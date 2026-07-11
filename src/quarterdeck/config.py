@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="QD_", env_nested_delimiter="__")
 
     paperclip: PaperclipConfig = PaperclipConfig()
-    spool_dir: Path = Path.home() / ".local" / "state" / "quarterdeck" / "spool"
+    ledger_dir: Path = Path.home() / ".local" / "state" / "quarterdeck" / "ledger"
     log_tail_bytes: int = 8192
 
 
