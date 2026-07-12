@@ -65,17 +65,39 @@ def _count_by_job(events: list[dict[str, Any]]) -> dict[str, int]:
 
 
 def watchdog_verdict(schedules_file: str = "") -> dict[str, Any]:
-    import yaml
-
     from quarterdeck.watchdog import check
 
-    path = Path(schedules_file) if schedules_file else config_dir() / "schedules.yaml"
-    if not path.exists():
-        return {"error": f"no schedules file at {path}"}
-    schedules = yaml.safe_load(path.read_text()).get("jobs", [])
+    if schedules_file:  # explicit legacy file: {jobs: [...]}
+        import yaml
+
+        path = Path(schedules_file)
+        if not path.exists():
+            return {"error": f"no schedules file at {path}", "coverage": False}
+        schedules = yaml.safe_load(path.read_text()).get("jobs", [])
+        meta: dict[str, Any] = {}
+    else:
+        from quarterdeck.bootstrap import load_effective_schedules
+
+        try:
+            eff = load_effective_schedules(config_dir())
+        except ValueError as exc:
+            return {"error": str(exc), "coverage": False}
+        schedules, meta = eff["schedules"], eff["meta"]
+    if not schedules:
+        return {
+            "error": "nothing enrolled — run qd init, then add labels to enroll: in schedules.yaml",
+            "coverage": False,
+            **meta,
+        }
     settings = _settings()
     missed = check(schedules, Ledger(settings.ledger_dir).read_all(), datetime.now(UTC))
-    return {"scheduled": len(schedules), "missed": missed, "healthy": not missed}
+    return {
+        "scheduled": len(schedules),
+        "missed": missed,
+        "healthy": not missed,
+        "coverage": True,
+        **meta,
+    }
 
 
 def project_now() -> dict[str, Any]:

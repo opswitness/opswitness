@@ -255,11 +255,35 @@ def watchdog(
             err=True,
         )
         raise typer.Exit(code=2)
-    path = Path(schedules_file) if schedules_file else config_dir() / "schedules.yaml"
-    if not path.exists():
-        typer.echo(f"no schedules file at {path}", err=True)
-        raise typer.Exit(code=2)
-    schedules = yaml.safe_load(path.read_text()).get("jobs", [])
+    if schedules_file:  # explicit legacy file: {jobs: [...]}
+        path = Path(schedules_file)
+        if not path.exists():
+            typer.echo(f"no schedules file at {path}", err=True)
+            raise typer.Exit(code=2)
+        schedules = yaml.safe_load(path.read_text()).get("jobs", [])
+    else:
+        from quarterdeck.bootstrap import load_effective_schedules
+
+        try:
+            eff = load_effective_schedules(config_dir())
+        except ValueError as exc:
+            typer.echo(f"schedules config error: {exc}", err=True)
+            raise typer.Exit(code=2) from None
+        schedules = eff["schedules"]
+        if not schedules:
+            m = eff["meta"]
+            typer.echo(
+                f"nothing enrolled ({m['candidates']} candidates, {m['services']} services) — "
+                f"run `qd init`, then add labels/globs to enroll: in "
+                f"{config_dir() / 'schedules.yaml'}",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        if eff["meta"]["unknown_enroll_patterns"]:
+            typer.echo(
+                f"⚠️ enroll patterns matching nothing: {eff['meta']['unknown_enroll_patterns']}",
+                err=True,
+            )
     settings = Settings()
     missed = check(schedules, Ledger(settings.ledger_dir).read_all(), datetime.now(UTC))
     for m in missed:
@@ -283,24 +307,34 @@ def init(
     from quarterdeck.bootstrap import init_workspace
     from quarterdeck.config import config_dir
 
-    summary = init_workspace(config_dir(), Path(launchagents))
+    try:
+        summary = init_workspace(config_dir(), Path(launchagents))
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
     for path in summary["created"]:
-        typer.echo(f"created: {path}")
-    for path in summary["merged"]:
-        typer.echo(f"merged:  {path} (your edits preserved)")
-    s = summary["stats"]
+        typer.echo(f"created:     {path}")
+    for path in summary["regenerated"]:
+        typer.echo(f"regenerated: {path} (machine-owned)")
+    c = summary["counts"]
     typer.echo(
-        f"fleet: {s.get('discovered', 0)} jobs discovered, {s.get('added', 0)} added, "
-        f"{s.get('kept', 0)} kept, {s.get('calendar_unsupported', 0)} calendar (fail-closed)"
+        f"discovered: {c['interval']} interval + {c['calendar']} calendar + "
+        f"{c['service']} services — ALL are candidates, none enrolled automatically"
     )
+    if summary["collisions"]:
+        typer.echo(f"⚠️ short-name collisions (kept by full label): {summary['collisions']}")
+    drift = summary["drift"]
+    if any(drift.values()):
+        typer.echo(f"drift since last init: {drift}")
+    for err in summary["errors"]:
+        typer.echo(f"⚠️ unreadable plist: {err['path']}: {err['error']}")
     typer.echo(
-        "\nready to use:\n"
-        "  qd wrap --job NAME -- <cmd>   # works now, zero further config\n"
-        "  qd status / qd runs / qd digest\n"
-        "  qd watchdog --once            # uses the generated schedules.yaml\n"
-        "next (each needs your explicit approval):\n"
-        "  qd adopt launchd <label>      # dry-run diff; --apply to wrap a real job\n"
-        "  docs/INSTALL-PAPERCLIP.md     # governance UI + approvals layer"
+        "\nready now (zero further config):\n"
+        "  qd wrap --job NAME -- <cmd>  ·  qd status / runs / digest\n"
+        "to monitor jobs, enroll them ONCE (human confirmation by design):\n"
+        f"  edit {config_dir() / 'schedules.yaml'} → enroll: [\"com.yourprefix.*\"]\n"
+        "  then: qd watchdog --once\n"
+        "later, each with explicit approval: qd adopt launchd <label> · INSTALL-PAPERCLIP.md"
     )
 
 
@@ -322,13 +356,24 @@ def digest(
     events = Ledger(settings.ledger_dir).read_all()
     missed: list = []
     coverage = False
-    sched_path = Path(schedules_file) if schedules_file else config_dir() / "schedules.yaml"
-    if sched_path.exists():
+    schedules: list = []
+    if schedules_file:  # explicit legacy file: {jobs: [...]}
         import yaml
 
+        sched_path = Path(schedules_file)
+        if sched_path.exists():
+            schedules = yaml.safe_load(sched_path.read_text()).get("jobs", [])
+    else:
+        from quarterdeck.bootstrap import load_effective_schedules
+
+        try:
+            schedules = load_effective_schedules(config_dir())["schedules"]
+        except ValueError as exc:
+            typer.echo(f"schedules config error: {exc}", err=True)
+            raise typer.Exit(code=2) from None
+    if schedules:
         from quarterdeck.watchdog import check
 
-        schedules = yaml.safe_load(sched_path.read_text()).get("jobs", [])
         missed = check(schedules, events, datetime.now(UTC))
         coverage = True
     d = build_digest(

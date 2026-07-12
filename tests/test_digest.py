@@ -85,14 +85,28 @@ def test_digest_cli_exit_codes(tmp_path, monkeypatch):
     led.append("run_started", "R9", {"job": "demo"})
     led.append("run_finished", "R9", {"job": "demo", "status": "succeeded", "exit_code": 0})
 
-    r = CliRunner().invoke(app, ["digest"])  # no schedules.yaml -> coverage unavailable
+    r = CliRunner().invoke(app, ["digest"])  # nothing enrolled -> coverage unavailable
     assert r.exit_code == 1 and "coverage unavailable" in r.output
 
     conf = tmp_path / "conf"
     conf.mkdir(parents=True, exist_ok=True)
-    (conf / "schedules.yaml").write_text(
-        yaml.safe_dump({"jobs": [{"job": "demo", "expected_interval_seconds": 999999}]})
+    (conf / "schedules.generated.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "version": 2,
+                "entries": [
+                    {
+                        "label": "com.t.demo",
+                        "class": "interval",
+                        "expected_interval_seconds": 999999,
+                        "grace_seconds": 300,
+                        "job": "demo",
+                    }
+                ],
+            }
+        )
     )
+    (conf / "schedules.yaml").write_text('enroll:\n  - "com.t.demo"\n')
     r2 = CliRunner().invoke(app, ["digest"])
     assert r2.exit_code == 0 and "🟢" in r2.output
 
