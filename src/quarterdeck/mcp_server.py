@@ -10,12 +10,11 @@ watchdog verdicts, and projection control.
 """
 
 import json
-import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from quarterdeck.config import CONFIG_DIR, Settings
+from quarterdeck.config import Settings, config_dir, resolve_api_key
 from quarterdeck.index import job_summary, query_runs, rebuild
 from quarterdeck.ledger import Ledger
 from quarterdeck.projector import pending_events
@@ -70,7 +69,7 @@ def watchdog_verdict(schedules_file: str = "") -> dict[str, Any]:
 
     from quarterdeck.watchdog import check
 
-    path = Path(schedules_file) if schedules_file else CONFIG_DIR / "schedules.yaml"
+    path = Path(schedules_file) if schedules_file else config_dir() / "schedules.yaml"
     if not path.exists():
         return {"error": f"no schedules file at {path}"}
     schedules = yaml.safe_load(path.read_text()).get("jobs", [])
@@ -84,7 +83,7 @@ def project_now() -> dict[str, Any]:
     from quarterdeck.projector import Projector
 
     settings = _settings()
-    api_key = os.environ.get(settings.paperclip.api_key_env, "")
+    api_key = resolve_api_key(settings)
     if not api_key or not settings.paperclip.company_id:
         return {"error": "paperclip api key / company_id not configured"}
     client = PaperclipClient(settings.paperclip.api_base, api_key, settings.paperclip.company_id)

@@ -105,19 +105,20 @@ def status() -> None:
 @app.command()
 def project() -> None:
     """Drain unacked ledger events into Paperclip (single-instance, at-least-once)."""
-    import os as _os
-
     from quarterdeck.config import Settings
     from quarterdeck.ledger import Ledger
     from quarterdeck.paperclip import PaperclipClient
     from quarterdeck.projector import Projector
 
+    from quarterdeck.config import resolve_api_key
+
     settings = Settings()
-    api_key = _os.environ.get(settings.paperclip.api_key_env, "")
+    api_key = resolve_api_key(settings)
     if not api_key or not settings.paperclip.company_id:
         typer.echo(
-            f"qd project: need {settings.paperclip.api_key_env} env and paperclip.company_id "
-            f"config (QD_PAPERCLIP__COMPANY_ID)",
+            "qd project: need paperclip.api_key (secrets.yaml or "
+            f"{settings.paperclip.api_key_env} env) and paperclip.company_id "
+            "(config.yaml or QD_PAPERCLIP__COMPANY_ID)",
             err=True,
         )
         raise typer.Exit(code=2)
@@ -242,7 +243,7 @@ def watchdog(
 
     import yaml
 
-    from quarterdeck.config import CONFIG_DIR, Settings
+    from quarterdeck.config import Settings, config_dir
     from quarterdeck.ledger import Ledger
     from quarterdeck.notify import alert
     from quarterdeck.watchdog import check
@@ -254,7 +255,7 @@ def watchdog(
             err=True,
         )
         raise typer.Exit(code=2)
-    path = Path(schedules_file) if schedules_file else CONFIG_DIR / "schedules.yaml"
+    path = Path(schedules_file) if schedules_file else config_dir() / "schedules.yaml"
     if not path.exists():
         typer.echo(f"no schedules file at {path}", err=True)
         raise typer.Exit(code=2)

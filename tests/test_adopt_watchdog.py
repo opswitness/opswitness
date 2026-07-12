@@ -147,3 +147,34 @@ def test_apply_leaves_no_temp_file(tmp_path):
     assert planned is not None
     apply(p, planned[1])
     assert not list(tmp_path.glob(".*.qd-tmp"))  # atomic rename completed, no debris
+
+
+def test_apply_preserves_file_mode(tmp_path):
+    import stat
+
+    p = _write_plist(tmp_path, "com.t.mode")
+    p.chmod(0o640)
+    planned = plan(p, "/opt/qd", "mode")
+    assert planned is not None
+    backup = apply(p, planned[1])
+    assert stat.S_IMODE(p.stat().st_mode) == 0o640
+    assert stat.S_IMODE(backup.stat().st_mode) == 0o640
+
+
+def test_half_written_backup_cannot_be_mistaken_for_pristine(tmp_path):
+    from quarterdeck.adopt import BACKUP_SUFFIX, _publish_backup
+
+    p = _write_plist(tmp_path, "com.t.crash")
+    pristine = p.read_bytes()
+    backup = p.with_suffix(p.suffix + BACKUP_SUFFIX)
+
+    # Simulate a crashed earlier attempt: a stale unique temp survives in the dir.
+    stale = tmp_path / f".{backup.name}.stale123.qd-tmp"
+    stale.write_bytes(b"TRUNCATED")
+
+    _publish_backup(backup, pristine, 0o644)
+    assert backup.read_bytes() == pristine  # published atomically, complete
+    # A second publish attempt never clobbers the pristine backup.
+    _publish_backup(backup, b"different", 0o644)
+    assert backup.read_bytes() == pristine
+    assert not list(tmp_path.glob(f".{backup.name}.*.qd-tmp")) or stale.exists()

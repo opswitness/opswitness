@@ -51,17 +51,74 @@ def _fsync_dir(dir_path: Path) -> None:
         os.close(fd)
 
 
-def _atomic_write(path: Path, data: bytes) -> None:
-    """Same-dir temp + fsync + os.replace + dir fsync — no torn plists, ever."""
-    tmp = path.parent / f".{path.name}.qd-tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+def _write_all(fd: int, data: bytes) -> None:
+    """os.write may short-write; loop until every byte is down."""
+    view = memoryview(data)
+    while view:
+        written = os.write(fd, view)
+        view = view[written:]
+
+
+def _mode_of(path: Path, default: int = 0o644) -> int:
+    import stat
+
     try:
-        os.write(fd, data)
+        return stat.S_IMODE(path.stat().st_mode)
+    except FileNotFoundError:
+        return default
+
+
+def _fsynced_temp(dir_path: Path, name_hint: str, data: bytes, mode: int) -> Path:
+    """Unique same-dir temp file with data fully written, fsync'd, mode set.
+
+    Cleaned up by the caller (or on exception here). Unique names mean a crashed
+    previous attempt can never be mistaken for—or collide with—this one.
+    """
+    import tempfile
+
+    fd, tmp_name = tempfile.mkstemp(dir=dir_path, prefix=f".{name_hint}.", suffix=".qd-tmp")
+    tmp = Path(tmp_name)
+    try:
+        _write_all(fd, data)
         os.fsync(fd)
-    finally:
+    except BaseException:
         os.close(fd)
-    os.replace(tmp, path)
+        tmp.unlink(missing_ok=True)
+        raise
+    os.close(fd)
+    os.chmod(tmp, mode)
+    return tmp
+
+
+def _atomic_write(path: Path, data: bytes, mode: int | None = None) -> None:
+    """Unique temp + write-all + fsync + os.replace + dir fsync; preserves file mode."""
+    final_mode = mode if mode is not None else _mode_of(path)
+    tmp = _fsynced_temp(path.parent, path.name, data, final_mode)
+    try:
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     _fsync_dir(path.parent)
+
+
+def _publish_backup(backup: Path, pristine: bytes, mode: int) -> None:
+    """Atomically publish the pristine backup, no-clobber.
+
+    A crashed half-written backup can never be mistaken for pristine: data goes to a
+    unique temp first (fully written + fsync'd), then os.link() publishes it — link is
+    atomic and fails with EEXIST if a backup already exists (first backup wins).
+    """
+    if backup.exists():
+        return
+    tmp = _fsynced_temp(backup.parent, backup.name, pristine, mode)
+    try:
+        os.link(tmp, backup)
+    except FileExistsError:
+        pass
+    finally:
+        tmp.unlink(missing_ok=True)
+    _fsync_dir(backup.parent)
 
 
 def _load(plist_path: Path) -> dict[str, Any]:
@@ -140,16 +197,9 @@ def apply(plist_path: Path, new_bytes: bytes) -> Path:
     """
     backup = plist_path.with_suffix(plist_path.suffix + BACKUP_SUFFIX)
     pristine = plist_path.read_bytes()
-    try:
-        fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-        try:
-            os.write(fd, pristine)
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-    except FileExistsError:
-        pass  # first backup wins
-    _atomic_write(plist_path, new_bytes)
+    mode = _mode_of(plist_path)
+    _publish_backup(backup, pristine, mode)
+    _atomic_write(plist_path, new_bytes, mode=mode)
     return backup
 
 

@@ -73,7 +73,10 @@ class Ledger:
                             check.seek(size - 1)
                             if check.read(1) != b"\n":
                                 os.write(fd, b"\n")
-                    os.write(fd, line.encode())
+                    data = memoryview(line.encode())
+                    while data:  # os.write may short-write
+                        written = os.write(fd, data)
+                        data = data[written:]
                     if fsync:
                         os.fsync(fd)
                 finally:
