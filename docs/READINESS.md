@@ -1,5 +1,73 @@
 # Quarterdeck Readiness
 
+Snapshot date: 2026-07-12 · This file is a SINGLE current snapshot; all earlier review
+text is preserved verbatim under History. ADRs remain the source of design truth;
+`INSTALL-PAPERCLIP.md` remains a proposed runbook and must not be executed until every
+open gate below is closed.
+
+## Current baseline
+
+- HEAD: `3b278b7` — 82 tests passing; ruff, mypy, full-history gitleaks clean.
+- P2 local code is complete **at this HEAD**, including the three coverage blockers
+  found in review and fixed with regression tests in `3b278b7`:
+  1. empty explicit `--schedules` no longer verdicts green (exit 2, both watchdog and
+     digest paths share one strict validator);
+  2. a retired job that runs inside the window resurfaces as `retired_but_active` and
+     breaks full/healthy — stale retirement is a finding, not an excuse;
+  3. `coverage=none` reports still name every ledger-known unmonitored job.
+- Real launchd plists untouched (zero `.qd-bak` on the machine); Paperclip permanent
+  install not executed; real HOME clean.
+
+## Open gates (blocking, in order)
+
+1. **INSTALL NO-GO** — launchd service templates, stable absolute Node/qd paths,
+   npm-prefix handling, secrets handling, isolated restore drill. Docs/templates first;
+   still no execution.
+2. **Signal fallback (`9f62656`) is live on the main wrap path** while its
+   deterministic rework is tracked: pgrep returncode unchecked (restricted
+   environments return 3), per-level blocking inside a signal handler, PID-reuse
+   race. Own workstream with fake-pgrep three-branch tests.
+3. **No git remote** — GitHub Actions CI has never actually run.
+4. **Live-Paperclip integration tests** (projector against a real server: create,
+   replay, lost-ack reconcile) — pending install.
+5. **Brand gate** before any publish (org name collision, trademark, domain).
+
+## P3 defer contract (documented upstream; spike verifies implementation, not semantics)
+
+- Non-interactive `claude -p` only; minimum version **v2.1.89** (machine: 2.1.146).
+- Hook returns `permissionDecision: "defer"` → run exits with
+  `stop_reason=tool_deferred`, carrying `session_id` + `deferred_tool_use`.
+- Resume via `claude -p --resume <session-id>`; the same tool call re-fires the hook.
+- **Parallel tool calls in one turn: defer is IGNORED** and the call falls into the
+  normal permission flow ⇒ the gate always runs `--permission-mode dontAsk`, safe
+  tools explicitly allowed, governed tools neither allowed nor asked — an ignored
+  defer therefore still denies.
+- No long-poll fallback: absence of defer support ⇒ deny. `bypassPermissions` is
+  forbidden under the gate.
+- Spike matrix: single defer/resume · parallel two-tool · approval timeout ·
+  duplicate resume · one-shot consumption · MCP tool missing on resume · old Claude
+  version · bypassPermissions rejection.
+
+## Truth split for approvals (P3)
+
+- **Paperclip owns**: approval UI, human identity, workflow state machine.
+- **Quarterdeck ledger owns**: the authoritative evidence — request hash,
+  tool_use_id, expiry, approval id, decision, decider, resume/consume outcome.
+- Paperclip database loss ⇒ pending calls stay denied; every past decision remains
+  auditable from the local ledger.
+
+## Next task
+
+Close INSTALL gate items as docs/templates (no execution), then install → live
+integration tests → 24-48h pilot job → 7-day soak. The P3 defer spike may run in
+parallel after install.
+
+---
+
+## History (superseded reviews, retained verbatim for audit)
+
+# Quarterdeck Readiness
+
 Date: 2026-07-12
 Status: local P2 code is usable for controlled development; permanent installation is **NO-GO**.
 

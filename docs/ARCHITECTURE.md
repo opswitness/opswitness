@@ -97,8 +97,12 @@ record); artifacts (P4) build no database (authority = one ledger event kind; th
 projection rides Paperclip work-products with reconciliation, since `externalId` has
 no unique constraint upstream); vertical-case agents (P5) run natively as Paperclip
 agents/routines. Scheduling stays with launchd (launchd intervals are elapsed-time,
-cron is calendar-aligned — they are not translatable); approvals storage stays with
-Paperclip; sessions stay with the agent CLIs.
+cron is calendar-aligned — they are not translatable); the approval **workflow, UI and
+human identity** stay with Paperclip while the **authoritative approval evidence**
+(request hash, tool_use_id, expiry, approval id, decision, decider, resume/consume
+outcome) stays in the local ledger — law 1 admits no exception: if Paperclip loses its
+database, pending calls stay denied and every past decision remains locally auditable;
+sessions stay with the agent CLIs.
 
 ## Entry doctrine: the platform doesn't fight for the door; the product must BE the door
 

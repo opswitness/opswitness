@@ -12,7 +12,7 @@ It adds the three things the platforms don't cover:
 |---|---|---|
 | **`qd wrap`** | Zero-modification onboarding for launchd/cron jobs: runs land in a local append-only ledger (crash-safe JSONL + SQLite index) and are projected into Paperclip as issues/comments/work-products ([ADR-0001](docs/adr/0001-run-ledger-write-model.md)). Never breaks the wrapped job (offline spool, exit-code mirroring). | Paperclip's watchdog only verifies its *own* issue trees; external heartbeat runs are read-only by design — nothing monitors external scheduled scripts. |
 | **`qd gate`** | Fail-closed, *tool-call-level* human approval for Claude Code via the official PreToolUse hook: block → notify (Telegram/console) → approve/deny → unblock. Every decision lands in Paperclip's audit trail. | Paperclip approvals are issue-level sign-offs ([#3017](https://github.com/paperclipai/paperclip/issues/3017) is open); hobby hooks have no ledger behind them. |
-| **`qd artifacts`** | sha256-addressed artifact ledger with label queries and run lineage, layered on Paperclip work-products. | Work-products are attachment references — no content hashing, no label queries. |
+| **`qd artifacts`** | Authoritative artifact events in the local ledger; queries served by the disposable SQLite index; content stored content-addressed (attachment / immutable blob); Paperclip work-products are a rebuildable projection. | Work-products carry no content hashes and no server-side idempotency (`externalId` has no unique constraint) — evidence-grade artifacts need an authority outside the platform. |
 
 ## Design rules
 
