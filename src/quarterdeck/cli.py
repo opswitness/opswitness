@@ -272,6 +272,43 @@ def watchdog(
 
 
 @app.command()
+def digest(
+    hours: int = typer.Option(24, "--hours", help="Report window"),
+    telegram: bool = typer.Option(False, "--telegram", help="Also push to Telegram (secrets.yaml)"),
+    schedules_file: str = typer.Option("", "--schedules", help="schedules.yaml for missed-run section"),
+) -> None:
+    """Daily fleet report — aggregated from the ledger (evidence, not self-reports)."""
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    from quarterdeck.config import Settings, config_dir
+    from quarterdeck.digest import build_digest, render_markdown
+    from quarterdeck.ledger import Ledger
+
+    settings = Settings()
+    events = Ledger(settings.ledger_dir).read_all()
+    missed: list = []
+    sched_path = Path(schedules_file) if schedules_file else config_dir() / "schedules.yaml"
+    if sched_path.exists():
+        import yaml
+
+        from quarterdeck.watchdog import check
+
+        schedules = yaml.safe_load(sched_path.read_text()).get("jobs", [])
+        missed = check(schedules, events, datetime.now(UTC))
+    report = render_markdown(build_digest(events, datetime.now(UTC), hours=hours, missed=missed))
+    typer.echo(report)
+    if telegram:
+        from quarterdeck.notify.telegram import send_telegram
+
+        if send_telegram(report, settings):
+            typer.echo("\n(sent to Telegram)", err=True)
+        else:
+            typer.echo("\n(telegram not configured or send failed)", err=True)
+            raise typer.Exit(code=1)
+
+
+@app.command()
 def mcp() -> None:
     """Serve the Quarterdeck MCP console over stdio (for AionUi or any MCP client)."""
     try:

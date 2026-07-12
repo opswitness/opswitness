@@ -33,10 +33,16 @@ class PaperclipConfig(BaseModel):
     company_id: str | None = None
 
 
+class TelegramConfig(BaseModel):
+    bot_token: str = ""  # secrets.yaml only
+    chat_id: str = ""
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="QD_", env_nested_delimiter="__")
 
     paperclip: PaperclipConfig = PaperclipConfig()
+    telegram: TelegramConfig = TelegramConfig()
     ledger_dir: Path = Path.home() / ".local" / "state" / "quarterdeck" / "ledger"
     log_tail_bytes: int = 8192
     capture_log_tail: bool = True
