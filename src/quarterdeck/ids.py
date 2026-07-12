@@ -1,8 +1,9 @@
 """Monotonic ULID generation (Crockford base32, 48-bit ms timestamp + 80-bit randomness).
 
 Dependency-free. Within one process, ULIDs are strictly monotonic even inside the same
-millisecond (random段 increments), so lexicographic order == creation order — the ledger's
-oldest-first projector relies on this.
+millisecond (random segment increments). Across processes they are IDENTITIES ONLY —
+global commit order is defined by ledger file append order under the exclusive lock
+(see Ledger docstring), never by ULID sort.
 """
 
 import os

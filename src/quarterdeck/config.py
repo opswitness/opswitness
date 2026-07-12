@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     paperclip: PaperclipConfig = PaperclipConfig()
     ledger_dir: Path = Path.home() / ".local" / "state" / "quarterdeck" / "ledger"
     log_tail_bytes: int = 8192
+    capture_log_tail: bool = True
+    redact: bool = True
 
 
 def load_settings() -> Settings:

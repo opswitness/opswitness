@@ -36,31 +36,53 @@ ULID `event_id`. The SQLite index (WAL) is a disposable view rebuilt from the sp
 
 ### 2. Crash-safe write protocol
 
+- **Permissions**: ledger directory `0700`, files `0600` (argv and log tails are sensitive;
+  enforced on every append, even for files predating the policy).
+- **Redaction on by default**: argv is redacted (sensitive flags, provider-shaped tokens)
+  before recording; log tails are redacted and capture can be disabled
+  (`capture_log_tail=false`). Heuristic, not DLP: the generic secret shape excludes `/` so
+  paths/URLs survive — base64-with-slash secrets are the accepted miss.
 - File opened `O_APPEND`; each write holds an exclusive `flock` (multiple `qd wrap` processes
   share the ledger safely).
 - One event = one JSON line = one `write()` call (events kept small; log tails truncated).
-- `run_started` is durably written **before** the child process is exec'd.
+- `run_started` is written **and `fsync`ed before** the child process is exec'd — power loss
+  must not produce a ran-but-unrecorded job.
 - `run_finished` is written and **`fsync`ed before `qd wrap` exits**.
-- Readers quarantine a torn final line (missing `\n` / invalid JSON) to `<file>.torn` and
+- Readers take a shared `flock` (an in-flight write can never be misread as torn), quarantine
+  undecodable lines to `<file>.torn` **exactly once** (dedup against existing quarantine), and
   continue — a torn tail is expected after power loss, never fatal.
 - On `ENOSPC`/`EACCES`/any ledger write failure: **the wrapped job still runs** (exit-code
   mirroring preserved); Quarterdeck emits an "audit evidence lost" alert through the notify
   channel and flags `degraded=true` on the next successful event.
+- **Ordering**: commit order = (file date asc, line position asc) — file append order under the
+  exclusive lock. ULIDs are per-process monotonic identities; they never define cross-process
+  order. The projector drains in commit order.
 
 ### 3. Projection = at-least-once + reconciliation (explicitly NOT exactly-once)
 
-A single projector (exclusive `flock` lease file) drains unacked events oldest-first:
+A single projector (exclusive `flock` lease file) drains unacked events in **commit order**
+(file date, line position — never ULID sort):
 
 - **issue** (one per job): find-or-create by deterministic marker; ack caches the issue id.
-- **comment** (run transitions): `metadata.qd_event_id = <ULID>` plus a human-visible
-  `qd:event:<ULID>` trailer in the body; before replaying unacked events the projector lists
-  recent comments and reconciles by metadata first, body marker as fallback.
+- **comment** (run transitions): comment `metadata` is a **strict schema**
+  (`version`/`sourceRunId`/`sections` only — arbitrary keys are rejected; verified on the live
+  spec). The event ULID travels in a legal structure:
+
+  ```json
+  {"version": 1, "sections": [{"rows": [
+    {"type": "key_value", "label": "qd_event_id", "value": "<ULID>"}]}]}
+  ```
+
+  plus a human-visible `qd:event:<ULID>` trailer in the body. Reconciliation lists recent
+  comments and matches the metadata row first, body marker as fallback.
 - **work-product**: `externalId = <event ULID>` (native; server-side uniqueness to be verified
   in P2 — until proven, same list-and-reconcile path applies).
 - **cost-event**: posted under a dedicated service agent (`quarterdeck`, created once per
-  company — satisfies the mandatory `agentId`); `billingCode = qd:<event ULID>` makes replays
-  reconcilable by listing. Residual duplicate window: crash after POST, before ack — documented,
-  bounded by reconciliation on next projector start.
+  company — satisfies the mandatory `agentId`); `billingCode = qd:<event ULID>` is a
+  **reconciliation marker, not a remote key** — the GET endpoint has zero filter params
+  (verified), so reconciliation lists recent events and scans locally. Residual duplicate
+  window: crash after POST, before ack — documented, bounded by reconciliation on next
+  projector start.
 - **activity**: best-effort audit echo, `details.qd_event_id` set, duplicate-tolerant; the
   local ledger — not Paperclip activity — is the authoritative audit for external jobs.
 
