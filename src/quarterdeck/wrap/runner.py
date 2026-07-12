@@ -81,10 +81,28 @@ def run_wrapped(job: str, argv: list[str], settings: Settings | None = None) -> 
 
     # Forward termination signals to the child's whole process group so
     # `launchctl unload` semantics survive wrapping (grandchildren included).
+    def _signal_descendants(pid: int, signum: int) -> None:
+        """Leaf-up best-effort walk for environments where killpg is denied
+        (sandboxes, MDM) — otherwise grandchildren would be orphaned alive."""
+        try:
+            out = subprocess.run(
+                ["pgrep", "-P", str(pid)], capture_output=True, text=True, timeout=5
+            )
+            for token in out.stdout.split():
+                child_pid = int(token)
+                _signal_descendants(child_pid, signum)
+                try:
+                    os.kill(child_pid, signum)
+                except (ProcessLookupError, PermissionError):
+                    pass
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+
     def _forward(signum: int, _frame: Any) -> None:
         try:
             os.killpg(child.pid, signum)
         except (ProcessLookupError, PermissionError):
+            _signal_descendants(child.pid, signum)
             try:
                 child.send_signal(signum)
             except ProcessLookupError:
