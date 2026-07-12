@@ -1,0 +1,116 @@
+# Architecture
+
+> Run long-lived AI work with approvals, evidence, and recoverable execution.
+
+Quarterdeck is the **trust / evidence bridge** in a five-layer stack. It is not the
+control plane (that's [Paperclip](https://github.com/paperclipai/paperclip), bought not
+built), not an executor (your launchd jobs and coding agents stay untouched), and not a
+UI (three doors already exist). It is the one layer nothing else can replace: the place
+where ungoverned reality gets connected to governance, with the evidence held locally.
+
+## The stack
+
+```mermaid
+flowchart BT
+    subgraph E["Execution layer (existing assets, never rewritten)"]
+        E1["launchd / cron fleet"]
+        E2["Claude Code (headless)"]
+        E3["Codex (exec, sandbox)"]
+        E4["LangGraph pipelines"]
+    end
+    subgraph Q["★ Quarterdeck — trust / evidence bridge (this repo)"]
+        Q1["qd wrap + local ledger"]
+        Q2["projector (commit order, fail-stop)"]
+        Q3["watchdog + digest (fail-closed)"]
+        Q4["gate (P3) + artifacts (P4)"]
+    end
+    subgraph P["Governance layer — Paperclip (73.4k★ MIT, off the shelf)"]
+        P1["issues · approvals · budgets · audit · Postgres"]
+    end
+    subgraph C["Console layer (three replaceable doors)"]
+        C1["Paperclip Web UI"]
+        C2["AionUi (dual MCP)"]
+        C3["qd CLI + Telegram"]
+    end
+    subgraph V["Vertical case layer (P5, paid)"]
+        V1["practitioner workbench (RAG lives here)"]
+        V2["software delivery · research · quant (private)"]
+    end
+    E -->|"wrap takeover · PreToolUse interception (P3)"| Q
+    Q -->|"projection: at-least-once + reconciliation"| P
+    P -->|read| C
+    C -.-> V
+```
+
+Evidence flows **upward**. Nothing above the bridge is a source of truth.
+
+## Design laws (review-hardened, each has tests)
+
+1. **The local ledger is the sole source of truth.** Append-only JSONL outbox,
+   crash-safe write protocol (O_APPEND + flock, one event one write, started fsync'd
+   before exec, finished fsync'd before exit, torn-tail heal + quarantine). Paperclip
+   receives *projections* — at-least-once with reconciliation, never claimed as
+   exactly-once. If Paperclip dies, the evidence chain is intact. See
+   [ADR-0001](adr/0001-run-ledger-write-model.md).
+2. **Fail closed, everywhere.** No approval decision means no. Unreachable API means no.
+   Unsupported schedule renders red, never silently green. Absence of coverage is
+   reported as absence — "no schedules" is never "0 missed"; coverage counts only
+   *active* monitoring, over *every* job the ledger has ever seen; the only audited
+   excuse is `retired:` in user config.
+3. **Execution evidence ≠ outcome evidence.** Exit codes prove the process ran; they do
+   not prove the data was right. The digest says so explicitly; outcome evidence
+   (artifact hashes, evals, approvals) arrives with P4 and is labeled separately.
+4. **Discovery generates candidates; monitoring requires one human enrollment.**
+   Auto-tighten may run unattended (bounded, audited, rollbackable); auto-loosen is
+   propose-only, always. Never break the wrapped job: ledger failure degrades to an
+   alert, exit codes are mirrored faithfully (including death-by-signal).
+5. **Canonical ID = the full launchd label.** Short names are display sugar; an ID that
+   could drift when a neighbor appears would sever ledger history. User config is
+   strict-schema (scalar enroll rejected, identity fields not overridable).
+6. **The platform layer has no LLM, no embeddings, no RAG — deliberately.** Evidence
+   does not tolerate "approximately relevant". Structured queries beat vectors here;
+   at scale, lexical FTS is the upgrade path. Knowledge retrieval (RAG) belongs to the
+   vertical case layer, where the curated rules corpus is itself the paid content.
+
+## Necessity and shrinkability
+
+Quarterdeck exists because of three verified gaps, no more:
+
+| Gap | Verified how |
+|---|---|
+| Nothing monitors *external* scheduled scripts | Paperclip's watchdog verifies only its own issue trees (official docs) |
+| No tool-call-level, fail-closed approval gate | paperclip#3017 open, unassigned, zero PRs; hobby hooks have no ledger |
+| No content-hashed artifacts; platform records are self-reported | work-products carry no hashes; audit-chain bug open upstream |
+
+It is designed to **shrink**: ADR-0001 carries revisit triggers — if upstream ships an
+external-run API, tool gates, or content hashes, the corresponding module retires.
+A thin layer that refuses to thin itself becomes the thing it replaced.
+
+## Entry doctrine: spine, not door
+
+Quarterdeck is the operational entry (`qd` is the only command; the MCP server is what
+consoles talk to) and must never grow its own GUI. Doors are replaceable — Paperclip's
+board for governance, AionUi for conversation, Telegram for the daily pulse — and any
+of them can be swapped without touching the spine. Product value concentrates in the
+irreplaceable layer precisely because it doesn't compete for the doorway. Paid users
+of vertical cases should never see Quarterdeck at all.
+
+## Module map
+
+| Module | Path | Status |
+|---|---|---|
+| ledger (outbox + write protocol) | `src/quarterdeck/ledger.py`, `fsutil.py` | ✅ P2 |
+| wrap runner (tee, signals, mirroring) | `src/quarterdeck/wrap/runner.py` | ✅ P2 (signal fallback rework tracked) |
+| projector (issues/comments, reconciliation) | `src/quarterdeck/projector.py`, `paperclip.py` | ✅ P2 |
+| index (disposable SQLite) | `src/quarterdeck/index.py` | ✅ P2 |
+| watchdog / digest / coverage | `src/quarterdeck/watchdog.py`, `digest.py` | ✅ P2 |
+| bootstrap (candidates, two-file model) | `src/quarterdeck/bootstrap.py` | ✅ P2 |
+| adopt (dry-run plist wrapping) | `src/quarterdeck/adopt.py` | ✅ P2 (`--apply` gated on install) |
+| MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ P2 |
+| gate (PreToolUse approval bridge) | — | P3 |
+| artifacts (sha256 ledger, lineage) | — | P4 |
+| vertical case packs | separate private repo | P5 |
+
+Related: [P0 validation](P0-VALIDATION.md) · [readiness gates](READINESS.md) ·
+[install runbook (NO-GO until gates close)](INSTALL-PAPERCLIP.md) ·
+[AionUi console setup](aionui.md)
