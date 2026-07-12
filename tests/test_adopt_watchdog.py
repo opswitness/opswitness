@@ -111,7 +111,7 @@ def test_resolve_qd_bin_requires_absolute_executable(tmp_path):
     assert resolve_qd_bin(str(fake)) == str(fake)
 
 
-def test_job_name_collision_fails_closed(tmp_path):
+def test_adopt_defaults_to_full_label_id(tmp_path):
     from typer.testing import CliRunner
 
     from quarterdeck.adopt import collisions, scan
@@ -120,25 +120,19 @@ def test_job_name_collision_fails_closed(tmp_path):
     _write_plist(tmp_path, "com.a.gateway")
     _write_plist(tmp_path, "com.b.gateway")
     dup = collisions(scan(tmp_path))
-    assert dup == {"gateway": ["com.a.gateway", "com.b.gateway"]}
+    assert dup == {"gateway": ["com.a.gateway", "com.b.gateway"]}  # reported for display
 
     fake_qd = tmp_path / "qd"
     fake_qd.write_text("#!/bin/sh\n")
     fake_qd.chmod(0o755)
-    runner = CliRunner()
-    r = runner.invoke(
+    r = CliRunner().invoke(
         app,
         ["adopt", "launchd", "com.a.gateway", "--dir", str(tmp_path), "--qd-bin", str(fake_qd)],
     )
-    assert r.exit_code == 2  # collision without explicit --job: refuse
-    r2 = runner.invoke(
-        app,
-        [
-            "adopt", "launchd", "com.a.gateway", "--dir", str(tmp_path),
-            "--qd-bin", str(fake_qd), "--job", "com.a.gateway",
-        ],
-    )
-    assert r2.exit_code == 0 and "dry-run" in r2.output  # explicit job name proceeds
+    # Full label is the default job ID: unique by construction, collisions are moot,
+    # and the ID can never drift when a neighbor appears later.
+    assert r.exit_code == 0 and "dry-run" in r.output
+    assert r.output.count("com.a.gateway") >= 2  # Label + --job value in the diff
 
 
 def test_apply_leaves_no_temp_file(tmp_path):

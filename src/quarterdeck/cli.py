@@ -178,22 +178,16 @@ def adopt_launchd(
         str(__import__("pathlib").Path.home() / "Library" / "LaunchAgents"), "--dir"
     ),
     qd_bin: str = typer.Option("", "--qd-bin", help="Path to qd (must resolve to absolute)"),
-    job_override: str = typer.Option("", "--job", help="Explicit job name (required on collision)"),
+    job_override: str = typer.Option(
+        "", "--job", help="Override the ledger job ID (default: the full label — stable forever)"
+    ),
     apply_: bool = typer.Option(False, "--apply", help="Actually write (default: dry-run diff)"),
     rollback_: bool = typer.Option(False, "--rollback", help="Restore the .qd-bak backup"),
 ) -> None:
     """Wrap one launchd job. Without --apply this only prints the diff."""
     from pathlib import Path
 
-    from quarterdeck.adopt import (
-        apply,
-        collisions,
-        job_name_from_label,
-        plan,
-        resolve_qd_bin,
-        rollback,
-        scan,
-    )
+    from quarterdeck.adopt import apply, plan, resolve_qd_bin, rollback
 
     plist = Path(dir) / f"{label}.plist"
     if not plist.exists():
@@ -203,16 +197,9 @@ def adopt_launchd(
         ok = rollback(plist)
         typer.echo("rolled back from backup" if ok else "no backup found")
         raise typer.Exit(code=0 if ok else 1)
-    job = job_override or job_name_from_label(label)
-    if not job_override:
-        dup = collisions(scan(Path(dir)))
-        if job in dup:
-            typer.echo(
-                f"job name '{job}' is claimed by multiple labels: {dup[job]} — "
-                f"pass an explicit --job (e.g. --job {label})",
-                err=True,
-            )
-            raise typer.Exit(code=2)
+    # Canonical ledger ID = full label: unique by construction, immune to
+    # neighbors appearing later. --job is an explicit, at-your-own-risk override.
+    job = job_override or label
     try:
         qd = resolve_qd_bin(qd_bin)
     except ValueError as exc:
@@ -316,6 +303,10 @@ def init(
         typer.echo(f"created:     {path}")
     for path in summary["regenerated"]:
         typer.echo(f"regenerated: {path} (machine-owned)")
+    if summary.get("generated_was_corrupt"):
+        typer.echo(
+            "⚠️ schedules.generated.yaml was corrupt and has been rebuilt from scan", err=True
+        )
     c = summary["counts"]
     typer.echo(
         f"discovered: {c['interval']} interval + {c['calendar']} calendar + "

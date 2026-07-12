@@ -67,8 +67,9 @@ def test_collisions_kept_by_full_label(real_machine_fixture):
     gen = yaml.safe_load((tmp_path / "conf" / GENERATED_NAME).read_text())
     labels = [e["label"] for e in gen["entries"]]
     assert len(labels) == 41 and len(set(labels)) == 41  # nothing silently dropped
-    dup_jobs = [e["job"] for e in gen["entries"] if e["label"].endswith(".gateway")]
-    assert set(dup_jobs) == {"com.hermes.gateway", "com.openclaw.gateway"}  # job=label on dup
+    # Canonical ID = full label for EVERY entry, not just collisions.
+    assert all(e["job"] == e["label"] for e in gen["entries"])
+    assert all("display_name" in e for e in gen["entries"])
 
 
 def test_user_file_is_never_rewritten(real_machine_fixture):
@@ -76,7 +77,7 @@ def test_user_file_is_never_rewritten(real_machine_fixture):
     cfg = tmp_path / "conf"
     init_workspace(cfg, la)
     user = cfg / USER_NAME
-    custom = "# my precious comment\nenroll:\n  - \"com.tianyuzhou.*\"\nmystery_field: 42\n"
+    custom = '# my precious comment (formatting matters to me)\nenroll:\n  - "com.tianyuzhou.*"\n'
     user.write_text(custom)
     init_workspace(cfg, la)  # re-init regenerates the generated file only
     assert user.read_text() == custom  # byte-identical: comments + unknown fields survive
@@ -98,6 +99,78 @@ def test_enroll_globs_merge_and_services_excluded(real_machine_fixture):
     calendar = by_label["com.tianyuzhou.tci-screen"]
     assert "expected_interval_seconds" not in calendar  # → watchdog unsupported, fail-closed
     assert eff["meta"]["unknown_enroll_patterns"] == ["com.nomatch.*"]
+
+
+def test_job_id_is_full_label_and_stable_when_collision_appears_later(tmp_path):
+    la = tmp_path / "LaunchAgents"
+    la.mkdir()
+    _plist(la, "com.tianyuzhou.feed-monitor", interval=1500)
+    cfg = tmp_path / "conf"
+    init_workspace(cfg, la)
+    gen1 = yaml.safe_load((cfg / GENERATED_NAME).read_text())
+    job_before = gen1["entries"][0]["job"]
+    assert job_before == "com.tianyuzhou.feed-monitor"  # full label from day one
+
+    _plist(la, "com.other.feed-monitor", interval=600)  # a colliding neighbor appears
+    init_workspace(cfg, la)
+    gen2 = yaml.safe_load((cfg / GENERATED_NAME).read_text())
+    jobs = {e["label"]: e["job"] for e in gen2["entries"]}
+    assert jobs["com.tianyuzhou.feed-monitor"] == job_before  # ID never drifts
+    assert jobs["com.other.feed-monitor"] == "com.other.feed-monitor"
+
+
+def test_scalar_enroll_is_rejected(tmp_path):
+    la = tmp_path / "LaunchAgents"
+    la.mkdir()
+    _plist(la, "com.t.a", interval=100)
+    cfg = tmp_path / "conf"
+    init_workspace(cfg, la)
+    (cfg / USER_NAME).write_text('enroll: "com.t.*"\n')  # scalar, not a list
+    with pytest.raises(ValueError, match="schema violation"):
+        load_effective_schedules(cfg)
+
+
+def test_identity_fields_cannot_be_overridden(tmp_path):
+    la = tmp_path / "LaunchAgents"
+    la.mkdir()
+    _plist(la, "com.t.a", interval=100)
+    cfg = tmp_path / "conf"
+    init_workspace(cfg, la)
+    (cfg / USER_NAME).write_text(
+        'enroll:\n  - "com.t.a"\noverrides:\n  com.t.a:\n    job: hijacked\n'
+    )
+    with pytest.raises(ValueError, match="schema violation"):
+        load_effective_schedules(cfg)
+
+
+def test_enabled_false_override_unenrolls(tmp_path):
+    la = tmp_path / "LaunchAgents"
+    la.mkdir()
+    _plist(la, "com.t.a", interval=100)
+    _plist(la, "com.t.b", interval=100)
+    cfg = tmp_path / "conf"
+    init_workspace(cfg, la)
+    (cfg / USER_NAME).write_text(
+        'enroll:\n  - "com.t.*"\noverrides:\n  com.t.a:\n    enabled: false\n'
+    )
+    eff = load_effective_schedules(cfg)
+    assert [s["label"] for s in eff["schedules"]] == ["com.t.b"]
+    assert eff["meta"]["disabled"] == 1
+
+
+def test_chmod_failure_leaves_no_temp_debris(tmp_path, monkeypatch):
+    import pytest as _pytest
+
+    from quarterdeck.fsutil import atomic_write
+
+    def boom(fd, mode):
+        raise OSError("fchmod denied")
+
+    monkeypatch.setattr("quarterdeck.fsutil.os.fchmod", boom)
+    with _pytest.raises(OSError):
+        atomic_write(tmp_path / "target.yaml", b"data", mode=0o600)
+    assert not list(tmp_path.glob("*.qd-tmp"))  # exception path cleaned the temp
+    assert not (tmp_path / "target.yaml").exists()
 
 
 def test_drift_reported_between_inits(real_machine_fixture):

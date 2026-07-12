@@ -19,6 +19,8 @@ def write_all(fd: int, data: bytes) -> None:
     view = memoryview(data)
     while view:
         written = os.write(fd, view)
+        if written == 0:
+            raise OSError("write() returned 0 — refusing to spin")
         view = view[written:]
 
 
@@ -39,13 +41,13 @@ def fsynced_temp(dir_path: Path, name_hint: str, data: bytes, mode: int) -> Path
     tmp = Path(tmp_name)
     try:
         write_all(fd, data)
+        os.fchmod(fd, mode)  # metadata set on the fd, BEFORE fsync, inside cleanup scope
         os.fsync(fd)
     except BaseException:
         os.close(fd)
         tmp.unlink(missing_ok=True)
         raise
     os.close(fd)
-    os.chmod(tmp, mode)
     return tmp
 
 

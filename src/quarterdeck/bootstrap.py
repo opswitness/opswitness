@@ -27,9 +27,29 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from quarterdeck.adopt import job_name_from_label, scan
 from quarterdeck.fsutil import atomic_write
+
+
+class ScheduleOverride(BaseModel):
+    """Whitelist of user-overridable schedule fields. Identity fields (job/label/
+    class/calendar/interval) are NOT overridable — the canonical ID and discovered
+    facts belong to the ledger and the plists, not to config."""
+
+    model_config = ConfigDict(extra="forbid")
+    grace_seconds: int | None = Field(default=None, gt=0)
+    enabled: bool | None = None
+
+
+class UserSchedulesConfig(BaseModel):
+    """Strict schema for the user-owned schedules.yaml. Unknown fields and scalar
+    `enroll` values are rejected loudly — a trust system never guesses config."""
+
+    model_config = ConfigDict(extra="forbid")
+    enroll: list[str] = []
+    overrides: dict[str, ScheduleOverride] = {}
 
 GENERATED_NAME = "schedules.generated.yaml"
 USER_NAME = "schedules.yaml"
@@ -89,7 +109,8 @@ def build_generated(entries: list[dict[str, Any]]) -> dict[str, Any]:
             item["expected_interval_seconds"] = e["expected_interval_seconds"]
             item["grace_seconds"] = default_grace(e["expected_interval_seconds"])
         elif cls == "calendar":
-            item["calendar"] = str(e.get("calendar"))
+            item["calendar"] = e.get("calendar")  # structured, not stringified —
+            # the future calendar watchdog must not have to re-parse a repr()
         try:
             item["source_hash"] = "sha256:" + hashlib.sha256(
                 Path(e["path"]).read_bytes()
@@ -101,8 +122,11 @@ def build_generated(entries: list[dict[str, Any]]) -> dict[str, Any]:
 
     collisions = {s: ls for s, ls in short_names.items() if len(ls) > 1}
     for label, item in by_label.items():
-        short = job_name_from_label(label)
-        item["job"] = label if short in collisions else short  # display/ledger key
+        # Canonical ID = full label, ALWAYS. A short name that is unique today can
+        # collide tomorrow; an ID that changes when a neighbor appears would sever
+        # ledger history, watchdog matching, and digests. Short names are display only.
+        item["job"] = label
+        item["display_name"] = job_name_from_label(label)
     return {
         "version": 2,
         "entries": sorted(by_label.values(), key=lambda i: str(i["label"])),
@@ -200,9 +224,13 @@ def load_effective_schedules(config_dir: Path) -> dict[str, Any]:
     User file errors raise (fail loudly); a missing generated file yields no coverage.
     """
     generated = _load_yaml(config_dir / GENERATED_NAME) or {"entries": []}
-    user = _load_yaml(config_dir / USER_NAME) or {}
-    patterns: list[str] = user.get("enroll") or []
-    overrides: dict[str, dict[str, Any]] = user.get("overrides") or {}
+    raw_user = _load_yaml(config_dir / USER_NAME) or {}
+    try:
+        user = UserSchedulesConfig.model_validate(raw_user)
+    except ValidationError as exc:
+        raise ValueError(f"{config_dir / USER_NAME}: schema violation — {exc}") from exc
+    patterns = user.enroll
+    overrides = user.overrides
 
     schedules: list[dict[str, Any]] = []
     meta: dict[str, Any] = {
@@ -221,16 +249,25 @@ def load_effective_schedules(config_dir: Path) -> dict[str, Any]:
                 matched_patterns.add(pat)
         if entry["class"] == "service":
             meta["services"] += 1
-            continue  # services are never auto-monitorable; explicit overrides only
+            continue  # services are never auto-monitorable
+        override = overrides.get(label)
+        if override and override.enabled is False:
+            meta["disabled"] = meta.get("disabled", 0) + 1
+            continue
         if not enrolled:
             meta["candidates"] += 1
             continue
-        sched: dict[str, Any] = {"job": entry.get("job", label), "label": label}
+        sched: dict[str, Any] = {
+            "job": entry.get("job", label),  # canonical = full label
+            "label": label,
+            "display_name": entry.get("display_name", job_name_from_label(label)),
+        }
         if entry["class"] == "interval":
             sched["expected_interval_seconds"] = entry["expected_interval_seconds"]
             sched["grace_seconds"] = entry.get("grace_seconds", 300)
         # calendar: no interval key → watchdog reports it as unsupported (fail-closed)
-        sched.update(overrides.get(label, {}))
+        if override and override.grace_seconds is not None:
+            sched["grace_seconds"] = override.grace_seconds
         schedules.append(sched)
         meta["enrolled"] += 1
     meta["unknown_enroll_patterns"] = [p for p in patterns if p not in matched_patterns]
