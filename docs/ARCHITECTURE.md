@@ -86,6 +86,15 @@ It is designed to **shrink**: ADR-0001 carries revisit triggers — if upstream 
 external-run API, tool gates, or content hashes, the corresponding module retires.
 A thin layer that refuses to thin itself becomes the thing it replaced.
 
+**The wheel test** — every proposed module must first answer: does Paperclip, Claude
+Code, or launchd already do this? Applied consequences: the gate (P3) builds no policy
+engine (Claude Code's native permission pipeline handles static allow/deny/ask; we add
+only the remote-human decision channel and the ledger record); artifacts (P4) build no
+database (hashes ride on Paperclip work-products via `externalId`; the outbox gains one
+event kind); vertical-case agents (P5) run natively as Paperclip agents/routines.
+Scheduling stays with launchd; approvals storage stays with Paperclip; sessions stay
+with the agent CLIs.
+
 ## Entry doctrine: spine, not door
 
 Quarterdeck is the operational entry (`qd` is the only command; the MCP server is what
