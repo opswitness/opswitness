@@ -53,12 +53,38 @@ def _in_window(run: dict[str, Any], cutoff: datetime) -> bool:
         return True  # unparseable timestamp: surface it rather than hide it
 
 
+def build_coverage(
+    observed_jobs: set[str],
+    schedules: list[dict[str, Any]] | None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    """Structured coverage verdict. A schedules file that covers one job must never
+    paint an otherwise uncovered fleet green."""
+    covered = sorted({str(s["job"]) for s in (schedules or []) if s.get("job")})
+    uncovered = sorted(observed_jobs - set(covered))
+    if error:
+        status = "none"
+    elif not covered:
+        status = "none"
+    elif uncovered:
+        status = "partial"
+    else:
+        status = "full"
+    return {
+        "status": status,
+        "covered_jobs": covered,
+        "observed_uncovered": uncovered,
+        "error": error,
+    }
+
+
 def build_digest(
     events: list[dict[str, Any]],
     now: datetime,
     hours: int = 24,
     missed: list[dict[str, Any]] | None = None,
-    watchdog_coverage: bool = False,
+    schedules: list[dict[str, Any]] | None = None,
+    coverage_error: str | None = None,
 ) -> dict[str, Any]:
     cutoff = now - timedelta(hours=hours)
     runs = [r for r in _collect_runs(events).values() if _in_window(r, cutoff)]
@@ -84,7 +110,8 @@ def build_digest(
         if run["status"] in TERMINAL_BAD or run.get("degraded")
     ]
     missed = missed or []
-    healthy = watchdog_coverage and not problems and not missed
+    coverage = build_coverage({run["job"] for run in runs}, schedules, coverage_error)
+    healthy = coverage["status"] == "full" and not problems and not missed
     return {
         "window_hours": hours,
         "generated_at": now.isoformat(),
@@ -92,19 +119,26 @@ def build_digest(
         "total_runs": len(runs),
         "problems": problems,
         "missed": missed,
-        "watchdog_coverage": watchdog_coverage,
+        "coverage": coverage,
         "projection_backlog": len(pending_events(events)),
         "healthy": healthy,
     }
 
 
-def _job_healthy(s: dict[str, int]) -> bool:
-    """Healthy = every terminal state succeeded, nothing degraded. Running is neutral."""
-    return s["total"] == s["succeeded"] + s["running"] and s["degraded"] == 0
+def _job_state(s: dict[str, int]) -> str:
+    """Three-state: problem / running (neutral, NOT success) / ok."""
+    if s["total"] != s["succeeded"] + s["running"] or s["degraded"]:
+        return "problem"
+    if s["running"]:
+        return "running"
+    return "ok"
+
+
+_STATE_MARK = {"ok": "✅", "running": "🔄", "problem": "❌"}
 
 
 def _job_line(job: str, s: dict[str, int]) -> str:
-    mark = "✅" if _job_healthy(s) else "❌"
+    mark = _STATE_MARK[_job_state(s)]
     parts = [f"成 {s['succeeded']}"]
     for key, zh in (("failed", "败"), ("killed", "杀"), ("spawn_failed", "起失败"),
                     ("unknown", "未知"), ("running", "跑")):
@@ -114,18 +148,29 @@ def _job_line(job: str, s: dict[str, int]) -> str:
     return f"- {mark} `{job}`: {s['total']} 次（{' / '.join(parts)}）{extra}"
 
 
+_COVERAGE_ZH = {"full": "完整", "partial": "部分", "none": "无"}
+
+
 def render_markdown(d: dict[str, Any]) -> str:
     verdict = "🟢 健康" if d["healthy"] else "🔴 需关注"
+    cov = d["coverage"]
     lines = [
         f"# 舰队日报（近 {d['window_hours']}h）— {verdict}",
         "",
         f"总运行 {d['total_runs']} 次 · 问题 {len(d['problems'])} 个 · "
-        f"投影积压 {d['projection_backlog']}",
+        f"投影积压 {d['projection_backlog']} · watchdog 覆盖：{_COVERAGE_ZH[cov['status']]}",
     ]
-    if d["watchdog_coverage"]:
+    if cov["status"] == "full":
         lines[-1] += f" · 漏跑 {len(d['missed'])} 个"
+    elif cov["status"] == "partial":
+        lines += [
+            "",
+            "⚠️ **watchdog 覆盖不完整** — 以下任务有运行记录但未纳管（不在任何 schedule 内）：",
+            *[f"- `{job}`" for job in cov["observed_uncovered"]],
+        ]
     else:
-        lines += ["", "⚠️ **watchdog coverage unavailable** — 无 schedules.yaml，漏跑无从判定（这不是 0）"]
+        reason = cov["error"] or "无已纳管的 schedules（缺失/为空）"
+        lines += ["", f"⚠️ **watchdog coverage unavailable** — {reason}；漏跑无从判定（这不是 0）"]
     lines += ["", "## 各任务表现（execution evidence）"]
     for job, s in sorted(d["jobs"].items()):
         lines.append(_job_line(job, s))
@@ -153,23 +198,37 @@ def render_markdown(d: dict[str, Any]) -> str:
 
 
 def render_telegram_html(d: dict[str, Any]) -> str:
-    """Telegram-flavored HTML (parse_mode=HTML): no markdown headings, <b>/<code> only."""
+    """Telegram-flavored HTML (parse_mode=HTML): no markdown headings, <b>/<code> only.
+
+    Dynamic fields are clipped so no single line can approach the chunk limit —
+    the paragraph splitter therefore never has to cut inside an HTML tag.
+    """
     import html
 
-    def code(s: Any) -> str:
-        return f"<code>{html.escape(str(s))}</code>"
+    def code(s: Any, limit: int = 256) -> str:
+        text = str(s)
+        if len(text) > limit:
+            text = text[: limit - 1] + "…"
+        return f"<code>{html.escape(text)}</code>"
 
     verdict = "🟢 健康" if d["healthy"] else "🔴 需关注"
+    cov = d["coverage"]
     parts = [
         f"<b>舰队日报（近 {d['window_hours']}h）— {verdict}</b>",
         f"总运行 {d['total_runs']} · 问题 {len(d['problems'])} · 积压 {d['projection_backlog']}"
-        + (f" · 漏跑 {len(d['missed'])}" if d["watchdog_coverage"] else ""),
+        f" · 覆盖 {_COVERAGE_ZH[cov['status']]}"
+        + (f" · 漏跑 {len(d['missed'])}" if cov["status"] == "full" else ""),
     ]
-    if not d["watchdog_coverage"]:
-        parts.append("⚠️ <b>watchdog coverage unavailable</b>（无 schedules.yaml，漏跑无从判定）")
+    if cov["status"] == "partial":
+        parts.append(
+            "⚠️ <b>覆盖不完整</b> — 未纳管却有运行：\n"
+            + "\n".join(code(j) for j in cov["observed_uncovered"])
+        )
+    elif cov["status"] == "none":
+        parts.append("⚠️ <b>watchdog coverage unavailable</b>（无已纳管 schedules，漏跑无从判定）")
     job_lines = []
     for job, s in sorted(d["jobs"].items()):
-        mark = "✅" if _job_healthy(s) else "❌"
+        mark = _STATE_MARK[_job_state(s)]
         job_lines.append(f"{mark} {code(job)} {s['total']} 次，成 {s['succeeded']}")
     if job_lines:
         parts.append("\n".join(job_lines))

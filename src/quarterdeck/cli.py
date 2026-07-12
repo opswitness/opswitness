@@ -355,29 +355,34 @@ def digest(
     settings = Settings()
     events = Ledger(settings.ledger_dir).read_all()
     missed: list = []
-    coverage = False
     schedules: list = []
+    coverage_error: str | None = None
     if schedules_file:  # explicit legacy file: {jobs: [...]}
         import yaml
 
         sched_path = Path(schedules_file)
         if sched_path.exists():
             schedules = yaml.safe_load(sched_path.read_text()).get("jobs", [])
+        else:
+            coverage_error = f"schedules file not found: {sched_path}"
     else:
         from quarterdeck.bootstrap import load_effective_schedules
 
         try:
             schedules = load_effective_schedules(config_dir())["schedules"]
         except ValueError as exc:
-            typer.echo(f"schedules config error: {exc}", err=True)
-            raise typer.Exit(code=2) from None
+            coverage_error = str(exc)  # malformed config = no coverage, never a crash-hide
     if schedules:
         from quarterdeck.watchdog import check
 
         missed = check(schedules, events, datetime.now(UTC))
-        coverage = True
     d = build_digest(
-        events, datetime.now(UTC), hours=hours, missed=missed, watchdog_coverage=coverage
+        events,
+        datetime.now(UTC),
+        hours=hours,
+        missed=missed,
+        schedules=schedules,
+        coverage_error=coverage_error,
     )
     typer.echo(render_markdown(d))
     if telegram:
