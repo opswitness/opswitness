@@ -34,6 +34,10 @@ The same contract, three verticals:
 
 Alpha. Built against Paperclip v2026.707. Not affiliated with Paperclip.
 
+Start with [ARCHITECTURE.md](docs/ARCHITECTURE.md) — layer position, design laws, and why
+this layer is deliberately designed to shrink. Release gates live in
+[READINESS.md](docs/READINESS.md).
+
 ## License
 
 Apache-2.0. Contributions accepted under [DCO](CONTRIBUTING.md).
