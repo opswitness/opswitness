@@ -29,6 +29,16 @@ def _run_events(job, status, ts, run_id, started_offset_h=0.0):
     return events
 
 
+def _lifecycle(kind, job, ts, event_id):
+    return {
+        "event_id": event_id,
+        "kind": kind,
+        "run_id": event_id,
+        "ts": ts.isoformat(),
+        "payload": {"schema_version": 1, "job": job, "reason": "test"},
+    }
+
+
 def test_digest_aggregates_windows_and_traceability():
     now = datetime.now(UTC)
     events = (
@@ -83,7 +93,7 @@ def test_unsupported_schedule_is_registered_not_covered():
     assert d["healthy"] is False
 
 
-def test_stray_outside_window_still_breaks_coverage_and_retire_excuses_it():
+def test_stray_outside_window_still_breaks_coverage_and_ledger_retire_excuses_it():
     now = datetime.now(UTC)
     events = (
         _run_events("covered-job", "succeeded", now - timedelta(hours=1), "R1")
@@ -93,10 +103,8 @@ def test_stray_outside_window_still_breaks_coverage_and_retire_excuses_it():
     assert d["coverage"]["status"] == "partial"  # ran 48h ago => still a stray today
     assert d["coverage"]["observed_unregistered"] == ["stray-old"]
 
-    d2 = build_digest(
-        events, now, hours=24, missed=[], schedules=_sched("covered-job"),
-        retired=["stray-old"],
-    )
+    events.append(_lifecycle("job_retired", "stray-old", now, "RET1"))
+    d2 = build_digest(events, now, hours=24, missed=[], schedules=_sched("covered-job"))
     assert d2["coverage"]["status"] == "full"  # the audited excuse path
     assert d2["coverage"]["retired"] == ["stray-old"]
     assert d2["healthy"] is True
@@ -104,19 +112,25 @@ def test_stray_outside_window_still_breaks_coverage_and_retire_excuses_it():
 
 def test_retired_job_running_in_window_resurfaces():
     now = datetime.now(UTC)
-    events = (
-        _run_events("covered-job", "succeeded", now - timedelta(hours=1), "R1")
-        + _run_events("zombie", "succeeded", now - timedelta(hours=2), "R2")
-    )
-    # 'zombie' was retired, but it ran INSIDE the window: retirement is stale.
-    d = build_digest(
-        events, now, hours=24, missed=[], schedules=_sched("covered-job"), retired=["zombie"]
-    )
+    events = _run_events("covered-job", "succeeded", now - timedelta(hours=1), "R1")
+    events += [_lifecycle("job_retired", "zombie", now - timedelta(hours=3), "RET1")]
+    events += _run_events("zombie", "succeeded", now - timedelta(hours=2), "R2")
+    d = build_digest(events, now, hours=24, missed=[], schedules=_sched("covered-job"))
     assert d["coverage"]["status"] == "partial"
-    assert d["coverage"]["retired_but_active"] == ["zombie"]
+    assert d["coverage"]["resurrected"] == ["zombie"]
     assert d["healthy"] is False
     md = render_markdown(d)
-    assert "退役已过期" in md and "zombie" in md
+    assert "退休后再次运行" in md and "zombie" in md
+
+
+def test_unretire_clears_resurrection_but_returns_job_to_coverage_universe():
+    now = datetime.now(UTC)
+    events = [_lifecycle("job_retired", "zombie", now - timedelta(hours=3), "RET1")]
+    events += _run_events("zombie", "succeeded", now - timedelta(hours=2), "R2")
+    events += [_lifecycle("job_unretired", "zombie", now - timedelta(hours=1), "UNRET1")]
+    d = build_digest(events, now, schedules=[])
+    assert d["coverage"]["resurrected"] == []
+    assert d["coverage"]["observed_unregistered"] == ["zombie"]
 
 
 def test_none_coverage_still_names_known_gaps():
@@ -243,7 +257,7 @@ def test_legacy_schedules_validation_matrix(tmp_path):
 
     empty = tmp_path / "empty.yaml"
     empty.write_text("")
-    assert load_legacy_schedules(empty) == ([], [])  # valid-empty => no coverage downstream
+    assert load_legacy_schedules(empty) == []  # valid-empty => no coverage downstream
 
     bad = tmp_path / "bad.yaml"
     bad.write_text("{{{{nope")
@@ -262,6 +276,27 @@ def test_legacy_schedules_validation_matrix(tmp_path):
 
     with pytest.raises(ValueError, match="not found"):
         load_legacy_schedules(tmp_path / "missing.yaml")
+
+    retired = tmp_path / "retired.yaml"
+    retired.write_text("retired: [old-job]\n")
+    with pytest.raises(ValueError, match="qd retire"):
+        load_legacy_schedules(retired)
+
+
+def test_retire_and_unretire_cli_are_append_only(tmp_path, monkeypatch):
+    from quarterdeck.cli import app
+    from quarterdeck.ledger import Ledger
+
+    ledger_dir = tmp_path / "ledger"
+    monkeypatch.setenv("QD_LEDGER_DIR", str(ledger_dir))
+    runner = CliRunner()
+    retired = runner.invoke(app, ["retire", "old-job", "--reason", "decommissioned"])
+    assert retired.exit_code == 0 and "retired: old-job" in retired.output
+    unretired = runner.invoke(app, ["unretire", "old-job", "--reason", "restored"])
+    assert unretired.exit_code == 0 and "unretired: old-job" in unretired.output
+    events = Ledger(ledger_dir).read_all()
+    assert [event["kind"] for event in events] == ["job_retired", "job_unretired"]
+    assert all(event["payload"]["schema_version"] == 1 for event in events)
 
 
 def test_explicit_schedules_empty_file_no_traceback(tmp_path, monkeypatch):

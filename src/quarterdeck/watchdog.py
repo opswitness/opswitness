@@ -7,6 +7,8 @@ known gap (croniter) — tracked for the fleet's calendar jobs before full rollo
 from datetime import datetime
 from typing import Any
 
+from quarterdeck.schedules import classify_schedule
+
 
 def last_seen_by_job(events: list[dict[str, Any]]) -> dict[str, datetime]:
     seen: dict[str, datetime] = {}
@@ -34,11 +36,11 @@ def check(
     seen = last_seen_by_job(events)
     missed: list[dict[str, Any]] = []
     for sched in schedules:
-        if not sched.get("enabled", True):
+        state = classify_schedule(sched)
+        if state == "disabled":
             continue
         job = sched["job"]
-        interval = sched.get("expected_interval_seconds")
-        if interval is None:
+        if state == "unsupported":
             # Fail closed: an unmonitorable schedule must never render a green light.
             missed.append(
                 {
@@ -48,6 +50,7 @@ def check(
                 }
             )
             continue
+        interval = sched["expected_interval_seconds"]
         grace = sched.get("grace_seconds", 300)
         last = seen.get(job)
         if last is None:

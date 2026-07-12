@@ -12,7 +12,9 @@ Honesty contract:
 from datetime import datetime, timedelta
 from typing import Any
 
+from quarterdeck.lifecycle import lifecycle_sets
 from quarterdeck.projector import pending_events
+from quarterdeck.schedules import schedules_by_state
 
 TERMINAL_BAD = ("failed", "killed", "spawn_failed", "unknown")
 _KNOWN_STATUSES = ("succeeded", "failed", "killed", "spawn_failed", "running")
@@ -57,9 +59,7 @@ def build_coverage(
     observed_jobs: set[str],
     schedules: list[dict[str, Any]] | None,
     error: str | None = None,
-    retired: list[str] | None = None,
-    extra_disabled: list[str] | None = None,
-    observed_window: set[str] | None = None,
+    events: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Structured coverage verdict.
 
@@ -69,35 +69,21 @@ def build_coverage(
     - the coverage universe is EVERY job the ledger has ever seen — the report
       window scopes performance stats, never the universe (a stray that ran
       48h ago is still a stray today);
-    - the only audited way to excuse a known job is `retired:` in the user config.
+    - retirement is excused only by append-only job lifecycle events; a subsequent
+      run resurrects the job and breaks coverage until an explicit unretire.
     """
-    retired_set = {str(r) for r in (retired or [])}
-    window = observed_window if observed_window is not None else observed_jobs
-    active: set[str] = set()
-    disabled: set[str] = {str(j) for j in (extra_disabled or [])}
-    unsupported: set[str] = set()
-    for s in schedules or []:
-        job = s.get("job")
-        if not job:
-            continue
-        job = str(job)
-        if s.get("enabled", True) is False:
-            disabled.add(job)
-        elif s.get("expected_interval_seconds") is None:
-            unsupported.add(job)
-        else:
-            active.add(job)
+    grouped = schedules_by_state(schedules or [])
+    active = set(grouped["active"])
+    disabled = set(grouped["disabled"])
+    unsupported = set(grouped["unsupported"])
+    retired_set, resurrected_set = lifecycle_sets(events or [])
+    resurrected = resurrected_set & observed_jobs
 
-    # Retirement excuses only jobs that are actually gone. A retired job running in
-    # the current window means the retirement is stale — it must resurface.
-    retired_but_active = sorted((retired_set & window) - active)
-    effective_retired = retired_set - set(retired_but_active)
-
-    not_covered = observed_jobs - active - effective_retired
+    not_covered = (observed_jobs - active - retired_set) | resurrected
     observed_disabled = sorted(not_covered & disabled)
     observed_unsupported = sorted(not_covered & unsupported)
     observed_unregistered = sorted(
-        not_covered - disabled - unsupported - set(retired_but_active)
+        not_covered - disabled - unsupported - resurrected
     )
 
     if error or not active:
@@ -112,7 +98,7 @@ def build_coverage(
         "disabled": sorted(disabled),
         "unsupported": sorted(unsupported),
         "retired": sorted(retired_set),
-        "retired_but_active": retired_but_active,
+        "resurrected": sorted(resurrected),
         "observed_unregistered": observed_unregistered,
         "observed_disabled": observed_disabled,
         "observed_unsupported": observed_unsupported,
@@ -127,8 +113,6 @@ def build_digest(
     missed: list[dict[str, Any]] | None = None,
     schedules: list[dict[str, Any]] | None = None,
     coverage_error: str | None = None,
-    retired: list[str] | None = None,
-    extra_disabled: list[str] | None = None,
 ) -> dict[str, Any]:
     cutoff = now - timedelta(hours=hours)
     all_runs = _collect_runs(events)
@@ -161,9 +145,7 @@ def build_digest(
         observed_all,
         schedules,
         coverage_error,
-        retired=retired,
-        extra_disabled=extra_disabled,
-        observed_window={run["job"] for run in runs},
+        events=events,
     )
     healthy = coverage["status"] == "full" and not problems and not missed
     return {
@@ -222,7 +204,7 @@ def render_markdown(d: dict[str, Any]) -> str:
         out = [f"- `{job}`（未登记）" for job in c["observed_unregistered"]]
         out += [f"- `{job}`（已登记但停用）" for job in c["observed_disabled"]]
         out += [f"- `{job}`（已登记但 watchdog 不支持）" for job in c["observed_unsupported"]]
-        out += [f"- `{job}`（已退役却仍在运行——退役已过期）" for job in c["retired_but_active"]]
+        out += [f"- `{job}`（退休后再次运行——必须显式 unretire）" for job in c["resurrected"]]
         return out
 
     if cov["status"] == "full":
@@ -288,7 +270,7 @@ def render_telegram_html(d: dict[str, Any]) -> str:
         cov["observed_unregistered"]
         + cov["observed_disabled"]
         + cov["observed_unsupported"]
-        + cov["retired_but_active"]
+        + cov["resurrected"]
     )
     if cov["status"] == "partial":
         parts.append(

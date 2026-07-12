@@ -55,8 +55,9 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
 2. **Fail closed, everywhere.** No approval decision means no. Unreachable API means no.
    Unsupported schedule renders red, never silently green. Absence of coverage is
    reported as absence — "no schedules" is never "0 missed"; coverage counts only
-   *active* monitoring, over *every* job the ledger has ever seen; the only audited
-   excuse is `retired:` in user config.
+   *active* monitoring, over *every* job the ledger has ever seen. Retirement and
+   reversal are append-only `job_retired` / `job_unretired` events; any later run
+   resurfaces as `resurrected` until an explicit unretire.
 3. **Execution evidence ≠ outcome evidence.** Exit codes prove the process ran; they do
    not prove the data was right. The digest says so explicitly; outcome evidence
    (artifact hashes, evals, approvals) arrives with P4 and is labeled separately.
@@ -136,10 +137,11 @@ users still never see Quarterdeck itself — they see the workbench it makes tru
 | Module | Path | Status |
 |---|---|---|
 | ledger (outbox + write protocol) | `src/quarterdeck/ledger.py`, `fsutil.py` | ✅ P2 |
-| wrap runner (tee, signals, mirroring) | `src/quarterdeck/wrap/runner.py` | ✅ P2 (signal fallback rework tracked) |
+| wrap runner (tee, bounded process-tree signals, mirroring) | `src/quarterdeck/wrap/runner.py`, `process_tree.py` | ✅ P2 |
 | projector (issues/comments, reconciliation) | `src/quarterdeck/projector.py`, `paperclip.py` | ✅ P2 |
 | index (disposable SQLite) | `src/quarterdeck/index.py` | ✅ P2 |
-| watchdog / digest / coverage | `src/quarterdeck/watchdog.py`, `digest.py` | ✅ P2 |
+| watchdog / digest / coverage | `src/quarterdeck/watchdog.py`, `digest.py`, `schedules.py` | ✅ P2 |
+| job lifecycle | `src/quarterdeck/lifecycle.py` | ✅ P2 |
 | bootstrap (candidates, two-file model) | `src/quarterdeck/bootstrap.py` | ✅ P2 |
 | adopt (dry-run plist wrapping) | `src/quarterdeck/adopt.py` | ✅ P2 (`--apply` gated on install) |
 | MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ P2 |
@@ -147,10 +149,8 @@ users still never see Quarterdeck itself — they see the workbench it makes tru
 | artifacts (ledger events + content-addressed projection) | — | P4 |
 | vertical case packs | separate private repo | P5 |
 
-Status column tracks code + tests in this repo. The authoritative release-gate record
-is [READINESS.md](READINESS.md) — **where the two disagree, READINESS wins.** Known
-honest gap: the interim signal fallback (`9f62656`) is live on the main execution path
-while its deterministic rework is tracked.
+Status tracks code + tests in this repo. [READINESS.md](READINESS.md) is the single
+current release-gate snapshot; ADRs remain the design authority.
 
 Related: [P0 validation](P0-VALIDATION.md) · [readiness gates](READINESS.md) ·
 [install runbook (NO-GO until gates close)](INSTALL-PAPERCLIP.md) ·

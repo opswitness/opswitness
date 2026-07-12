@@ -7,14 +7,15 @@ open gate below is closed.
 
 ## Current baseline
 
-- HEAD: `3b278b7` — 82 tests passing; ruff, mypy, full-history gitleaks clean.
-- P2 local code is complete **at this HEAD**, including the three coverage blockers
-  found in review and fixed with regression tests in `3b278b7`:
-  1. empty explicit `--schedules` no longer verdicts green (exit 2, both watchdog and
-     digest paths share one strict validator);
-  2. a retired job that runs inside the window resurfaces as `retired_but_active` and
-     breaks full/healthy — stale retirement is a finding, not an excuse;
-  3. `coverage=none` reports still name every ledger-known unmonitored job.
+- Worktree atop HEAD `de0bc6e`: M0 implementation complete; 91 tests pass in three
+  consecutive full-suite runs; ruff, mypy, and full-history gitleaks are clean.
+- Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
+  in a signal handler. The handler writes a self-pipe; the supervisor snapshots
+  `(pid, create_time)`, verifies descendants, escalates after 750ms, and emits
+  `tree_signal_degraded` when cleanup cannot be proven.
+- Watchdog, digest, and bootstrap share one `classify_schedule()` definition.
+- Mutable `retired:` config has been removed. `qd retire/unretire --reason` records
+  lifecycle events; a post-retirement run becomes `resurrected` and breaks health.
 - Real launchd plists untouched (zero `.qd-bak` on the machine); Paperclip permanent
   install not executed; real HOME clean.
 
@@ -23,14 +24,10 @@ open gate below is closed.
 1. **INSTALL NO-GO** — launchd service templates, stable absolute Node/qd paths,
    npm-prefix handling, secrets handling, isolated restore drill. Docs/templates first;
    still no execution.
-2. **Signal fallback (`9f62656`) is live on the main wrap path** while its
-   deterministic rework is tracked: pgrep returncode unchecked (restricted
-   environments return 3), per-level blocking inside a signal handler, PID-reuse
-   race. Own workstream with fake-pgrep three-branch tests.
-3. **No git remote** — GitHub Actions CI has never actually run.
-4. **Live-Paperclip integration tests** (projector against a real server: create,
+2. **No git remote** — GitHub Actions CI has never actually run.
+3. **Live-Paperclip integration tests** (projector against a real server: create,
    replay, lost-ack reconcile) — pending install.
-5. **Brand gate** before any publish (org name collision, trademark, domain).
+4. **Brand gate** before any publish (org name collision, trademark, domain).
 
 ## P3 defer contract (documented upstream; spike verifies implementation, not semantics)
 
@@ -58,7 +55,8 @@ open gate below is closed.
 
 ## Next task
 
-Close INSTALL gate items as docs/templates (no execution), then install → live
+Implement M1 doctor, secure service launchers/templates, and backup/restore dry-run
+(no execution), then request explicit approval for install → live
 integration tests → 24-48h pilot job → 7-day soak. The P3 defer spike may run in
 parallel after install.
 

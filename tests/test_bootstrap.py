@@ -13,6 +13,7 @@ from quarterdeck.bootstrap import (
     load_effective_schedules,
 )
 from quarterdeck.cli import app
+from quarterdeck.schedules import classify_schedule
 
 
 def _plist(dir_path, label, interval=None, calendar=None, keepalive=False):
@@ -154,8 +155,19 @@ def test_enabled_false_override_unenrolls(tmp_path):
         'enroll:\n  - "com.t.*"\noverrides:\n  com.t.a:\n    enabled: false\n'
     )
     eff = load_effective_schedules(cfg)
-    assert [s["label"] for s in eff["schedules"]] == ["com.t.b"]
+    by_label = {s["label"]: s for s in eff["schedules"]}
+    assert set(by_label) == {"com.t.a", "com.t.b"}
+    assert classify_schedule(by_label["com.t.a"]) == "disabled"
+    assert classify_schedule(by_label["com.t.b"]) == "active"
     assert eff["meta"]["disabled"] == 1
+
+
+def test_retired_config_is_rejected_with_migration_path(tmp_path):
+    cfg = tmp_path / "conf"
+    cfg.mkdir()
+    (cfg / USER_NAME).write_text("retired: [old-job]\n")
+    with pytest.raises(ValueError, match="qd retire"):
+        load_effective_schedules(cfg)
 
 
 def test_chmod_failure_leaves_no_temp_debris(tmp_path, monkeypatch):

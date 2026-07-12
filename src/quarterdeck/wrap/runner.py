@@ -12,6 +12,7 @@ Invariants:
 """
 
 import os
+import select
 import signal
 import subprocess
 import sys
@@ -79,34 +80,17 @@ def run_wrapped(job: str, argv: list[str], settings: Settings | None = None) -> 
         alert(f"job={job} failed to spawn: {exc}")
         return 127
 
-    # Forward termination signals to the child's whole process group so
-    # `launchctl unload` semantics survive wrapping (grandchildren included).
-    def _signal_descendants(pid: int, signum: int) -> None:
-        """Leaf-up best-effort walk for environments where killpg is denied
-        (sandboxes, MDM) — otherwise grandchildren would be orphaned alive."""
-        try:
-            out = subprocess.run(
-                ["pgrep", "-P", str(pid)], capture_output=True, text=True, timeout=5
-            )
-            for token in out.stdout.split():
-                child_pid = int(token)
-                _signal_descendants(child_pid, signum)
-                try:
-                    os.kill(child_pid, signum)
-                except (ProcessLookupError, PermissionError):
-                    pass
-        except (OSError, ValueError, subprocess.SubprocessError):
-            pass
+    # Signal handlers only write one byte to a non-blocking self-pipe. Process
+    # inspection, retries, sleeps, ledger writes, and alerts stay in normal code.
+    signal_r, signal_w = os.pipe()
+    os.set_blocking(signal_r, False)
+    os.set_blocking(signal_w, False)
 
     def _forward(signum: int, _frame: Any) -> None:
         try:
-            os.killpg(child.pid, signum)
-        except (ProcessLookupError, PermissionError):
-            _signal_descendants(child.pid, signum)
-            try:
-                child.send_signal(signum)
-            except ProcessLookupError:
-                pass
+            os.write(signal_w, bytes((signum,)))
+        except OSError:
+            pass
 
     old_handlers = {}
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
@@ -119,11 +103,52 @@ def run_wrapped(job: str, argv: list[str], settings: Settings | None = None) -> 
         t.start()
         threads.append(t)
 
-    exit_code = child.wait()
+    from quarterdeck.process_tree import signal_process_tree
+
+    exit_code: int | None = None
+    try:
+        while exit_code is None:
+            exit_code = child.poll()
+            if exit_code is not None:
+                break
+            readable, _, _ = select.select([signal_r], [], [], 0.1)
+            if not readable:
+                continue
+            try:
+                requested = os.read(signal_r, 64)
+            except BlockingIOError:
+                continue
+            if not requested:
+                continue
+            result = signal_process_tree(child.pid, requested[0])
+            if result.degraded:
+                degraded = True
+                payload = {
+                    "schema_version": 1,
+                    "job": job,
+                    "requested_signal": result.requested_signal,
+                    "final_signal": result.final_signal,
+                    "survivors": result.survivors,
+                    "errors": result.errors,
+                    "pid_reused": sorted(set(result.pid_reused)),
+                }
+                ledger.append(
+                    "tree_signal_degraded", run_id, payload, fsync=True, degraded=True
+                )
+                alert(
+                    f"process-tree signal degraded: job={job} run={run_id} "
+                    f"survivors={result.survivors} errors={result.errors}"
+                )
+            exit_code = child.wait()
+    finally:
+        os.close(signal_r)
+        os.close(signal_w)
+        for sig, handler in old_handlers.items():
+            signal.signal(sig, handler)
+
+    assert exit_code is not None
     for t in threads:
         t.join(timeout=5)
-    for sig, handler in old_handlers.items():
-        signal.signal(sig, handler)
 
     if exit_code == 0:
         status = "succeeded"

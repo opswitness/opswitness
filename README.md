@@ -19,6 +19,8 @@ It adds the three things the platforms don't cover:
 - **Wrap, don't rewrite.** Your launchd plists, cron lines, and `claude -p` invocations stay exactly as they are.
 - **Fail closed.** No decision means no. API unreachable means no. Expired means no.
 - **Evidence over trust.** Append-only audit events, content-hashed artifacts, honest failure records.
+- **Lifecycle is evidence.** Retirements and reversals are ledger events (`qd retire/unretire`),
+  never mutable config that can erase a known job from coverage.
 - **Your credentials stay yours.** Quarterdeck never handles Claude subscription tokens; it talks to
   the `claude` CLI *you* installed and authenticated. Hosted/product deployments must use API keys.
 
@@ -33,6 +35,9 @@ The same contract, three verticals:
 ## Status
 
 Alpha. Built against Paperclip v2026.707. Not affiliated with Paperclip.
+
+The local P2 code path is test-complete. Permanent Paperclip/launchd installation remains
+NO-GO until the M1 install-readiness gates in READINESS pass.
 
 Start with [ARCHITECTURE.md](docs/ARCHITECTURE.md) — layer position, design laws, and why
 this layer is deliberately designed to shrink. Release gates live in

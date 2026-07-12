@@ -31,6 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from quarterdeck.adopt import job_name_from_label, scan
 from quarterdeck.fsutil import atomic_write
+from quarterdeck.schedules import classify_schedule
 
 
 class ScheduleOverride(BaseModel):
@@ -50,8 +51,6 @@ class UserSchedulesConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enroll: list[str] = []
     overrides: dict[str, ScheduleOverride] = {}
-    # The ONLY audited way to excuse a ledger-known job from coverage accounting:
-    retired: list[str] = []
 
 
 class LegacyScheduleEntry(BaseModel):
@@ -71,10 +70,9 @@ class LegacyScheduleEntry(BaseModel):
 class LegacySchedulesFile(BaseModel):
     model_config = ConfigDict(extra="forbid")
     jobs: list[LegacyScheduleEntry] = []
-    retired: list[str] = []
 
 
-def load_legacy_schedules(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
+def load_legacy_schedules(path: Path) -> list[dict[str, Any]]:
     """Unified validator for explicit --schedules files. Empty file = valid-empty
     (=> no coverage downstream); every malformation raises ValueError loudly."""
     if not path.exists():
@@ -87,14 +85,16 @@ def load_legacy_schedules(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
         raw = {}
     if not isinstance(raw, dict):
         raise ValueError(f"{path}: expected a mapping at top level")
+    if "retired" in raw:
+        raise ValueError(
+            f"{path}: `retired:` was removed; use `qd retire JOB --reason ...` "
+            "so retirement remains in the append-only ledger"
+        )
     try:
         parsed = LegacySchedulesFile.model_validate(raw)
     except ValidationError as exc:
         raise ValueError(f"{path}: schema violation — {exc}") from exc
-    return (
-        [e.model_dump(exclude_none=True) for e in parsed.jobs],
-        list(parsed.retired),
-    )
+    return [e.model_dump(exclude_none=True) for e in parsed.jobs]
 
 GENERATED_NAME = "schedules.generated.yaml"
 USER_NAME = "schedules.yaml"
@@ -125,7 +125,7 @@ def default_grace(interval: int) -> int:
     return max(300, interval // 5)
 
 
-def classify(entry: dict[str, Any]) -> str:
+def classify_source(entry: dict[str, Any]) -> str:
     if "expected_interval_seconds" in entry:
         return "interval"
     if "calendar" in entry:
@@ -143,7 +143,7 @@ def build_generated(entries: list[dict[str, Any]]) -> dict[str, Any]:
             errors.append({"path": e.get("path", "?"), "error": e["error"]})
             continue
         label = e["label"]
-        cls = classify(e)
+        cls = classify_source(e)
         item: dict[str, Any] = {
             "label": label,
             "class": cls,
@@ -270,6 +270,11 @@ def load_effective_schedules(config_dir: Path) -> dict[str, Any]:
     """
     generated = _load_yaml(config_dir / GENERATED_NAME) or {"entries": []}
     raw_user = _load_yaml(config_dir / USER_NAME) or {}
+    if "retired" in raw_user:
+        raise ValueError(
+            f"{config_dir / USER_NAME}: `retired:` was removed; use "
+            "`qd retire JOB --reason ...` so retirement remains auditable"
+        )
     try:
         user = UserSchedulesConfig.model_validate(raw_user)
     except ValidationError as exc:
@@ -284,7 +289,7 @@ def load_effective_schedules(config_dir: Path) -> dict[str, Any]:
         "services": 0,
         "unknown_enroll_patterns": [],
         "disabled_jobs": [],
-        "retired": list(user.retired),
+        "unsupported_jobs": [],
     }
     matched_patterns: set[str] = set()
     for entry in generated.get("entries", []):
@@ -297,14 +302,10 @@ def load_effective_schedules(config_dir: Path) -> dict[str, Any]:
         if entry["class"] == "service":
             meta["services"] += 1
             continue  # services are never auto-monitorable
-        override = overrides.get(label)
-        if override and override.enabled is False:
-            meta["disabled"] = meta.get("disabled", 0) + 1
-            meta["disabled_jobs"].append(entry.get("job", label))
-            continue
         if not enrolled:
             meta["candidates"] += 1
             continue
+        override = overrides.get(label)
         sched: dict[str, Any] = {
             "job": entry.get("job", label),  # canonical = full label
             "label": label,
@@ -316,7 +317,15 @@ def load_effective_schedules(config_dir: Path) -> dict[str, Any]:
         # calendar: no interval key → watchdog reports it as unsupported (fail-closed)
         if override and override.grace_seconds is not None:
             sched["grace_seconds"] = override.grace_seconds
+        if override and override.enabled is False:
+            sched["enabled"] = False
         schedules.append(sched)
         meta["enrolled"] += 1
+        state = classify_schedule(sched)
+        if state == "disabled":
+            meta["disabled"] = meta.get("disabled", 0) + 1
+            meta["disabled_jobs"].append(sched["job"])
+        elif state == "unsupported":
+            meta["unsupported_jobs"].append(sched["job"])
     meta["unknown_enroll_patterns"] = [p for p in patterns if p not in matched_patterns]
     return {"schedules": schedules, "meta": meta}

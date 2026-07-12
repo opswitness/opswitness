@@ -61,6 +61,50 @@ def _index_db(settings: "Settings"):
     return settings.ledger_dir.parent / "index.db"
 
 
+def _job_lifecycle(kind: str, job: str, reason: str) -> None:
+    from quarterdeck.config import Settings
+    from quarterdeck.ids import new_ulid
+    from quarterdeck.ledger import Ledger
+    from quarterdeck.lifecycle import fold_job_lifecycle
+
+    job = job.strip()
+    reason = reason.strip()
+    if not job or not reason:
+        typer.echo("job and --reason must be non-empty", err=True)
+        raise typer.Exit(code=2)
+    ledger = Ledger(Settings().ledger_dir)
+    states = fold_job_lifecycle(ledger.read_all())
+    state = states.get(job)
+    if kind == "job_retired" and state and state.retired and not state.resurrected:
+        typer.echo(f"already retired: {job}")
+        return
+    if kind == "job_unretired" and (state is None or not state.retired):
+        typer.echo(f"not retired: {job}")
+        return
+    event = ledger.append(
+        kind,
+        new_ulid(),
+        {"schema_version": 1, "job": job, "reason": reason},
+        fsync=True,
+    )
+    if event is None:
+        typer.echo(f"could not durably record {kind} for {job}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"{kind.removeprefix('job_')}: {job} event={event['event_id']}")
+
+
+@app.command()
+def retire(job: str, reason: str = typer.Option(..., "--reason")) -> None:
+    """Retire a ledger-known job with an append-only reason."""
+    _job_lifecycle("job_retired", job, reason)
+
+
+@app.command()
+def unretire(job: str, reason: str = typer.Option(..., "--reason")) -> None:
+    """Return a retired job to the coverage universe."""
+    _job_lifecycle("job_unretired", job, reason)
+
+
 @app.command()
 def runs(
     job: str = typer.Option(None, "--job", help="Filter by job name"),
@@ -247,17 +291,10 @@ def watchdog(
         from quarterdeck.bootstrap import load_legacy_schedules
 
         try:
-            schedules, _retired = load_legacy_schedules(Path(schedules_file))
+            schedules = load_legacy_schedules(Path(schedules_file))
         except ValueError as exc:
             typer.echo(f"schedules config error: {exc}", err=True)
             raise typer.Exit(code=2) from None
-        if not schedules:
-            # Same guard as the loader branch: zero schedules can never verdict green.
-            typer.echo(
-                f"no supported schedules in {schedules_file} — refusing a green verdict",
-                err=True,
-            )
-            raise typer.Exit(code=2)
     else:
         from quarterdeck.bootstrap import load_effective_schedules
 
@@ -281,6 +318,16 @@ def watchdog(
                 f"⚠️ enroll patterns matching nothing: {eff['meta']['unknown_enroll_patterns']}",
                 err=True,
             )
+    from quarterdeck.schedules import schedules_by_state
+
+    grouped = schedules_by_state(schedules)
+    if not grouped["active"]:
+        typer.echo(
+            "no active interval schedules — refusing a green verdict "
+            f"(disabled={len(grouped['disabled'])}, unsupported={len(grouped['unsupported'])})",
+            err=True,
+        )
+        raise typer.Exit(code=2)
     settings = Settings()
     missed = check(schedules, Ledger(settings.ledger_dir).read_all(), datetime.now(UTC))
     for m in missed:
@@ -288,7 +335,7 @@ def watchdog(
         alert(f"missed run: job={m['job']} reason={m['reason']}{detail}")
         typer.echo(f"❌ {m['job']}: {m['reason']}{detail}")
     if not missed:
-        typer.echo(f"✅ all {len(schedules)} scheduled jobs within expectations")
+        typer.echo(f"✅ all {len(grouped['active'])} active scheduled jobs within expectations")
     raise typer.Exit(code=1 if missed else 0)
 
 
@@ -357,14 +404,12 @@ def digest(
     events = Ledger(settings.ledger_dir).read_all()
     missed: list = []
     schedules: list = []
-    retired: list = []
-    extra_disabled: list = []
     coverage_error: str | None = None
     if schedules_file:  # explicit legacy file: {jobs: [...]} — unified strict validation
         from quarterdeck.bootstrap import load_legacy_schedules
 
         try:
-            schedules, retired = load_legacy_schedules(Path(schedules_file))
+            schedules = load_legacy_schedules(Path(schedules_file))
         except ValueError as exc:
             coverage_error = str(exc)  # malformed config = no coverage, never a traceback
     else:
@@ -373,8 +418,6 @@ def digest(
         try:
             eff = load_effective_schedules(config_dir())
             schedules = eff["schedules"]
-            retired = eff["meta"].get("retired", [])
-            extra_disabled = eff["meta"].get("disabled_jobs", [])
         except ValueError as exc:
             coverage_error = str(exc)
     if schedules:
@@ -388,8 +431,6 @@ def digest(
         missed=missed,
         schedules=schedules,
         coverage_error=coverage_error,
-        retired=retired,
-        extra_disabled=extra_disabled,
     )
     typer.echo(render_markdown(d))
     if telegram:

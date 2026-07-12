@@ -4,8 +4,11 @@ import subprocess
 import sys
 import time
 
+import psutil
+
 from quarterdeck.config import Settings
 from quarterdeck.ledger import Ledger
+from quarterdeck.process_tree import ProcessIdentity, signal_process_tree
 from quarterdeck.wrap.runner import run_wrapped
 
 SK = "sk-" + "a1B2" * 8
@@ -65,7 +68,7 @@ def test_child_killed_by_signal_recorded_as_killed(tmp_path):
 
 
 def test_sigterm_kills_whole_process_tree(tmp_path):
-    marker = "987654321"
+    pid_file = tmp_path / "grandchild.pid"
     env = dict(os.environ, QD_LEDGER_DIR=str(tmp_path / "ledger"))
     wrapper = subprocess.Popen(
         [
@@ -78,22 +81,24 @@ def test_sigterm_kills_whole_process_tree(tmp_path):
             "--",
             "sh",
             "-c",
-            f"sleep {marker} & wait",
+            f"sleep 999 & echo $! > {pid_file}; wait",
         ],
         env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    # Wait for the grandchild sleep to exist.
+    # The child publishes the exact grandchild PID; no process-list oracle needed.
     deadline = time.time() + 10
     while time.time() < deadline:
-        if subprocess.run(["pgrep", "-f", f"sleep {marker}"], capture_output=True).returncode == 0:
+        if pid_file.exists() and pid_file.read_text().strip():
             break
         time.sleep(0.1)
     else:
         wrapper.kill()
         raise AssertionError("grandchild never appeared")
 
+    grandchild_pid = int(pid_file.read_text())
+    grandchild_created = psutil.Process(grandchild_pid).create_time()
     wrapper.send_signal(signal.SIGTERM)
     wrapper.wait(timeout=10)
     # Exit semantics mirror the death: the wrapper itself dies by SIGTERM,
@@ -102,9 +107,123 @@ def test_sigterm_kills_whole_process_tree(tmp_path):
 
     deadline = time.time() + 5
     while time.time() < deadline:
-        if subprocess.run(["pgrep", "-f", f"sleep {marker}"], capture_output=True).returncode != 0:
+        try:
+            process = psutil.Process(grandchild_pid)
+            gone = (
+                abs(process.create_time() - grandchild_created) > 0.001
+                or not process.is_running()
+                or process.status() == psutil.STATUS_ZOMBIE
+            )
+        except psutil.NoSuchProcess:
+            gone = True
+        if gone:
             break
         time.sleep(0.2)
     else:
-        subprocess.run(["pkill", "-f", f"sleep {marker}"])
+        try:
+            psutil.Process(grandchild_pid).kill()
+        except psutil.NoSuchProcess:
+            pass
         raise AssertionError("grandchild survived SIGTERM — process tree not reaped")
+
+
+class FakeInspector:
+    def __init__(self, *, survive_term=True, permission_denied=False, reused=False):
+        self.identities = [ProcessIdentity(100, 1.0, 0), ProcessIdentity(101, 2.0, 1)]
+        self.alive_pids = {100, 101}
+        self.survive_term = survive_term
+        self.permission_denied = permission_denied
+        self.reused = reused
+        self.sent: list[tuple[int, int]] = []
+
+    def snapshot(self, root_pid):
+        assert root_pid == 100
+        return self.identities
+
+    def alive(self, identity):
+        return identity.pid in self.alive_pids
+
+    def send(self, identity, signum):
+        self.sent.append((identity.pid, signum))
+        if self.reused and identity.pid == 101:
+            self.alive_pids.remove(101)
+            raise ProcessLookupError("pid reused")
+        if self.permission_denied:
+            raise PermissionError("MDM denied")
+        if signum == signal.SIGKILL or not self.survive_term:
+            self.alive_pids.discard(identity.pid)
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+def test_process_tree_success_leaf_first():
+    inspector = FakeInspector(survive_term=False)
+    clock = FakeClock()
+    result = signal_process_tree(
+        100,
+        signal.SIGTERM,
+        inspector=inspector,
+        clock=clock,
+        sleeper=clock.sleep,
+        group_signal=lambda _pid, _sig: None,
+    )
+    assert result.degraded is False and result.survivors == []
+    assert inspector.sent[:2] == [(101, signal.SIGTERM), (100, signal.SIGTERM)]
+
+
+def test_process_tree_escalates_to_sigkill_within_budget():
+    inspector = FakeInspector(survive_term=True)
+    clock = FakeClock()
+    result = signal_process_tree(
+        100,
+        signal.SIGTERM,
+        inspector=inspector,
+        clock=clock,
+        sleeper=clock.sleep,
+        group_signal=lambda _pid, _sig: None,
+    )
+    assert result.degraded is False and result.final_signal == signal.SIGKILL
+    assert (101, signal.SIGKILL) in inspector.sent and clock.now <= 1.0
+
+
+def test_process_tree_permission_denial_is_degraded_and_bounded():
+    inspector = FakeInspector(permission_denied=True)
+    clock = FakeClock()
+
+    def denied(_pid, _sig):
+        raise PermissionError("killpg denied")
+
+    result = signal_process_tree(
+        100,
+        signal.SIGTERM,
+        inspector=inspector,
+        clock=clock,
+        sleeper=clock.sleep,
+        group_signal=denied,
+    )
+    assert result.degraded is True and result.survivors == [100, 101]
+    assert any("PermissionError" in error for error in result.errors)
+    assert clock.now <= 1.0
+
+
+def test_process_tree_pid_reuse_is_never_signalled_as_new_process():
+    inspector = FakeInspector(survive_term=False, reused=True)
+    clock = FakeClock()
+    result = signal_process_tree(
+        100,
+        signal.SIGTERM,
+        inspector=inspector,
+        clock=clock,
+        sleeper=clock.sleep,
+        group_signal=lambda _pid, _sig: None,
+    )
+    assert 101 in result.pid_reused and 101 not in result.survivors

@@ -98,6 +98,24 @@ def test_watchdog_loop_mode_is_refused(tmp_path, monkeypatch):
     assert result.exit_code == 2
 
 
+def test_watchdog_refuses_all_disabled_explicit_schedules(tmp_path, monkeypatch):
+    import yaml
+    from typer.testing import CliRunner
+
+    from quarterdeck.cli import app
+
+    path = tmp_path / "disabled.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {"jobs": [{"job": "disabled", "expected_interval_seconds": 60, "enabled": False}]}
+        )
+    )
+    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "ledger"))
+    result = CliRunner().invoke(app, ["watchdog", "--schedules", str(path)])
+    assert result.exit_code == 2
+    assert "no active interval schedules" in result.output
+
+
 def test_resolve_qd_bin_requires_absolute_executable(tmp_path):
     import pytest
 
