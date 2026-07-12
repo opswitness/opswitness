@@ -70,7 +70,9 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
 6. **The platform layer has no LLM, no embeddings, no RAG — deliberately.** Evidence
    does not tolerate "approximately relevant". Structured queries beat vectors here;
    at scale, lexical FTS is the upgrade path. Knowledge retrieval (RAG) belongs to the
-   vertical case layer, where the curated rules corpus is itself the paid content.
+   vertical case layer, where the curated rules corpus is itself the paid content —
+   shape defined in [ADR-0002](adr/0002-knowledge-layer.md): deterministic-first split,
+   markdown vault as source, structured-first retrieval, verifiable citations.
 
 ## Necessity and shrinkability
 
