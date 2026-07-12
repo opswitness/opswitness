@@ -59,6 +59,7 @@ def build_coverage(
     error: str | None = None,
     retired: list[str] | None = None,
     extra_disabled: list[str] | None = None,
+    observed_window: set[str] | None = None,
 ) -> dict[str, Any]:
     """Structured coverage verdict.
 
@@ -71,6 +72,7 @@ def build_coverage(
     - the only audited way to excuse a known job is `retired:` in the user config.
     """
     retired_set = {str(r) for r in (retired or [])}
+    window = observed_window if observed_window is not None else observed_jobs
     active: set[str] = set()
     disabled: set[str] = {str(j) for j in (extra_disabled or [])}
     unsupported: set[str] = set()
@@ -86,10 +88,17 @@ def build_coverage(
         else:
             active.add(job)
 
-    not_covered = observed_jobs - active - retired_set
+    # Retirement excuses only jobs that are actually gone. A retired job running in
+    # the current window means the retirement is stale — it must resurface.
+    retired_but_active = sorted((retired_set & window) - active)
+    effective_retired = retired_set - set(retired_but_active)
+
+    not_covered = observed_jobs - active - effective_retired
     observed_disabled = sorted(not_covered & disabled)
     observed_unsupported = sorted(not_covered & unsupported)
-    observed_unregistered = sorted(not_covered - disabled - unsupported)
+    observed_unregistered = sorted(
+        not_covered - disabled - unsupported - set(retired_but_active)
+    )
 
     if error or not active:
         status = "none"
@@ -103,6 +112,7 @@ def build_coverage(
         "disabled": sorted(disabled),
         "unsupported": sorted(unsupported),
         "retired": sorted(retired_set),
+        "retired_but_active": retired_but_active,
         "observed_unregistered": observed_unregistered,
         "observed_disabled": observed_disabled,
         "observed_unsupported": observed_unsupported,
@@ -148,7 +158,12 @@ def build_digest(
     ]
     missed = missed or []
     coverage = build_coverage(
-        observed_all, schedules, coverage_error, retired=retired, extra_disabled=extra_disabled
+        observed_all,
+        schedules,
+        coverage_error,
+        retired=retired,
+        extra_disabled=extra_disabled,
+        observed_window={run["job"] for run in runs},
     )
     healthy = coverage["status"] == "full" and not problems and not missed
     return {
@@ -203,16 +218,24 @@ def render_markdown(d: dict[str, Any]) -> str:
         f"（活跃 {len(cov['active_covered'])} · 停用 {len(cov['disabled'])} · "
         f"不支持 {len(cov['unsupported'])} · 退役 {len(cov['retired'])}）"
     )
+    def _gap_lines(c: dict[str, Any]) -> list[str]:
+        out = [f"- `{job}`（未登记）" for job in c["observed_unregistered"]]
+        out += [f"- `{job}`（已登记但停用）" for job in c["observed_disabled"]]
+        out += [f"- `{job}`（已登记但 watchdog 不支持）" for job in c["observed_unsupported"]]
+        out += [f"- `{job}`（已退役却仍在运行——退役已过期）" for job in c["retired_but_active"]]
+        return out
+
     if cov["status"] == "full":
         lines[-1] += f" · 漏跑 {len(d['missed'])} 个"
     elif cov["status"] == "partial":
         lines += ["", "⚠️ **watchdog 覆盖不完整** — 账本已知但无活跃监控的任务："]
-        lines += [f"- `{job}`（未登记）" for job in cov["observed_unregistered"]]
-        lines += [f"- `{job}`（已登记但停用）" for job in cov["observed_disabled"]]
-        lines += [f"- `{job}`（已登记但 watchdog 不支持）" for job in cov["observed_unsupported"]]
+        lines += _gap_lines(cov)
     else:
         reason = cov["error"] or "无活跃监控的 schedules（缺失/为空/全部停用或不支持）"
         lines += ["", f"⚠️ **watchdog coverage unavailable** — {reason}；漏跑无从判定（这不是 0）"]
+        gaps = _gap_lines(cov)
+        if gaps:
+            lines += ["", "账本已知、当前无任何监控的任务："] + gaps
     lines += ["", "## 各任务表现（execution evidence）"]
     for job, s in sorted(d["jobs"].items()):
         lines.append(_job_line(job, s))
@@ -261,17 +284,21 @@ def render_telegram_html(d: dict[str, Any]) -> str:
         f" · 覆盖 {_COVERAGE_ZH[cov['status']]}"
         + (f" · 漏跑 {len(d['missed'])}" if cov["status"] == "full" else ""),
     ]
+    gaps = (
+        cov["observed_unregistered"]
+        + cov["observed_disabled"]
+        + cov["observed_unsupported"]
+        + cov["retired_but_active"]
+    )
     if cov["status"] == "partial":
-        gaps = (
-            cov["observed_unregistered"] + cov["observed_disabled"] + cov["observed_unsupported"]
-        )
         parts.append(
             "⚠️ <b>覆盖不完整</b> — 账本已知但无活跃监控：\n" + "\n".join(code(j) for j in gaps)
         )
     elif cov["status"] == "none":
-        parts.append(
-            "⚠️ <b>watchdog coverage unavailable</b>（无活跃监控的 schedules，漏跑无从判定）"
-        )
+        note = "⚠️ <b>watchdog coverage unavailable</b>（无活跃监控的 schedules，漏跑无从判定）"
+        if gaps:
+            note += "\n已知无监控任务：\n" + "\n".join(code(j) for j in gaps)
+        parts.append(note)
     job_lines = []
     for job, s in sorted(d["jobs"].items()):
         mark = _STATE_MARK[_job_state(s)]

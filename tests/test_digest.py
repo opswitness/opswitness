@@ -102,6 +102,49 @@ def test_stray_outside_window_still_breaks_coverage_and_retire_excuses_it():
     assert d2["healthy"] is True
 
 
+def test_retired_job_running_in_window_resurfaces():
+    now = datetime.now(UTC)
+    events = (
+        _run_events("covered-job", "succeeded", now - timedelta(hours=1), "R1")
+        + _run_events("zombie", "succeeded", now - timedelta(hours=2), "R2")
+    )
+    # 'zombie' was retired, but it ran INSIDE the window: retirement is stale.
+    d = build_digest(
+        events, now, hours=24, missed=[], schedules=_sched("covered-job"), retired=["zombie"]
+    )
+    assert d["coverage"]["status"] == "partial"
+    assert d["coverage"]["retired_but_active"] == ["zombie"]
+    assert d["healthy"] is False
+    md = render_markdown(d)
+    assert "退役已过期" in md and "zombie" in md
+
+
+def test_none_coverage_still_names_known_gaps():
+    now = datetime.now(UTC)
+    events = _run_events("ghost-job", "succeeded", now - timedelta(hours=40), "R1")
+    d = build_digest(events, now, hours=24, schedules=[])
+    assert d["coverage"]["status"] == "none"
+    md = render_markdown(d)
+    assert "coverage unavailable" in md
+    assert "ghost-job" in md  # historical gap named even with zero coverage
+    tg = render_telegram_html(d)
+    assert "ghost-job" in tg
+
+
+def test_watchdog_refuses_green_on_empty_explicit_schedules(tmp_path, monkeypatch):
+    from quarterdeck.cli import app
+    from quarterdeck.ledger import Ledger
+
+    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "ledger"))
+    monkeypatch.setenv("QD_CONFIG_DIR", str(tmp_path / "conf"))
+    Ledger(tmp_path / "ledger").append("run_started", "R1", {"job": "demo"})
+    empty = tmp_path / "empty.yaml"
+    empty.write_text("")
+    r = CliRunner().invoke(app, ["watchdog", "--schedules", str(empty)])
+    assert r.exit_code == 2  # zero schedules can never verdict green
+    assert "refusing" in r.output
+
+
 def test_empty_schedules_is_no_coverage():
     now = datetime.now(UTC)
     events = _run_events("demo", "succeeded", now - timedelta(hours=1), "R1")

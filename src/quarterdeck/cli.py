@@ -251,6 +251,13 @@ def watchdog(
         except ValueError as exc:
             typer.echo(f"schedules config error: {exc}", err=True)
             raise typer.Exit(code=2) from None
+        if not schedules:
+            # Same guard as the loader branch: zero schedules can never verdict green.
+            typer.echo(
+                f"no supported schedules in {schedules_file} — refusing a green verdict",
+                err=True,
+            )
+            raise typer.Exit(code=2)
     else:
         from quarterdeck.bootstrap import load_effective_schedules
 
