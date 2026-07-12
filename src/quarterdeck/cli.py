@@ -137,5 +137,105 @@ def project() -> None:
     raise typer.Exit(code=0 if stats["pending_after"] == 0 else 1)
 
 
+adopt_app = typer.Typer(no_args_is_help=True)
+app.add_typer(adopt_app, name="adopt", help="Wrap launchd jobs (dry-run by default)")
+
+
+@adopt_app.command("scan")
+def adopt_scan(
+    dir: str = typer.Option(
+        str(__import__("pathlib").Path.home() / "Library" / "LaunchAgents"), "--dir"
+    ),
+) -> None:
+    """Read-only inventory of launchd plists: schedule, command, wrapped state."""
+    from pathlib import Path
+
+    from quarterdeck.adopt import scan
+
+    for e in scan(Path(dir)):
+        if "error" in e:
+            typer.echo(f"⚠️  {e['path']}: {e['error']}")
+            continue
+        sched = (
+            f"interval={e['expected_interval_seconds']}s"
+            if "expected_interval_seconds" in e
+            else f"calendar={e.get('calendar')}"
+        )
+        mark = "✅wrapped" if e["wrapped"] else "·"
+        typer.echo(f"{mark} {e['label']:<44} job={e['job']:<20} {sched}")
+
+
+@adopt_app.command("launchd")
+def adopt_launchd(
+    label: str,
+    dir: str = typer.Option(
+        str(__import__("pathlib").Path.home() / "Library" / "LaunchAgents"), "--dir"
+    ),
+    qd_bin: str = typer.Option("", "--qd-bin", help="Path to qd (default: current executable)"),
+    apply_: bool = typer.Option(False, "--apply", help="Actually write (default: dry-run diff)"),
+    rollback_: bool = typer.Option(False, "--rollback", help="Restore the .qd-bak backup"),
+) -> None:
+    """Wrap one launchd job. Without --apply this only prints the diff."""
+    import shutil
+    import sys
+    from pathlib import Path
+
+    from quarterdeck.adopt import apply, job_name_from_label, plan, rollback
+
+    plist = Path(dir) / f"{label}.plist"
+    if not plist.exists():
+        typer.echo(f"not found: {plist}", err=True)
+        raise typer.Exit(code=2)
+    if rollback_:
+        ok = rollback(plist)
+        typer.echo("rolled back from backup" if ok else "no backup found")
+        raise typer.Exit(code=0 if ok else 1)
+    qd = qd_bin or shutil.which("qd") or sys.argv[0]
+    planned = plan(plist, qd, job_name_from_label(label))
+    if planned is None:
+        typer.echo("already wrapped — nothing to do")
+        raise typer.Exit(code=0)
+    _old, new_bytes, diff = planned
+    typer.echo(diff)
+    if not apply_:
+        typer.echo("\n(dry-run — pass --apply to write; a .qd-bak backup will be kept)")
+        raise typer.Exit(code=0)
+    backup = apply(plist, new_bytes)
+    typer.echo(f"\nwritten. backup: {backup}")
+    typer.echo(f"reload manually:\n  launchctl unload {plist}\n  launchctl load {plist}")
+
+
+@app.command()
+def watchdog(
+    schedules_file: str = typer.Option("", "--schedules", help="YAML: jobs: [{job, expected_interval_seconds, grace_seconds}]"),
+    once: bool = typer.Option(True, "--once/--loop", help="Single check (loop mode lands with P2 soak)"),
+) -> None:
+    """Detect missed runs from the ledger against expected schedules."""
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    import yaml
+
+    from quarterdeck.config import CONFIG_DIR, Settings
+    from quarterdeck.ledger import Ledger
+    from quarterdeck.notify import alert
+    from quarterdeck.watchdog import check
+
+    path = Path(schedules_file) if schedules_file else CONFIG_DIR / "schedules.yaml"
+    if not path.exists():
+        typer.echo(f"no schedules file at {path}", err=True)
+        raise typer.Exit(code=2)
+    schedules = yaml.safe_load(path.read_text()).get("jobs", [])
+    settings = Settings()
+    missed = check(schedules, Ledger(settings.ledger_dir).read_all(), datetime.now(UTC))
+    for m in missed:
+        detail = f" overdue={m['overdue_seconds']}s" if "overdue_seconds" in m else ""
+        alert(f"missed run: job={m['job']} reason={m['reason']}{detail}")
+        typer.echo(f"❌ {m['job']}: {m['reason']}{detail}")
+    if not missed:
+        typer.echo(f"✅ all {len(schedules)} scheduled jobs within expectations")
+    raise typer.Exit(code=1 if missed else 0)
+
+
 if __name__ == "__main__":
     app()
