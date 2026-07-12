@@ -321,6 +321,7 @@ def digest(
     settings = Settings()
     events = Ledger(settings.ledger_dir).read_all()
     missed: list = []
+    coverage = False
     sched_path = Path(schedules_file) if schedules_file else config_dir() / "schedules.yaml"
     if sched_path.exists():
         import yaml
@@ -329,16 +330,22 @@ def digest(
 
         schedules = yaml.safe_load(sched_path.read_text()).get("jobs", [])
         missed = check(schedules, events, datetime.now(UTC))
-    report = render_markdown(build_digest(events, datetime.now(UTC), hours=hours, missed=missed))
-    typer.echo(report)
+        coverage = True
+    d = build_digest(
+        events, datetime.now(UTC), hours=hours, missed=missed, watchdog_coverage=coverage
+    )
+    typer.echo(render_markdown(d))
     if telegram:
+        from quarterdeck.digest import render_telegram_html
         from quarterdeck.notify.telegram import send_telegram
 
-        if send_telegram(report, settings):
+        if send_telegram(render_telegram_html(d), settings, parse_mode="HTML"):
             typer.echo("\n(sent to Telegram)", err=True)
         else:
             typer.echo("\n(telegram not configured or send failed)", err=True)
             raise typer.Exit(code=1)
+    # Health is the exit code: unhealthy (problems / missed / no coverage) => non-zero.
+    raise typer.Exit(code=0 if d["healthy"] else 1)
 
 
 @app.command()
