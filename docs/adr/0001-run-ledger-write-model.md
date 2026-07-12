@@ -75,8 +75,12 @@ A single projector (exclusive `flock` lease file) drains unacked events in **com
 
   plus a human-visible `qd:event:<ULID>` trailer in the body. Reconciliation lists recent
   comments and matches the metadata row first, body marker as fallback.
-- **work-product**: `externalId = <event ULID>` (native; server-side uniqueness to be verified
-  in P2 — until proven, same list-and-reconcile path applies).
+- **work-product**: `externalId = <event ULID>` — **verified on the pinned v2026.707
+  source: plain index, NO unique constraint; creation is an unconditional insert.**
+  `externalId` is therefore a reconciliation marker, never a server-side idempotency
+  key; the list-and-reconcile path is mandatory, same as comments. `createdByRunId`
+  only references Paperclip's own heartbeat runs — Quarterdeck ULIDs cannot join
+  native lineage; lineage lives in `metadata` and the local ledger.
 - **cost-event**: posted under a dedicated service agent (`quarterdeck`, created once per
   company — satisfies the mandatory `agentId`); `billingCode = qd:<event ULID>` is a
   **reconciliation marker, not a remote key** — the GET endpoint has zero filter params

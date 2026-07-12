@@ -90,12 +90,15 @@ A thin layer that refuses to thin itself becomes the thing it replaced.
 
 **The wheel test** — every proposed module must first answer: does Paperclip, Claude
 Code, or launchd already do this? Applied consequences: the gate (P3) builds no policy
-engine (Claude Code's native permission pipeline handles static allow/deny/ask; we add
-only the remote-human decision channel and the ledger record); artifacts (P4) build no
-database (hashes ride on Paperclip work-products via `externalId`; the outbox gains one
-event kind); vertical-case agents (P5) run natively as Paperclip agents/routines.
-Scheduling stays with launchd; approvals storage stays with Paperclip; sessions stay
-with the agent CLIs.
+engine and no in-hook waiting (Claude Code's native permission pipeline handles static
+allow/deny/ask; its `permissionDecision: "defer"` handles the pending-decision
+lifecycle — we add only the defer→Paperclip-approval→resume bridge and the ledger
+record); artifacts (P4) build no database (authority = one ledger event kind; the
+projection rides Paperclip work-products with reconciliation, since `externalId` has
+no unique constraint upstream); vertical-case agents (P5) run natively as Paperclip
+agents/routines. Scheduling stays with launchd (launchd intervals are elapsed-time,
+cron is calendar-aligned — they are not translatable); approvals storage stays with
+Paperclip; sessions stay with the agent CLIs.
 
 ## Entry doctrine: the platform doesn't fight for the door; the product must BE the door
 
@@ -136,9 +139,14 @@ users still never see Quarterdeck itself — they see the workbench it makes tru
 | bootstrap (candidates, two-file model) | `src/quarterdeck/bootstrap.py` | ✅ P2 |
 | adopt (dry-run plist wrapping) | `src/quarterdeck/adopt.py` | ✅ P2 (`--apply` gated on install) |
 | MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ P2 |
-| gate (PreToolUse approval bridge) | — | P3 |
-| artifacts (sha256 ledger, lineage) | — | P4 |
+| gate (PreToolUse `defer` → Paperclip approval → resume) | — | P3 |
+| artifacts (ledger events + content-addressed projection) | — | P4 |
 | vertical case packs | separate private repo | P5 |
+
+Status column tracks code + tests in this repo. The authoritative release-gate record
+is [READINESS.md](READINESS.md) — **where the two disagree, READINESS wins.** Known
+honest gap: the interim signal fallback (`9f62656`) is live on the main execution path
+while its deterministic rework is tracked.
 
 Related: [P0 validation](P0-VALIDATION.md) · [readiness gates](READINESS.md) ·
 [install runbook (NO-GO until gates close)](INSTALL-PAPERCLIP.md) ·

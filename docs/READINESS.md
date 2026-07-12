@@ -111,3 +111,37 @@ event, provenance, and rollback. Permission relaxation remains proposal-only.
 
 Implement digest coverage-final only. Keep installation and real plist/config writes disabled.
 After that, implement bootstrap v2 as a separate, reviewable commit.
+
+---
+
+## Update 2026-07-12 (through f32ac92)
+
+Landed since the `bc52f96` baseline above (each commit reviewed in-loop):
+
+- `9dba684` projector per-job fail-stop ordering; faithful signal exit semantics
+- `6297d6e` adopt dry-run doctrine + watchdog missed-run detection
+- `36829d6` fail-closed watchdog for unsupported schedules; atomic plist writes; qd-path/collision gates
+- `affe16a` crash-safe backup publish; real config layering (env > secrets > config > defaults)
+- `ce8fb89`→`0e3f0f9`→`592f2b6` bootstrap v1→v2→v2.1: candidates-only discovery, full-label
+  canonical IDs (immutable under later collisions), strict user-config schema, fsutil gaps
+- `bc52f96`→`c42a6f2`→`716c062` digest hardening → coverage-final → coverage v3:
+  structured coverage (active-only, full-ledger universe, retired excuse path),
+  three-state job marks, unified legacy-schedules validation
+- `84a90a4` MCP console surface (6 tools, stdio handshake smoke)
+- `1c5b0e6` evidence-based digest + Telegram HTML renderer
+- Suite at 79 tests; ruff/mypy/gitleaks green at every commit above.
+
+### Open (unchanged verdicts)
+
+1. **Signal fallback (`9f62656`) is live on the main path** while its deterministic
+   rework is tracked: pgrep returncode unchecked (restricted envs return 3), per-level
+   5s blocking in a signal handler, PID-reuse race. Not a digest gate; own workstream.
+2. **P3 design pivoted to `defer`** (native `permissionDecision: "defer"` confirmed in
+   the hooks reference; detailed save/resume semantics + minimum Claude Code version to
+   be pinned by the P3 spike; long-poll hook demoted to fallback design).
+3. **P4 idempotency corrected**: `externalId` has no unique constraint upstream
+   (verified against pinned v2026.707 source) — projection is list-and-reconcile;
+   artifact content must be content-addressed (attachment/immutable blob), never a
+   mutable local path reference alone.
+4. **INSTALL remains NO-GO**: launchd service templates, stable Node/qd absolute paths,
+   npm prefix handling, secrets handling, isolated restore drill — unchanged.
