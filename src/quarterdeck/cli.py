@@ -270,5 +270,16 @@ def watchdog(
     raise typer.Exit(code=1 if missed else 0)
 
 
+@app.command()
+def mcp() -> None:
+    """Serve the Quarterdeck MCP console over stdio (for AionUi or any MCP client)."""
+    try:
+        from quarterdeck.mcp_server import build_server
+    except ImportError:
+        typer.echo("mcp extra not installed — pip install 'quarterdeck[mcp]'", err=True)
+        raise typer.Exit(code=2) from None
+    build_server().run()
+
+
 if __name__ == "__main__":
     app()
