@@ -150,9 +150,11 @@ def adopt_scan(
     """Read-only inventory of launchd plists: schedule, command, wrapped state."""
     from pathlib import Path
 
-    from quarterdeck.adopt import scan
+    from quarterdeck.adopt import collisions, scan
 
-    for e in scan(Path(dir)):
+    entries = scan(Path(dir))
+    dup = collisions(entries)
+    for e in entries:
         if "error" in e:
             typer.echo(f"⚠️  {e['path']}: {e['error']}")
             continue
@@ -162,7 +164,10 @@ def adopt_scan(
             else f"calendar={e.get('calendar')}"
         )
         mark = "✅wrapped" if e["wrapped"] else "·"
-        typer.echo(f"{mark} {e['label']:<44} job={e['job']:<20} {sched}")
+        dup_mark = " ⚠️dup-job" if e["job"] in dup else ""
+        typer.echo(f"{mark} {e['label']:<44} job={e['job']:<20} {sched}{dup_mark}")
+    if dup:
+        typer.echo(f"\n⚠️ job-name collisions (adopt requires explicit --job): {dup}")
 
 
 @adopt_app.command("launchd")
@@ -171,16 +176,23 @@ def adopt_launchd(
     dir: str = typer.Option(
         str(__import__("pathlib").Path.home() / "Library" / "LaunchAgents"), "--dir"
     ),
-    qd_bin: str = typer.Option("", "--qd-bin", help="Path to qd (default: current executable)"),
+    qd_bin: str = typer.Option("", "--qd-bin", help="Path to qd (must resolve to absolute)"),
+    job_override: str = typer.Option("", "--job", help="Explicit job name (required on collision)"),
     apply_: bool = typer.Option(False, "--apply", help="Actually write (default: dry-run diff)"),
     rollback_: bool = typer.Option(False, "--rollback", help="Restore the .qd-bak backup"),
 ) -> None:
     """Wrap one launchd job. Without --apply this only prints the diff."""
-    import shutil
-    import sys
     from pathlib import Path
 
-    from quarterdeck.adopt import apply, job_name_from_label, plan, rollback
+    from quarterdeck.adopt import (
+        apply,
+        collisions,
+        job_name_from_label,
+        plan,
+        resolve_qd_bin,
+        rollback,
+        scan,
+    )
 
     plist = Path(dir) / f"{label}.plist"
     if not plist.exists():
@@ -190,8 +202,22 @@ def adopt_launchd(
         ok = rollback(plist)
         typer.echo("rolled back from backup" if ok else "no backup found")
         raise typer.Exit(code=0 if ok else 1)
-    qd = qd_bin or shutil.which("qd") or sys.argv[0]
-    planned = plan(plist, qd, job_name_from_label(label))
+    job = job_override or job_name_from_label(label)
+    if not job_override:
+        dup = collisions(scan(Path(dir)))
+        if job in dup:
+            typer.echo(
+                f"job name '{job}' is claimed by multiple labels: {dup[job]} — "
+                f"pass an explicit --job (e.g. --job {label})",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+    try:
+        qd = resolve_qd_bin(qd_bin)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+    planned = plan(plist, qd, job)
     if planned is None:
         typer.echo("already wrapped — nothing to do")
         raise typer.Exit(code=0)
@@ -221,6 +247,13 @@ def watchdog(
     from quarterdeck.notify import alert
     from quarterdeck.watchdog import check
 
+    if not once:
+        typer.echo(
+            "watchdog --loop is not implemented yet (lands with the P2 soak); "
+            "schedule `qd watchdog --once` via launchd/cron instead",
+            err=True,
+        )
+        raise typer.Exit(code=2)
     path = Path(schedules_file) if schedules_file else CONFIG_DIR / "schedules.yaml"
     if not path.exists():
         typer.echo(f"no schedules file at {path}", err=True)

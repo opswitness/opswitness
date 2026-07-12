@@ -39,7 +39,15 @@ def check(
         job = sched["job"]
         interval = sched.get("expected_interval_seconds")
         if interval is None:
-            continue  # calendar jobs: not yet supported
+            # Fail closed: an unmonitorable schedule must never render a green light.
+            missed.append(
+                {
+                    "job": job,
+                    "reason": "unsupported",
+                    "note": "calendar/cron schedules not supported yet — no coverage",
+                }
+            )
+            continue
         grace = sched.get("grace_seconds", 300)
         last = seen.get(job)
         if last is None:

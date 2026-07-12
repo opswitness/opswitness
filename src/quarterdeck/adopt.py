@@ -6,8 +6,10 @@ restores it byte-identically. launchctl reload is printed, never executed.
 """
 
 import difflib
+import os
 import plistlib
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +18,50 @@ BACKUP_SUFFIX = ".qd-bak"
 
 def job_name_from_label(label: str) -> str:
     return label.rsplit(".", 1)[-1]
+
+
+def resolve_qd_bin(explicit: str = "") -> str:
+    """Resolve qd to a verified absolute executable — launchd has no cwd/PATH to lean on."""
+    candidate = explicit or shutil.which("qd") or sys.argv[0]
+    p = Path(candidate).expanduser()
+    if not p.is_absolute():
+        p = p.resolve()
+    if not (p.is_file() and os.access(p, os.X_OK)):
+        raise ValueError(
+            f"cannot resolve qd to an absolute executable (got {candidate!r}); "
+            f"pass --qd-bin /abs/path/to/qd"
+        )
+    return str(p)
+
+
+def collisions(entries: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """Short job names claimed by more than one label — adoption must fail closed on these."""
+    by_job: dict[str, list[str]] = {}
+    for e in entries:
+        if "job" in e and "label" in e:
+            by_job.setdefault(e["job"], []).append(e["label"])
+    return {job: labels for job, labels in by_job.items() if len(labels) > 1}
+
+
+def _fsync_dir(dir_path: Path) -> None:
+    fd = os.open(dir_path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _atomic_write(path: Path, data: bytes) -> None:
+    """Same-dir temp + fsync + os.replace + dir fsync — no torn plists, ever."""
+    tmp = path.parent / f".{path.name}.qd-tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+    try:
+        os.write(fd, data)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(tmp, path)
+    _fsync_dir(path.parent)
 
 
 def _load(plist_path: Path) -> dict[str, Any]:
@@ -86,11 +132,24 @@ def plan(plist_path: Path, qd_bin: str, job: str) -> tuple[bytes, bytes, str] | 
 
 
 def apply(plist_path: Path, new_bytes: bytes) -> Path:
-    """Write the wrapped plist, preserving the pristine backup. Caller reloads launchd."""
+    """Atomically write the wrapped plist, preserving the pristine backup.
+
+    Backup uses exclusive create (first backup wins — it always holds the
+    pre-Quarterdeck original); the plist write is temp+fsync+rename. Caller
+    reloads launchd.
+    """
     backup = plist_path.with_suffix(plist_path.suffix + BACKUP_SUFFIX)
-    if not backup.exists():  # first backup wins: always the pre-Quarterdeck original
-        shutil.copy2(plist_path, backup)
-    plist_path.write_bytes(new_bytes)
+    pristine = plist_path.read_bytes()
+    try:
+        fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        try:
+            os.write(fd, pristine)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except FileExistsError:
+        pass  # first backup wins
+    _atomic_write(plist_path, new_bytes)
     return backup
 
 
@@ -98,5 +157,5 @@ def rollback(plist_path: Path) -> bool:
     backup = plist_path.with_suffix(plist_path.suffix + BACKUP_SUFFIX)
     if not backup.exists():
         return False
-    plist_path.write_bytes(backup.read_bytes())
+    _atomic_write(plist_path, backup.read_bytes())
     return True

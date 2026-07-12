@@ -66,20 +66,84 @@ def _event(job: str, ts: datetime) -> dict:
     return {"kind": "run_started", "ts": ts.isoformat(), "payload": {"job": job}}
 
 
-def test_watchdog_detects_overdue_and_never_run():
+def test_watchdog_detects_overdue_never_run_and_unsupported():
     now = datetime.now(UTC)
     schedules = [
         {"job": "fresh", "expected_interval_seconds": 1500, "grace_seconds": 300},
         {"job": "stale", "expected_interval_seconds": 1500, "grace_seconds": 300},
         {"job": "ghost", "expected_interval_seconds": 1500},
         {"job": "disabled", "expected_interval_seconds": 60, "enabled": False},
+        {"job": "calendar-job"},  # no interval: must fail closed, never a green light
     ]
     events = [
         _event("fresh", now - timedelta(seconds=600)),
         _event("stale", now - timedelta(seconds=4000)),
+        _event("calendar-job", now),
     ]
     missed = check(schedules, events, now)
     by_job = {m["job"]: m for m in missed}
-    assert set(by_job) == {"stale", "ghost"}
+    assert set(by_job) == {"stale", "ghost", "calendar-job"}
     assert by_job["stale"]["reason"] == "overdue" and by_job["stale"]["overdue_seconds"] > 0
     assert by_job["ghost"]["reason"] == "never-run"
+    assert by_job["calendar-job"]["reason"] == "unsupported"
+
+
+def test_watchdog_loop_mode_is_refused(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from quarterdeck.cli import app
+
+    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "ledger"))
+    result = CliRunner().invoke(app, ["watchdog", "--loop"])
+    assert result.exit_code == 2
+
+
+def test_resolve_qd_bin_requires_absolute_executable(tmp_path):
+    import pytest
+
+    from quarterdeck.adopt import resolve_qd_bin
+
+    with pytest.raises(ValueError):
+        resolve_qd_bin(str(tmp_path / "does-not-exist"))
+    fake = tmp_path / "qd"
+    fake.write_text("#!/bin/sh\n")
+    fake.chmod(0o755)
+    assert resolve_qd_bin(str(fake)) == str(fake)
+
+
+def test_job_name_collision_fails_closed(tmp_path):
+    from typer.testing import CliRunner
+
+    from quarterdeck.adopt import collisions, scan
+    from quarterdeck.cli import app
+
+    _write_plist(tmp_path, "com.a.gateway")
+    _write_plist(tmp_path, "com.b.gateway")
+    dup = collisions(scan(tmp_path))
+    assert dup == {"gateway": ["com.a.gateway", "com.b.gateway"]}
+
+    fake_qd = tmp_path / "qd"
+    fake_qd.write_text("#!/bin/sh\n")
+    fake_qd.chmod(0o755)
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        ["adopt", "launchd", "com.a.gateway", "--dir", str(tmp_path), "--qd-bin", str(fake_qd)],
+    )
+    assert r.exit_code == 2  # collision without explicit --job: refuse
+    r2 = runner.invoke(
+        app,
+        [
+            "adopt", "launchd", "com.a.gateway", "--dir", str(tmp_path),
+            "--qd-bin", str(fake_qd), "--job", "com.a.gateway",
+        ],
+    )
+    assert r2.exit_code == 0 and "dry-run" in r2.output  # explicit job name proceeds
+
+
+def test_apply_leaves_no_temp_file(tmp_path):
+    p = _write_plist(tmp_path, "com.t.atomic")
+    planned = plan(p, "/opt/qd", "atomic")
+    assert planned is not None
+    apply(p, planned[1])
+    assert not list(tmp_path.glob(".*.qd-tmp"))  # atomic rename completed, no debris
