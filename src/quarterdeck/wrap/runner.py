@@ -107,12 +107,20 @@ def run_wrapped(job: str, argv: list[str], settings: Settings | None = None) -> 
     for sig, handler in old_handlers.items():
         signal.signal(sig, handler)
 
+    if exit_code == 0:
+        status = "succeeded"
+    elif exit_code < 0:
+        status = "killed"  # died by signal; CLI re-raises the same signal after ledgering
+    else:
+        status = "failed"
     finish_payload: dict[str, Any] = {
         "job": job,
         "exit_code": exit_code,
-        "status": "succeeded" if exit_code == 0 else "failed",
+        "status": status,
         "duration_s": round(time.monotonic() - started_at, 3),
     }
+    if exit_code < 0:
+        finish_payload["signal"] = -exit_code
     if settings.capture_log_tail:
         tail = _ring_tail(ring, settings.log_tail_bytes)
         finish_payload["log_tail"] = redact_text(tail) if settings.redact else tail

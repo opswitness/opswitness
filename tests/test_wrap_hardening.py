@@ -56,6 +56,14 @@ def test_log_tail_redacted_and_optional(tmp_path):
     assert "log_tail" not in fin2
 
 
+def test_child_killed_by_signal_recorded_as_killed(tmp_path):
+    s = _settings(tmp_path)
+    code = run_wrapped("demo", ["sh", "-c", "kill -TERM $$"], s)
+    assert code == -signal.SIGTERM  # raw wait() semantics preserved by the library layer
+    fin = Ledger(s.ledger_dir).read_all()[-1]["payload"]
+    assert fin["status"] == "killed" and fin["signal"] == signal.SIGTERM
+
+
 def test_sigterm_kills_whole_process_tree(tmp_path):
     marker = "987654321"
     env = dict(os.environ, QD_LEDGER_DIR=str(tmp_path / "ledger"))
@@ -88,6 +96,9 @@ def test_sigterm_kills_whole_process_tree(tmp_path):
 
     wrapper.send_signal(signal.SIGTERM)
     wrapper.wait(timeout=10)
+    # Exit semantics mirror the death: the wrapper itself dies by SIGTERM,
+    # not by a synthetic positive exit code.
+    assert wrapper.returncode == -signal.SIGTERM, wrapper.returncode
 
     deadline = time.time() + 5
     while time.time() < deadline:

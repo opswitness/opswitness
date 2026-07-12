@@ -86,7 +86,8 @@ def test_paperclip_down_leaves_events_pending(tmp_path):
     respx.get(f"{BASE}/api/companies/c1/issues").mock(return_value=Response(500, text="boom"))
 
     stats = Projector(led, _client(), tmp_path / "lease").drain()
-    assert stats["projected"] == 0 and stats["skipped_errors"] == 2
+    assert stats["projected"] == 0
+    assert stats["skipped_errors"] == 1 and stats["blocked"] == 1  # fail-stop per job
     assert stats["pending_after"] == 2
     assert all(e["kind"] != "projection_ack" for e in led.read_all())
 

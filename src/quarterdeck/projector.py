@@ -103,7 +103,13 @@ class Projector:
 
     def drain(self) -> dict[str, int]:
         """Project all unacked events in commit order. Returns counters."""
-        stats = {"projected": 0, "reconciled": 0, "skipped_errors": 0, "pending_after": 0}
+        stats = {
+            "projected": 0,
+            "reconciled": 0,
+            "skipped_errors": 0,
+            "blocked": 0,
+            "pending_after": 0,
+        }
         self.lease_path.parent.mkdir(parents=True, exist_ok=True)
         lease_fd = os.open(self.lease_path, os.O_CREAT | os.O_WRONLY, 0o600)
         try:
@@ -114,8 +120,15 @@ class Projector:
                 return stats
 
             events = self.ledger.read_all()
+            blocked_jobs: set[str] = set()
             for event in pending_events(events):
                 job = event["payload"].get("job", "unknown")
+                if job in blocked_jobs:
+                    # Fail-stop per job: an earlier event for this job failed this drain.
+                    # Projecting later events now would invert commit order remotely
+                    # (e.g. run_finished before run_started). Frozen until next drain.
+                    stats["blocked"] += 1
+                    continue
                 try:
                     issue_id = self._issue_for(job)
                     if event["event_id"] in self._remote_event_ids(issue_id):
@@ -131,7 +144,8 @@ class Projector:
                     stats["projected"] += 1
                 except PaperclipError:
                     stats["skipped_errors"] += 1
-                    # Leave unacked: replayed on next drain.
+                    blocked_jobs.add(job)
+                    # Leave unacked: replayed in commit order on the next drain.
             stats["pending_after"] = len(pending_events(self.ledger.read_all()))
             return stats
         finally:

@@ -39,7 +39,22 @@ def wrap(
     if not argv:
         typer.echo("qd wrap: no command given (usage: qd wrap --job NAME -- cmd ...)", err=True)
         raise typer.Exit(code=2)
-    raise typer.Exit(code=run_wrapped(job, argv))
+    code = run_wrapped(job, argv)
+    if code < 0:
+        # Child died by a signal. The ledger is already fsync'd — mirror the death
+        # faithfully by re-raising the same signal on ourselves so launchd/cron see
+        # "killed by signal", not a synthetic exit code.
+        import os as _os
+        import signal as _signal
+
+        sig = -code
+        try:
+            _signal.signal(sig, _signal.SIG_DFL)
+            _os.kill(_os.getpid(), sig)
+        except (OSError, ValueError):
+            pass
+        raise typer.Exit(code=128 + sig)  # fallback if the signal did not terminate us
+    raise typer.Exit(code=code)
 
 
 def _index_db(settings: "Settings"):
