@@ -272,6 +272,39 @@ def watchdog(
 
 
 @app.command()
+def init(
+    launchagents: str = typer.Option(
+        str(__import__("pathlib").Path.home() / "Library" / "LaunchAgents"), "--launchagents"
+    ),
+) -> None:
+    """Zero-config bootstrap: detect the fleet, generate config + schedules (merge, never clobber)."""
+    from pathlib import Path
+
+    from quarterdeck.bootstrap import init_workspace
+    from quarterdeck.config import config_dir
+
+    summary = init_workspace(config_dir(), Path(launchagents))
+    for path in summary["created"]:
+        typer.echo(f"created: {path}")
+    for path in summary["merged"]:
+        typer.echo(f"merged:  {path} (your edits preserved)")
+    s = summary["stats"]
+    typer.echo(
+        f"fleet: {s.get('discovered', 0)} jobs discovered, {s.get('added', 0)} added, "
+        f"{s.get('kept', 0)} kept, {s.get('calendar_unsupported', 0)} calendar (fail-closed)"
+    )
+    typer.echo(
+        "\nready to use:\n"
+        "  qd wrap --job NAME -- <cmd>   # works now, zero further config\n"
+        "  qd status / qd runs / qd digest\n"
+        "  qd watchdog --once            # uses the generated schedules.yaml\n"
+        "next (each needs your explicit approval):\n"
+        "  qd adopt launchd <label>      # dry-run diff; --apply to wrap a real job\n"
+        "  docs/INSTALL-PAPERCLIP.md     # governance UI + approvals layer"
+    )
+
+
+@app.command()
 def digest(
     hours: int = typer.Option(24, "--hours", help="Report window"),
     telegram: bool = typer.Option(False, "--telegram", help="Also push to Telegram (secrets.yaml)"),
