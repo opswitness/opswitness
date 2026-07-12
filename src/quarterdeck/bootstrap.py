@@ -50,6 +50,51 @@ class UserSchedulesConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enroll: list[str] = []
     overrides: dict[str, ScheduleOverride] = {}
+    # The ONLY audited way to excuse a ledger-known job from coverage accounting:
+    retired: list[str] = []
+
+
+class LegacyScheduleEntry(BaseModel):
+    """Strict schema for explicit --schedules files ({jobs: [...]})."""
+
+    model_config = ConfigDict(extra="forbid")
+    job: str
+    label: str | None = None
+    display_name: str | None = None
+    expected_interval_seconds: int | None = Field(default=None, gt=0)
+    grace_seconds: int = Field(default=300, gt=0)
+    enabled: bool = True
+    note: str | None = None
+    source: str | None = None
+
+
+class LegacySchedulesFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    jobs: list[LegacyScheduleEntry] = []
+    retired: list[str] = []
+
+
+def load_legacy_schedules(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
+    """Unified validator for explicit --schedules files. Empty file = valid-empty
+    (=> no coverage downstream); every malformation raises ValueError loudly."""
+    if not path.exists():
+        raise ValueError(f"{path}: schedules file not found")
+    try:
+        raw = yaml.safe_load(path.read_text())
+    except yaml.YAMLError as exc:
+        raise ValueError(f"{path}: invalid YAML — {exc}") from exc
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: expected a mapping at top level")
+    try:
+        parsed = LegacySchedulesFile.model_validate(raw)
+    except ValidationError as exc:
+        raise ValueError(f"{path}: schema violation — {exc}") from exc
+    return (
+        [e.model_dump(exclude_none=True) for e in parsed.jobs],
+        list(parsed.retired),
+    )
 
 GENERATED_NAME = "schedules.generated.yaml"
 USER_NAME = "schedules.yaml"
@@ -238,6 +283,8 @@ def load_effective_schedules(config_dir: Path) -> dict[str, Any]:
         "candidates": 0,
         "services": 0,
         "unknown_enroll_patterns": [],
+        "disabled_jobs": [],
+        "retired": list(user.retired),
     }
     matched_patterns: set[str] = set()
     for entry in generated.get("entries", []):
@@ -253,6 +300,7 @@ def load_effective_schedules(config_dir: Path) -> dict[str, Any]:
         override = overrides.get(label)
         if override and override.enabled is False:
             meta["disabled"] = meta.get("disabled", 0) + 1
+            meta["disabled_jobs"].append(entry.get("job", label))
             continue
         if not enrolled:
             meta["candidates"] += 1

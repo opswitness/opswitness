@@ -57,23 +57,55 @@ def build_coverage(
     observed_jobs: set[str],
     schedules: list[dict[str, Any]] | None,
     error: str | None = None,
+    retired: list[str] | None = None,
+    extra_disabled: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Structured coverage verdict. A schedules file that covers one job must never
-    paint an otherwise uncovered fleet green."""
-    covered = sorted({str(s["job"]) for s in (schedules or []) if s.get("job")})
-    uncovered = sorted(observed_jobs - set(covered))
-    if error:
+    """Structured coverage verdict.
+
+    Rules (review-hardened, twice):
+    - only ACTIVE schedules count as covering (enabled, interval-supported);
+      a disabled or calendar/unsupported entry is registered, not covered;
+    - the coverage universe is EVERY job the ledger has ever seen — the report
+      window scopes performance stats, never the universe (a stray that ran
+      48h ago is still a stray today);
+    - the only audited way to excuse a known job is `retired:` in the user config.
+    """
+    retired_set = {str(r) for r in (retired or [])}
+    active: set[str] = set()
+    disabled: set[str] = {str(j) for j in (extra_disabled or [])}
+    unsupported: set[str] = set()
+    for s in schedules or []:
+        job = s.get("job")
+        if not job:
+            continue
+        job = str(job)
+        if s.get("enabled", True) is False:
+            disabled.add(job)
+        elif s.get("expected_interval_seconds") is None:
+            unsupported.add(job)
+        else:
+            active.add(job)
+
+    not_covered = observed_jobs - active - retired_set
+    observed_disabled = sorted(not_covered & disabled)
+    observed_unsupported = sorted(not_covered & unsupported)
+    observed_unregistered = sorted(not_covered - disabled - unsupported)
+
+    if error or not active:
         status = "none"
-    elif not covered:
-        status = "none"
-    elif uncovered:
+    elif not_covered:
         status = "partial"
     else:
         status = "full"
     return {
         "status": status,
-        "covered_jobs": covered,
-        "observed_uncovered": uncovered,
+        "active_covered": sorted(active),
+        "disabled": sorted(disabled),
+        "unsupported": sorted(unsupported),
+        "retired": sorted(retired_set),
+        "observed_unregistered": observed_unregistered,
+        "observed_disabled": observed_disabled,
+        "observed_unsupported": observed_unsupported,
         "error": error,
     }
 
@@ -85,9 +117,14 @@ def build_digest(
     missed: list[dict[str, Any]] | None = None,
     schedules: list[dict[str, Any]] | None = None,
     coverage_error: str | None = None,
+    retired: list[str] | None = None,
+    extra_disabled: list[str] | None = None,
 ) -> dict[str, Any]:
     cutoff = now - timedelta(hours=hours)
-    runs = [r for r in _collect_runs(events).values() if _in_window(r, cutoff)]
+    all_runs = _collect_runs(events)
+    runs = [r for r in all_runs.values() if _in_window(r, cutoff)]
+    # Coverage universe: every job the ledger has EVER seen, not just this window.
+    observed_all = {r["job"] for r in all_runs.values()}
 
     jobs: dict[str, dict[str, int]] = {}
     for run in runs:
@@ -110,7 +147,9 @@ def build_digest(
         if run["status"] in TERMINAL_BAD or run.get("degraded")
     ]
     missed = missed or []
-    coverage = build_coverage({run["job"] for run in runs}, schedules, coverage_error)
+    coverage = build_coverage(
+        observed_all, schedules, coverage_error, retired=retired, extra_disabled=extra_disabled
+    )
     healthy = coverage["status"] == "full" and not problems and not missed
     return {
         "window_hours": hours,
@@ -160,16 +199,19 @@ def render_markdown(d: dict[str, Any]) -> str:
         f"总运行 {d['total_runs']} 次 · 问题 {len(d['problems'])} 个 · "
         f"投影积压 {d['projection_backlog']} · watchdog 覆盖：{_COVERAGE_ZH[cov['status']]}",
     ]
+    lines[-1] += (
+        f"（活跃 {len(cov['active_covered'])} · 停用 {len(cov['disabled'])} · "
+        f"不支持 {len(cov['unsupported'])} · 退役 {len(cov['retired'])}）"
+    )
     if cov["status"] == "full":
         lines[-1] += f" · 漏跑 {len(d['missed'])} 个"
     elif cov["status"] == "partial":
-        lines += [
-            "",
-            "⚠️ **watchdog 覆盖不完整** — 以下任务有运行记录但未纳管（不在任何 schedule 内）：",
-            *[f"- `{job}`" for job in cov["observed_uncovered"]],
-        ]
+        lines += ["", "⚠️ **watchdog 覆盖不完整** — 账本已知但无活跃监控的任务："]
+        lines += [f"- `{job}`（未登记）" for job in cov["observed_unregistered"]]
+        lines += [f"- `{job}`（已登记但停用）" for job in cov["observed_disabled"]]
+        lines += [f"- `{job}`（已登记但 watchdog 不支持）" for job in cov["observed_unsupported"]]
     else:
-        reason = cov["error"] or "无已纳管的 schedules（缺失/为空）"
+        reason = cov["error"] or "无活跃监控的 schedules（缺失/为空/全部停用或不支持）"
         lines += ["", f"⚠️ **watchdog coverage unavailable** — {reason}；漏跑无从判定（这不是 0）"]
     lines += ["", "## 各任务表现（execution evidence）"]
     for job, s in sorted(d["jobs"].items()):
@@ -220,12 +262,16 @@ def render_telegram_html(d: dict[str, Any]) -> str:
         + (f" · 漏跑 {len(d['missed'])}" if cov["status"] == "full" else ""),
     ]
     if cov["status"] == "partial":
+        gaps = (
+            cov["observed_unregistered"] + cov["observed_disabled"] + cov["observed_unsupported"]
+        )
         parts.append(
-            "⚠️ <b>覆盖不完整</b> — 未纳管却有运行：\n"
-            + "\n".join(code(j) for j in cov["observed_uncovered"])
+            "⚠️ <b>覆盖不完整</b> — 账本已知但无活跃监控：\n" + "\n".join(code(j) for j in gaps)
         )
     elif cov["status"] == "none":
-        parts.append("⚠️ <b>watchdog coverage unavailable</b>（无已纳管 schedules，漏跑无从判定）")
+        parts.append(
+            "⚠️ <b>watchdog coverage unavailable</b>（无活跃监控的 schedules，漏跑无从判定）"
+        )
     job_lines = []
     for job, s in sorted(d["jobs"].items()):
         mark = _STATE_MARK[_job_state(s)]

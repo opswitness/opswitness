@@ -168,7 +168,9 @@ def adopt_scan(
         dup_mark = " ⚠️dup-job" if e["job"] in dup else ""
         typer.echo(f"{mark} {e['label']:<44} job={e['job']:<20} {sched}{dup_mark}")
     if dup:
-        typer.echo(f"\n⚠️ job-name collisions (adopt requires explicit --job): {dup}")
+        typer.echo(
+            f"\n⚠️ display-name collisions (IDs stay unique — canonical ID is the full label): {dup}"
+        )
 
 
 @adopt_app.command("launchd")
@@ -228,7 +230,6 @@ def watchdog(
     from datetime import UTC, datetime
     from pathlib import Path
 
-    import yaml
 
     from quarterdeck.config import Settings, config_dir
     from quarterdeck.ledger import Ledger
@@ -242,12 +243,14 @@ def watchdog(
             err=True,
         )
         raise typer.Exit(code=2)
-    if schedules_file:  # explicit legacy file: {jobs: [...]}
-        path = Path(schedules_file)
-        if not path.exists():
-            typer.echo(f"no schedules file at {path}", err=True)
-            raise typer.Exit(code=2)
-        schedules = yaml.safe_load(path.read_text()).get("jobs", [])
+    if schedules_file:  # explicit legacy file: {jobs: [...]} — unified strict validation
+        from quarterdeck.bootstrap import load_legacy_schedules
+
+        try:
+            schedules, _retired = load_legacy_schedules(Path(schedules_file))
+        except ValueError as exc:
+            typer.echo(f"schedules config error: {exc}", err=True)
+            raise typer.Exit(code=2) from None
     else:
         from quarterdeck.bootstrap import load_effective_schedules
 
@@ -347,22 +350,26 @@ def digest(
     events = Ledger(settings.ledger_dir).read_all()
     missed: list = []
     schedules: list = []
+    retired: list = []
+    extra_disabled: list = []
     coverage_error: str | None = None
-    if schedules_file:  # explicit legacy file: {jobs: [...]}
-        import yaml
+    if schedules_file:  # explicit legacy file: {jobs: [...]} — unified strict validation
+        from quarterdeck.bootstrap import load_legacy_schedules
 
-        sched_path = Path(schedules_file)
-        if sched_path.exists():
-            schedules = yaml.safe_load(sched_path.read_text()).get("jobs", [])
-        else:
-            coverage_error = f"schedules file not found: {sched_path}"
+        try:
+            schedules, retired = load_legacy_schedules(Path(schedules_file))
+        except ValueError as exc:
+            coverage_error = str(exc)  # malformed config = no coverage, never a traceback
     else:
         from quarterdeck.bootstrap import load_effective_schedules
 
         try:
-            schedules = load_effective_schedules(config_dir())["schedules"]
+            eff = load_effective_schedules(config_dir())
+            schedules = eff["schedules"]
+            retired = eff["meta"].get("retired", [])
+            extra_disabled = eff["meta"].get("disabled_jobs", [])
         except ValueError as exc:
-            coverage_error = str(exc)  # malformed config = no coverage, never a crash-hide
+            coverage_error = str(exc)
     if schedules:
         from quarterdeck.watchdog import check
 
@@ -374,6 +381,8 @@ def digest(
         missed=missed,
         schedules=schedules,
         coverage_error=coverage_error,
+        retired=retired,
+        extra_disabled=extra_disabled,
     )
     typer.echo(render_markdown(d))
     if telegram:

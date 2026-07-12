@@ -37,11 +37,13 @@ def test_digest_aggregates_windows_and_traceability():
         + _run_events("old-job", "succeeded", now - timedelta(hours=48), "R3")
     )
     d = build_digest(events, now, hours=24, missed=[], schedules=_sched("feed-monitor"))
-    assert d["total_runs"] == 2 and "old-job" not in d["jobs"]
-    assert d["coverage"]["status"] == "full"
+    assert d["total_runs"] == 2 and "old-job" not in d["jobs"]  # window scopes STATS...
+    # ...but never the coverage universe: old-job is ledger-known and unmonitored.
+    assert d["coverage"]["status"] == "partial"
+    assert d["coverage"]["observed_unregistered"] == ["old-job"]
     p = d["problems"][0]
     assert p["run_id"] == "R2" and p["ts"] and p["duration_s"] == 5.0
-    assert d["healthy"] is False  # a failed run
+    assert d["healthy"] is False
     md = render_markdown(d)
     assert "run=`R2`" in md and "execution-evidence-based" in md and "🔴" in md
 
@@ -54,10 +56,50 @@ def test_partial_coverage_names_uncovered_jobs_and_is_never_green():
     )
     d = build_digest(events, now, missed=[], schedules=_sched("covered-job"))
     assert d["coverage"]["status"] == "partial"
-    assert d["coverage"]["observed_uncovered"] == ["stray-job"]
+    assert d["coverage"]["observed_unregistered"] == ["stray-job"]
     assert d["healthy"] is False  # partial coverage can never be green
     md = render_markdown(d)
     assert "覆盖不完整" in md and "stray-job" in md and "🔴" in md
+
+
+def test_disabled_schedule_is_registered_not_covered():
+    now = datetime.now(UTC)
+    events = _run_events("demo", "succeeded", now - timedelta(hours=1), "R1")
+    schedules = [{"job": "demo", "expected_interval_seconds": 999, "enabled": False}]
+    d = build_digest(events, now, missed=[], schedules=schedules)
+    # "in the file" is not "actively monitored": a lone disabled entry gives NO coverage.
+    assert d["coverage"]["status"] == "none"
+    assert d["coverage"]["observed_disabled"] == ["demo"]
+    assert d["healthy"] is False
+
+
+def test_unsupported_schedule_is_registered_not_covered():
+    now = datetime.now(UTC)
+    events = _run_events("cal-job", "succeeded", now - timedelta(hours=1), "R1")
+    schedules = [{"job": "cal-job"}]  # calendar entry: no interval
+    d = build_digest(events, now, missed=[], schedules=schedules)
+    assert d["coverage"]["status"] == "none"
+    assert d["coverage"]["observed_unsupported"] == ["cal-job"]
+    assert d["healthy"] is False
+
+
+def test_stray_outside_window_still_breaks_coverage_and_retire_excuses_it():
+    now = datetime.now(UTC)
+    events = (
+        _run_events("covered-job", "succeeded", now - timedelta(hours=1), "R1")
+        + _run_events("stray-old", "succeeded", now - timedelta(hours=48), "R2")
+    )
+    d = build_digest(events, now, hours=24, missed=[], schedules=_sched("covered-job"))
+    assert d["coverage"]["status"] == "partial"  # ran 48h ago => still a stray today
+    assert d["coverage"]["observed_unregistered"] == ["stray-old"]
+
+    d2 = build_digest(
+        events, now, hours=24, missed=[], schedules=_sched("covered-job"),
+        retired=["stray-old"],
+    )
+    assert d2["coverage"]["status"] == "full"  # the audited excuse path
+    assert d2["coverage"]["retired"] == ["stray-old"]
+    assert d2["healthy"] is True
 
 
 def test_empty_schedules_is_no_coverage():
@@ -149,6 +191,56 @@ def test_telegram_long_fields_clipped_and_chunks_never_cut_tags():
     assert all(len(c) <= 3900 for c in chunks)
     for c in chunks:
         assert c.count("<code>") == c.count("</code>")  # no tag split across chunks
+
+
+def test_legacy_schedules_validation_matrix(tmp_path):
+    import pytest
+
+    from quarterdeck.bootstrap import load_legacy_schedules
+
+    empty = tmp_path / "empty.yaml"
+    empty.write_text("")
+    assert load_legacy_schedules(empty) == ([], [])  # valid-empty => no coverage downstream
+
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("{{{{nope")
+    with pytest.raises(ValueError, match="invalid YAML"):
+        load_legacy_schedules(bad)
+
+    seq = tmp_path / "seq.yaml"
+    seq.write_text("- a\n- b\n")
+    with pytest.raises(ValueError, match="mapping"):
+        load_legacy_schedules(seq)
+
+    scalar_jobs = tmp_path / "scalar.yaml"
+    scalar_jobs.write_text("jobs: 3\n")
+    with pytest.raises(ValueError, match="schema violation"):
+        load_legacy_schedules(scalar_jobs)
+
+    with pytest.raises(ValueError, match="not found"):
+        load_legacy_schedules(tmp_path / "missing.yaml")
+
+
+def test_explicit_schedules_empty_file_no_traceback(tmp_path, monkeypatch):
+    from quarterdeck.cli import app
+    from quarterdeck.ledger import Ledger
+
+    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "ledger"))
+    monkeypatch.setenv("QD_CONFIG_DIR", str(tmp_path / "conf"))
+    Ledger(tmp_path / "ledger").append("run_started", "R1", {"job": "demo"})
+    empty = tmp_path / "empty.yaml"
+    empty.write_text("")
+    r = CliRunner().invoke(app, ["digest", "--schedules", str(empty)])
+    assert r.exit_code == 1  # unhealthy, but a report — never a traceback
+    assert "coverage unavailable" in r.output
+
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("{{{{nope")
+    r2 = CliRunner().invoke(app, ["digest", "--schedules", str(bad)])
+    assert r2.exit_code == 1 and "invalid YAML" in r2.output
+
+    r3 = CliRunner().invoke(app, ["watchdog", "--schedules", str(bad)])
+    assert r3.exit_code == 2  # watchdog: same validator, clean refusal
 
 
 @respx.mock
