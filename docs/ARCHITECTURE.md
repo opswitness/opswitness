@@ -97,14 +97,32 @@ event kind); vertical-case agents (P5) run natively as Paperclip agents/routines
 Scheduling stays with launchd; approvals storage stays with Paperclip; sessions stay
 with the agent CLIs.
 
-## Entry doctrine: spine, not door
+## Entry doctrine: the platform doesn't fight for the door; the product must BE the door
 
-Quarterdeck is the operational entry (`qd` is the only command; the MCP server is what
-consoles talk to) and must never grow its own GUI. Doors are replaceable — Paperclip's
-board for governance, AionUi for conversation, Telegram for the daily pulse — and any
-of them can be swapped without touching the spine. Product value concentrates in the
-irreplaceable layer precisely because it doesn't compete for the doorway. Paid users
-of vertical cases should never see Quarterdeck at all.
+Two kinds of doors, two opposite rules:
+
+**Platform layer (open source, power users): spine, not door.** Quarterdeck is the
+operational entry (`qd` is the only command; the MCP server is what consoles talk to)
+and never grows its own GUI. Doors are replaceable — Paperclip's board for governance,
+AionUi for conversation, Telegram for the daily pulse — and any of them can be swapped
+without touching the spine. Product value concentrates in the irreplaceable layer
+precisely because it doesn't compete for this doorway.
+
+**Commercial layer (paid verticals): the door IS the product.** Entry equals
+relationship ownership — whoever's surface opens every morning owns the brand memory,
+the pricing conversation, and the renewal. Paid users enter through a **purpose-built
+thin workbench** (for the practitioner case: client list → chart → draft → sign-off
+queue → delivery), never through a generic issue board, and never via "install three
+tools and wire up MCP". Not a rebranded Paperclip fork — that buys the UI maintenance
+debt of a 73k★ project and still ships the wrong UX; the workbench calls the lower
+layers' APIs and Paperclip stays as invisible as Postgres. It stays thin (weeks, not
+months) precisely because every piece of logic lives below: the deterministic engine,
+Paperclip-native agents, the gate, the corpus MCP.
+
+Sequencing: not one line of UI code until a paying pilot exists. Interim for pilots:
+Paperclip's per-company `branding:update` carries our/practitioner branding without a
+fork, and the first touch is already ours (`qd init`, signed corpus bundles). Paid
+users still never see Quarterdeck itself — they see the workbench it makes trustworthy.
 
 ## Module map
 
