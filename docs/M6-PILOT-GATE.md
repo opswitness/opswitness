@@ -2,8 +2,9 @@
 
 Date: 2026-07-12 America/Los_Angeles
 
-Status: recruitment-ready; product implementation is blocked on a written paid commitment
-or deposit from one design partner.
+Status: outreach-ready; product implementation is blocked on a written paid commitment or
+deposit from one design partner. The customer-facing offer and confirmation template is
+[PRACTITIONER-PILOT-OFFER.zh-CN.md](PRACTITIONER-PILOT-OFFER.zh-CN.md).
 
 ## Design-partner offer
 
