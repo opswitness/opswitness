@@ -770,6 +770,9 @@ def digest(
     hours: int = typer.Option(24, "--hours", help="Report window"),
     telegram: bool = typer.Option(False, "--telegram", help="Also push to Telegram (secrets.yaml)"),
     schedules_file: str = typer.Option("", "--schedules", help="schedules.yaml for missed-run section"),
+    html_out: str = typer.Option(
+        "", "--html", help="Also write a self-contained static HTML report to this path"
+    ),
 ) -> None:
     """Daily fleet report — aggregated from the ledger (evidence, not self-reports)."""
     from datetime import UTC, datetime
@@ -812,6 +815,14 @@ def digest(
         coverage_error=coverage_error,
     )
     typer.echo(render_markdown(d))
+    if html_out:
+        from quarterdeck.digest import render_page_html
+        from quarterdeck.fsutil import atomic_write
+
+        out_path = Path(html_out).expanduser()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(out_path, render_page_html(d).encode(), mode=0o600)
+        typer.echo(f"\n(html report: {out_path})", err=True)
     if telegram:
         from quarterdeck.digest import render_telegram_html
         from quarterdeck.notify.telegram import send_telegram
