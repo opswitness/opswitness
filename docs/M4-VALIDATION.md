@@ -2,8 +2,7 @@
 
 Date: 2026-07-12 America/Los_Angeles
 
-Status: repository implementation passes deterministic validation. Live Paperclip
-work-product projection remains the final M4 acceptance step.
+Status: repository implementation and live Paperclip work-product acceptance pass.
 
 ## Implemented
 
@@ -36,9 +35,16 @@ hash, size, MIME, labels, run id, event ULID, and `cas+sha256://` URI.
 Full repository verification: 130 tests pass; ruff and mypy pass. Worktree and full-history
 gitleaks scans are required again immediately before commit.
 
-## Remaining live acceptance
+## Live acceptance
 
-Register one non-sensitive artifact against the register-trigger canary run, project it to
-the existing `[qd] com.tianyuzhou.register-trigger` issue, verify one work-product with the
-same event ULID/hash, then rerun projection to prove zero repost. This does not require M3
-Claude login and does not change launchd scheduling.
+- Canary run: `01KXCE6YVYPT31FC0FEAGWYBTC` (`com.tianyuzhou.register-trigger`).
+- Registration event: `01KXCGTPEDZMYDRJ1K6C2N04VX`.
+- SHA-256: `84f458d1adfbe78d021a866ff5387094ca50b8be384ddb45f972478726645e1c`;
+  130 bytes; local verify passed.
+- Paperclip work-product: `d7a1235c-b545-4fad-b243-2444d8382bc0`; matching externalId,
+  title, and hash; remote match count exactly one.
+- Explicit second drain: projected 0, reconciled 0, errors 0, pending 0; remote count stayed one.
+- Production doctor remained fully green (including the new secret-free recovery template),
+  and digest stayed green with execution and outcome sections separated.
+
+The canary content was synthetic and non-sensitive. No launchd schedule changed.

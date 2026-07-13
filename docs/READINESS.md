@@ -33,7 +33,8 @@ blocked by the current open gates below.
   not available yet. Evidence: [M3-VALIDATION.md](M3-VALIDATION.md).
 - M4 repository implementation now includes atomic CAS, artifact lineage/eval/signoff,
   rebuildable indexes, work-product reconciliation, outcome digest, and backup/restore
-  coverage. Evidence: [M4-VALIDATION.md](M4-VALIDATION.md) and
+  coverage. Live canary projection and zero-repost drain pass. Evidence:
+  [M4-VALIDATION.md](M4-VALIDATION.md) and
   [ADR-0002](adr/0002-artifact-authority.md).
 
 ## Open gates (blocking, in order)
@@ -46,10 +47,8 @@ blocked by the current open gates below.
 4. **M3 live defer** — the machine's Claude Code 2.1.146 is not logged in. A harmless
    real defer -> Paperclip board approval -> resume -> consume -> execute-once drill must
    pass before installing gate recovery.
-5. **M4 live projection** — one non-sensitive canary artifact must create exactly one
-   reconciled Paperclip work-product and survive a zero-repost second drain.
-6. **No git remote** — GitHub Actions CI has never actually run.
-7. **Brand gate** before any publish (org name collision, trademark, domain).
+5. **No git remote** — GitHub Actions CI has never actually run.
+6. **Brand gate** before any publish (org name collision, trademark, domain).
 
 ## P3 defer contract (implemented; live acceptance pending)
 

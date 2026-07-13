@@ -41,8 +41,8 @@ Paperclip/Postgres/launchd installation was explicitly approved and completed. T
 register-trigger canary is under observation; feed-monitor and sox-monitor remain blocked
 until the elapsed-time gates in READINESS pass. M3 gate code and deterministic tests are
 complete, but live defer/resume remains NO-GO until local Claude login and board approval
-acceptance pass. M4 content-addressed artifact/eval/signoff code is implemented; its live
-Paperclip work-product acceptance remains open.
+acceptance pass. M4 content-addressed artifact/eval/signoff and live Paperclip work-product
+reconciliation pass.
 
 Start with [ARCHITECTURE.md](docs/ARCHITECTURE.md) — layer position, design laws, and why
 this layer is deliberately designed to shrink. Release gates live in
