@@ -58,5 +58,21 @@ temporary directory, and the complete suite passes with production services runn
 Next gate: observe for 24–48 hours before adopting feed-monitor and sox-monitor. Their
 seven-day soak remains mandatory before M2 is called operationally complete.
 
+### Observation checkpoint: 2026-07-13 00:11 PDT
+
+- Elapsed since the first wrapped canary run: about 6.5 hours, so this is evidence only,
+  not a gate pass.
+- The canary has two successful runs and zero failures; the second run completed at
+  `2026-07-13T06:32:24Z`.
+- Production status reports six total ledger runs and zero pending projection events.
+- The projector recorded the second run as `projected=2 errors=0 pending=0`, followed by
+  repeated zero-error, zero-backlog drains.
+- The watchdog repeatedly reports that the one active scheduled job is within
+  expectations. Its stderr has not grown since the pre-enrollment bootstrap warnings.
+- Paperclip scheduled database backups completed hourly from 18:29 through 23:29 PDT; the
+  latest observed backup completed successfully.
+- An unsandboxed `qd doctor --json` remained fully green with ports 5432/3100 open and one
+  matching Paperclip process.
+
 Verification after the live fixes: 106 tests pass; ruff, mypy, and full-history gitleaks
 pass. No secret values were printed or committed.
