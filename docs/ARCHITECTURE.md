@@ -147,7 +147,7 @@ users still never see Quarterdeck itself — they see the workbench it makes tru
 | MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ P2 |
 | install doctor / secure services / disaster recovery | `src/quarterdeck/doctor.py`, `service.py`, `backup.py` | ✅ M1 + M2 live validation; soak pending |
 | gate (PreToolUse `defer` → Paperclip approval → resume) | `gate.py`, `gated_claude.py` | M3 code complete; live auth/acceptance pending |
-| artifacts (ledger events + content-addressed projection) | — | P4 |
+| artifacts (ledger events + content-addressed projection) | `artifacts.py`, `index.py` | M4 code complete; live projection pending |
 | vertical case packs | separate private repo | P5 |
 
 Status tracks code + tests in this repo. [READINESS.md](READINESS.md) is the single

@@ -1,5 +1,6 @@
 """Disposable SQLite index over the ledger — rebuilt on demand, never authoritative."""
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,30 @@ CREATE TABLE IF NOT EXISTS runs (
   degraded INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS runs_job_idx ON runs (job, started_ts DESC);
+CREATE TABLE IF NOT EXISTS artifacts (
+  event_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  job TEXT NOT NULL,
+  logical_name TEXT NOT NULL,
+  sha256 TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  mime TEXT NOT NULL,
+  labels_json TEXT NOT NULL,
+  cas_uri TEXT NOT NULL,
+  registered_ts TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS artifacts_run_idx ON artifacts (run_id, registered_ts DESC);
+CREATE TABLE IF NOT EXISTS artifact_outcomes (
+  event_id TEXT PRIMARY KEY,
+  artifact_event_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  verdict TEXT,
+  actor TEXT,
+  summary TEXT,
+  ts TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS artifact_outcomes_artifact_idx
+  ON artifact_outcomes (artifact_event_id, ts);
 """
 
 
@@ -28,7 +53,11 @@ def rebuild(db_path: Path, ledger: Ledger) -> dict[str, Any]:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(db_path)
     try:
-        con.executescript("DROP TABLE IF EXISTS runs;" + _SCHEMA)
+        con.executescript(
+            "DROP TABLE IF EXISTS runs;"
+            "DROP TABLE IF EXISTS artifacts;"
+            "DROP TABLE IF EXISTS artifact_outcomes;" + _SCHEMA
+        )
         for e in events:
             p = e.get("payload", {})
             degraded = 1 if e.get("degraded") else 0
@@ -56,11 +85,48 @@ def rebuild(db_path: Path, ledger: Ledger) -> dict[str, Any]:
                         degraded,
                     ),
                 )
+            elif e.get("kind") == "artifact_registered":
+                con.execute(
+                    "INSERT INTO artifacts (event_id, run_id, job, logical_name, sha256,"
+                    " size, mime, labels_json, cas_uri, registered_ts)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        e["event_id"],
+                        e["run_id"],
+                        p.get("job"),
+                        p.get("logical_name"),
+                        p.get("sha256"),
+                        p.get("size"),
+                        p.get("mime"),
+                        json.dumps(p.get("labels", []), separators=(",", ":")),
+                        p.get("cas_uri"),
+                        e.get("ts"),
+                    ),
+                )
+            elif e.get("kind") in {"artifact_eval", "artifact_signoff"}:
+                con.execute(
+                    "INSERT INTO artifact_outcomes (event_id, artifact_event_id, kind,"
+                    " verdict, actor, summary, ts) VALUES (?,?,?,?,?,?,?)",
+                    (
+                        e["event_id"],
+                        p.get("artifact_event_id"),
+                        e["kind"],
+                        p.get("verdict") or p.get("decision"),
+                        p.get("evaluator") or p.get("signed_by"),
+                        p.get("summary") or p.get("note"),
+                        e.get("ts"),
+                    ),
+                )
         con.commit()
         n_runs = con.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+        n_artifacts = con.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0]
     finally:
         con.close()
-    return {"runs": n_runs, "pending_projection": len(pending_events(events))}
+    return {
+        "runs": n_runs,
+        "artifacts": n_artifacts,
+        "pending_projection": len(pending_events(events)),
+    }
 
 
 def query_runs(db_path: Path, job: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
@@ -92,5 +158,23 @@ def job_summary(db_path: Path) -> list[dict[str, Any]]:
             " FROM runs GROUP BY job ORDER BY job"
         ).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        con.close()
+
+
+def query_artifacts(
+    db_path: Path, run_id: str | None = None, limit: int = 50
+) -> list[dict[str, Any]]:
+    con = sqlite3.connect(db_path)
+    con.row_factory = sqlite3.Row
+    try:
+        sql = "SELECT * FROM artifacts"
+        args: list[Any] = []
+        if run_id:
+            sql += " WHERE run_id = ?"
+            args.append(run_id)
+        sql += " ORDER BY registered_ts DESC LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in con.execute(sql, args).fetchall()]
     finally:
         con.close()

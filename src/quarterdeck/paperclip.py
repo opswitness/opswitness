@@ -102,3 +102,15 @@ class PaperclipClient:
         if not isinstance(data, dict):
             raise PaperclipError("create approval: expected an object")
         return data
+
+    def list_work_products(self, issue_id: str) -> list[dict[str, Any]]:
+        data = self._req("GET", f"/api/issues/{issue_id}/work-products")
+        return _items(data, "workProducts", "work_products", "items", "data")
+
+    def create_work_product(
+        self, issue_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        data = self._req("POST", f"/api/issues/{issue_id}/work-products", json=payload)
+        if not isinstance(data, dict):
+            raise PaperclipError("create work product: expected an object")
+        return data

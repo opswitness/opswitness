@@ -16,7 +16,13 @@ from quarterdeck.paperclip import PaperclipClient, PaperclipError
 
 ISSUE_TITLE_PREFIX = "[qd] "
 BODY_MARKER = re.compile(r"qd:event:([0-9A-HJKMNP-TV-Z]{26})")
-PROJECTED_KINDS = ("run_started", "run_finished")
+PROJECTED_KINDS = (
+    "run_started",
+    "run_finished",
+    "artifact_registered",
+    "artifact_eval",
+    "artifact_signoff",
+)
 
 
 def qd_metadata(event_id: str) -> dict[str, Any]:
@@ -43,6 +49,19 @@ def extract_remote_event_ids(comments: list[dict[str, Any]]) -> set[str]:
     return found
 
 
+def extract_work_product_event_ids(products: list[dict[str, Any]]) -> set[str]:
+    found: set[str] = set()
+    for product in products:
+        external_id = product.get("externalId")
+        if isinstance(external_id, str):
+            found.add(external_id)
+        metadata = product.get("metadata") or {}
+        marker = metadata.get("qd_event_id") if isinstance(metadata, dict) else None
+        if isinstance(marker, str):
+            found.add(marker)
+    return found
+
+
 def pending_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     acked = {
         e["payload"].get("event_id")
@@ -59,13 +78,21 @@ def _comment_body(event: dict[str, Any]) -> str:
     if event["kind"] == "run_started":
         head = f"▶️ run started — `{p.get('job')}`"
         detail = f"argv: `{' '.join(p.get('argv', []))}`"
-    else:
+    elif event["kind"] == "run_finished":
         icon = "✅" if p.get("status") == "succeeded" else "❌"
         head = f"{icon} run {p.get('status')} — `{p.get('job')}` (exit {p.get('exit_code')})"
         detail = f"duration: {p.get('duration_s')}s"
         tail = p.get("log_tail")
         if tail:
             detail += f"\n\n```\n{tail[-1500:]}\n```"
+    elif event["kind"] == "artifact_eval":
+        icon = "✅" if p.get("verdict") == "pass" else "❌" if p.get("verdict") == "fail" else "⚠️"
+        head = f"{icon} artifact eval — `{p.get('artifact_event_id')}`"
+        detail = f"{p.get('evaluator')}: {p.get('verdict')} — {p.get('summary')}"
+    else:
+        icon = "✅" if p.get("decision") == "approved" else "🔁"
+        head = f"{icon} artifact signoff — `{p.get('artifact_event_id')}`"
+        detail = f"{p.get('signed_by')}: {p.get('decision')} — {p.get('note')}"
     return f"{head}\n{detail}\n\nqd:event:{event['event_id']}"
 
 
@@ -76,6 +103,7 @@ class Projector:
         self.lease_path = lease_path
         self._issue_cache: dict[str, str] = {}
         self._remote_ids_cache: dict[str, set[str]] = {}
+        self._remote_work_product_ids_cache: dict[str, set[str]] = {}
 
     def _issue_for(self, job: str) -> str:
         if job in self._issue_cache:
@@ -100,6 +128,52 @@ class Projector:
                 self.client.list_comments(issue_id)
             )
         return self._remote_ids_cache[issue_id]
+
+    def _remote_work_product_ids(self, issue_id: str) -> set[str]:
+        if issue_id not in self._remote_work_product_ids_cache:
+            self._remote_work_product_ids_cache[issue_id] = extract_work_product_event_ids(
+                self.client.list_work_products(issue_id)
+            )
+        return self._remote_work_product_ids_cache[issue_id]
+
+    def _project_artifact(self, issue_id: str, event: dict[str, Any]) -> tuple[str, bool]:
+        from quarterdeck.artifacts import verify_registration
+
+        if event["event_id"] in self._remote_work_product_ids(issue_id):
+            return "reconciled", True
+        verified = verify_registration(self.ledger, event)
+        if not verified["ok"]:
+            raise PaperclipError(
+                f"artifact {event['event_id']} CAS verification failed: {verified['reason']}"
+            )
+        payload = event["payload"]
+        labels = payload.get("labels", [])
+        created = self.client.create_work_product(
+            issue_id,
+            {
+                "type": "artifact",
+                "provider": "quarterdeck",
+                "externalId": event["event_id"],
+                "title": payload["logical_name"],
+                "status": "ready_for_review",
+                "reviewState": "needs_board_review"
+                if "requires-signoff" in labels
+                else "none",
+                "healthStatus": "healthy",
+                "summary": f"sha256={payload['sha256']} size={payload['size']} mime={payload['mime']}",
+                "metadata": {
+                    "qd_event_id": event["event_id"],
+                    "run_id": event["run_id"],
+                    "sha256": payload["sha256"],
+                    "size": payload["size"],
+                    "mime": payload["mime"],
+                    "labels": labels,
+                    "cas_uri": payload["cas_uri"],
+                },
+            },
+        )
+        self._remote_work_product_ids_cache[issue_id].add(event["event_id"])
+        return str(created.get("id", "")), False
 
     def drain(self) -> dict[str, int]:
         """Project all unacked events in commit order. Returns counters."""
@@ -131,6 +205,11 @@ class Projector:
                     continue
                 try:
                     issue_id = self._issue_for(job)
+                    if event["kind"] == "artifact_registered":
+                        remote_id, reconciled = self._project_artifact(issue_id, event)
+                        self._ack(event, "work_product", remote_id)
+                        stats["reconciled" if reconciled else "projected"] += 1
+                        continue
                     if event["event_id"] in self._remote_event_ids(issue_id):
                         # Crash window: posted previously but ack was lost. Heal without repost.
                         self._ack(event, "comment", "reconciled")

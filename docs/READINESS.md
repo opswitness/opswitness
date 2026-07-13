@@ -9,7 +9,7 @@ blocked by the current open gates below.
 
 - M0-M2 are committed through `dede83f`; M2 permanent install and live integration
   executed successfully. The current worktree is the M3 implementation.
-- Full suite: 122 tests pass; ruff, mypy, and full-history gitleaks are clean.
+- Full suite: 130 tests pass; ruff, mypy, and full-history gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
   `(pid, create_time)`, verifies descendants, escalates after 750ms, and emits
@@ -31,6 +31,10 @@ blocked by the current open gates below.
   `gated-claude`, Paperclip approval reconciliation, one-shot recovery, and a fourth
   secret-free launchd template. Deterministic spike coverage passes; live Claude auth is
   not available yet. Evidence: [M3-VALIDATION.md](M3-VALIDATION.md).
+- M4 repository implementation now includes atomic CAS, artifact lineage/eval/signoff,
+  rebuildable indexes, work-product reconciliation, outcome digest, and backup/restore
+  coverage. Evidence: [M4-VALIDATION.md](M4-VALIDATION.md) and
+  [ADR-0002](adr/0002-artifact-authority.md).
 
 ## Open gates (blocking, in order)
 
@@ -42,8 +46,10 @@ blocked by the current open gates below.
 4. **M3 live defer** — the machine's Claude Code 2.1.146 is not logged in. A harmless
    real defer -> Paperclip board approval -> resume -> consume -> execute-once drill must
    pass before installing gate recovery.
-5. **No git remote** — GitHub Actions CI has never actually run.
-6. **Brand gate** before any publish (org name collision, trademark, domain).
+5. **M4 live projection** — one non-sensitive canary artifact must create exactly one
+   reconciled Paperclip work-product and survive a zero-repost second drain.
+6. **No git remote** — GitHub Actions CI has never actually run.
+7. **Brand gate** before any publish (org name collision, trademark, domain).
 
 ## P3 defer contract (implemented; live acceptance pending)
 

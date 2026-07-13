@@ -3,7 +3,7 @@
 Subcommand map (build order):
   qd wrap  -- <cmd...>   run a job under the ledger (P2)
   qd gate  install       write Claude Code PreToolUse hook settings (P3)
-  qd artifacts index     sha256-index artifact directories (P5)
+  qd artifacts register  snapshot immutable outcome evidence (P4)
   qd status              fleet at a glance
 """
 
@@ -23,6 +23,8 @@ backup_app = typer.Typer(no_args_is_help=True)
 app.add_typer(backup_app, name="backup", help="Encrypted backup and isolated restore")
 gate_app = typer.Typer(no_args_is_help=True)
 app.add_typer(gate_app, name="gate", help="Fail-closed Claude Code tool approvals")
+artifacts_app = typer.Typer(no_args_is_help=True)
+app.add_typer(artifacts_app, name="artifacts", help="Content-addressed outcome evidence")
 
 
 def _load_settings_cli() -> "Settings":
@@ -260,6 +262,150 @@ def gated_claude_command(
         raise typer.Exit(code=2) from None
     typer.echo(json.dumps(result, ensure_ascii=False))
     raise typer.Exit(code=code)
+
+
+@artifacts_app.command("register")
+def artifacts_register(
+    source: str,
+    run_id: str = typer.Option(..., "--run-id"),
+    name: str = typer.Option("", "--name"),
+    label: list[str] | None = typer.Option(None, "--label"),
+    mime: str = typer.Option("", "--mime"),
+) -> None:
+    """Snapshot one file into CAS and append its immutable lineage event."""
+    import json
+    from pathlib import Path
+
+    from quarterdeck.artifacts import register_artifact
+    from quarterdeck.ledger import Ledger
+
+    path = Path(source)
+    try:
+        event = register_artifact(
+            Ledger(_load_settings_cli().ledger_dir),
+            path,
+            run_id=run_id,
+            logical_name=name or path.name,
+            labels=label,
+            mime=mime or None,
+        )
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+    typer.echo(json.dumps(event, ensure_ascii=False))
+
+
+@artifacts_app.command("list")
+def artifacts_list(run_id: str = typer.Option("", "--run-id")) -> None:
+    """List artifact registrations from the authoritative ledger."""
+    from quarterdeck.artifacts import artifact_records
+    from quarterdeck.ledger import Ledger
+
+    records = artifact_records(Ledger(_load_settings_cli().ledger_dir).read_all())
+    for event in records:
+        if run_id and event.get("run_id") != run_id:
+            continue
+        payload = event["payload"]
+        typer.echo(
+            f"{event['event_id']}  {event['run_id']}  {payload['sha256'][:12]}  "
+            f"{payload['size']}  {payload['logical_name']}"
+        )
+
+
+@artifacts_app.command("show")
+def artifacts_show(event_id: str) -> None:
+    """Show a registration and all eval/signoff events that reference it."""
+    import json
+
+    from quarterdeck.artifacts import registration
+    from quarterdeck.ledger import Ledger
+
+    events = Ledger(_load_settings_cli().ledger_dir).read_all()
+    try:
+        source = registration(events, event_id)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+    related = [
+        event
+        for event in events
+        if event.get("payload", {}).get("artifact_event_id") == event_id
+    ]
+    typer.echo(json.dumps({"registration": source, "outcomes": related}, ensure_ascii=False, indent=2))
+
+
+@artifacts_app.command("verify")
+def artifacts_verify(event_id: str = typer.Argument("")) -> None:
+    """Hash-check one registration or every registered CAS blob."""
+    import json
+
+    from quarterdeck.artifacts import artifact_records, registration, verify_registration
+    from quarterdeck.ledger import Ledger
+
+    ledger = Ledger(_load_settings_cli().ledger_dir)
+    events = ledger.read_all()
+    try:
+        records = [registration(events, event_id)] if event_id else artifact_records(events)
+        results = [verify_registration(ledger, event) for event in records]
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+    typer.echo(json.dumps(results, ensure_ascii=False, indent=2))
+    raise typer.Exit(code=0 if all(result["ok"] for result in results) else 1)
+
+
+@artifacts_app.command("eval")
+def artifacts_eval(
+    event_id: str,
+    verdict: str = typer.Option(..., "--verdict"),
+    evaluator: str = typer.Option(..., "--evaluator"),
+    summary: str = typer.Option(..., "--summary"),
+) -> None:
+    """Append a deterministic or human eval result for an artifact."""
+    import json
+
+    from quarterdeck.artifacts import evaluate_artifact
+    from quarterdeck.ledger import Ledger
+
+    try:
+        event = evaluate_artifact(
+            Ledger(_load_settings_cli().ledger_dir),
+            event_id,
+            verdict=verdict,
+            evaluator=evaluator,
+            summary=summary,
+        )
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+    typer.echo(json.dumps(event, ensure_ascii=False))
+
+
+@artifacts_app.command("signoff")
+def artifacts_signoff(
+    event_id: str,
+    decision: str = typer.Option(..., "--decision"),
+    signed_by: str = typer.Option(..., "--signed-by"),
+    note: str = typer.Option(..., "--note"),
+) -> None:
+    """Append a named human signoff; this is independent from tool-call approval."""
+    import json
+
+    from quarterdeck.artifacts import signoff_artifact
+    from quarterdeck.ledger import Ledger
+
+    try:
+        event = signoff_artifact(
+            Ledger(_load_settings_cli().ledger_dir),
+            event_id,
+            decision=decision,
+            signed_by=signed_by,
+            note=note,
+        )
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+    typer.echo(json.dumps(event, ensure_ascii=False))
 
 
 @app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})

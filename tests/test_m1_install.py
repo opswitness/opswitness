@@ -11,6 +11,7 @@ from quarterdeck.backup import (
     _rebase_paperclip_config,
     backup_plan,
     create_backup,
+    restore_backup,
     restore_plan,
 )
 from quarterdeck.cli import app
@@ -162,15 +163,20 @@ def test_backup_execute_uses_secure_atomic_output(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", f"{tools}:/bin:/usr/bin")
     settings.ledger_dir.mkdir(parents=True)
     (settings.ledger_dir / "events.jsonl").write_text("{}\n")
+    cas = settings.ledger_dir.parent / "artifacts" / "sha256" / "ab"
+    cas.mkdir(parents=True)
+    (cas / ("ab" * 32)).write_bytes(b"artifact-bytes")
     output = settings.backup.directory / "test.tar.age"
     result = create_backup(settings, output, execute=True)
     assert result["executed"] is True and output.exists()
     assert output.stat().st_mode & 0o777 == 0o600
     assert not list(output.parent.glob("*.partial"))
     with __import__("tarfile").open(output, "r") as archive:
-        assert {"database.dump", "quarterdeck_state/ledger/events.jsonl"} <= set(
-            archive.getnames()
-        )
+        assert {
+            "database.dump",
+            "quarterdeck_state/ledger/events.jsonl",
+            f"quarterdeck_state/artifacts/sha256/ab/{'ab' * 32}",
+        } <= set(archive.getnames())
 
 
 def test_backup_refuses_insecure_existing_directory(tmp_path, monkeypatch):
@@ -180,6 +186,76 @@ def test_backup_refuses_insecure_existing_directory(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="0700"):
         create_backup(settings, settings.backup.directory / "x.age", execute=True)
     assert settings.backup.directory.stat().st_mode & 0o777 == 0o755
+
+
+def test_backup_restore_round_trip_preserves_artifact_cas(tmp_path, monkeypatch):
+    settings = _settings(tmp_path, monkeypatch)
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    scripts = {
+        "pg_dump": (
+            "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n"
+            "  if [ \"$1\" = --file ]; then shift; printf DUMP > \"$1\"; exit 0; fi\n"
+            "  shift\ndone\nexit 2\n"
+        ),
+        "age": (
+            "#!/bin/sh\n"
+            "if [ \"$1\" = --decrypt ]; then\n"
+            "  out=\"\"; last=\"\"\n"
+            "  while [ $# -gt 0 ]; do\n"
+            "    if [ \"$1\" = --output ]; then shift; out=\"$1\"; else last=\"$1\"; fi\n"
+            "    shift\n  done\n  cp \"$last\" \"$out\"\n"
+            "else\n  last=\"\"; for arg in \"$@\"; do last=\"$arg\"; done; cat \"$last\"\nfi\n"
+        ),
+        "psql": "#!/bin/sh\nexit 0\n",
+        "pg_restore": "#!/bin/sh\nexit 0\n",
+    }
+    for name, body in scripts.items():
+        path = tools / name
+        path.write_text(body)
+        path.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tools}:/bin:/usr/bin")
+
+    settings.ledger_dir.mkdir(parents=True)
+    (settings.ledger_dir / "events.jsonl").write_text("{}\n")
+    digest = "cd" * 32
+    cas = settings.ledger_dir.parent / "artifacts" / "sha256" / "cd" / digest
+    cas.parent.mkdir(parents=True)
+    cas.write_bytes(b"restorable-artifact")
+    instance = settings.services.paperclip_home / "instances" / "default"
+    instance.mkdir(parents=True)
+    (instance / "config.json").write_text(
+        json.dumps(
+            {
+                "server": {"port": 3100},
+                "database": {
+                    "connectionString": settings.database_url,
+                    "embeddedPostgresDataDir": "/old/db",
+                    "backup": {"dir": "/old/backups"},
+                },
+                "logging": {"logDir": "/old/logs"},
+                "storage": {"localDisk": {"baseDir": "/old/storage"}},
+                "secrets": {"localEncrypted": {"keyFilePath": "/old/master.key"}},
+            }
+        )
+    )
+    archive = settings.backup.directory / "round-trip.tar.age"
+    create_backup(settings, archive, execute=True)
+    identity = tmp_path / "age.key"
+    identity.write_text("fake")
+    target = tmp_path / "isolated-restore"
+    result = restore_backup(
+        settings,
+        archive,
+        identity,
+        target,
+        "qd_restore_artifacts",
+        3310,
+        execute=True,
+    )
+    restored = target / "quarterdeck_state" / "artifacts" / "sha256" / "cd" / digest
+    assert result["executed"] is True
+    assert restored.read_bytes() == b"restorable-artifact"
 
 
 def test_restore_rejects_production_paths_ports_and_database_names(tmp_path, monkeypatch):

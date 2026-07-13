@@ -55,6 +55,76 @@ def _in_window(run: dict[str, Any], cutoff: datetime) -> bool:
         return True  # unparseable timestamp: surface it rather than hide it
 
 
+def _event_in_window(event: dict[str, Any], cutoff: datetime) -> bool:
+    try:
+        return datetime.fromisoformat(str(event.get("ts"))) >= cutoff
+    except (TypeError, ValueError):
+        return True
+
+
+def _collect_outcomes(events: list[dict[str, Any]], cutoff: datetime) -> dict[str, Any]:
+    registrations = {
+        event["event_id"]: event
+        for event in events
+        if event.get("kind") == "artifact_registered"
+    }
+    evals: dict[str, dict[str, Any]] = {}
+    signoffs: dict[str, dict[str, Any]] = {}
+    touched = {
+        event_id for event_id, event in registrations.items() if _event_in_window(event, cutoff)
+    }
+    for event in events:
+        payload = event.get("payload", {})
+        artifact_id = payload.get("artifact_event_id")
+        if not isinstance(artifact_id, str) or artifact_id not in registrations:
+            continue
+        if event.get("kind") == "artifact_eval":
+            evals[artifact_id] = event
+        elif event.get("kind") == "artifact_signoff":
+            signoffs[artifact_id] = event
+        else:
+            continue
+        if _event_in_window(event, cutoff):
+            touched.add(artifact_id)
+    items: list[dict[str, Any]] = []
+    problems: list[dict[str, Any]] = []
+    pending_required = 0
+    for artifact_id in sorted(touched):
+        event = registrations[artifact_id]
+        payload = event["payload"]
+        evaluation = evals.get(artifact_id, {}).get("payload", {})
+        signoff = signoffs.get(artifact_id, {}).get("payload", {})
+        requires_signoff = "requires-signoff" in payload.get("labels", [])
+        pending = requires_signoff and not signoff
+        item = {
+            "event_id": artifact_id,
+            "run_id": event.get("run_id"),
+            "job": payload.get("job"),
+            "logical_name": payload.get("logical_name"),
+            "sha256": payload.get("sha256"),
+            "size": payload.get("size"),
+            "eval": evaluation.get("verdict"),
+            "signoff": signoff.get("decision"),
+            "requires_signoff": requires_signoff,
+            "pending_signoff": pending,
+        }
+        items.append(item)
+        if pending:
+            pending_required += 1
+        if evaluation.get("verdict") == "fail" or signoff.get("decision") == "changes_requested":
+            problems.append(item)
+    return {
+        "items": items,
+        "registered": len(items),
+        "eval_pass": sum(item["eval"] == "pass" for item in items),
+        "eval_fail": sum(item["eval"] == "fail" for item in items),
+        "approved": sum(item["signoff"] == "approved" for item in items),
+        "changes_requested": sum(item["signoff"] == "changes_requested" for item in items),
+        "pending_required": pending_required,
+        "problems": problems,
+    }
+
+
 def build_coverage(
     observed_jobs: set[str],
     schedules: list[dict[str, Any]] | None,
@@ -147,7 +217,14 @@ def build_digest(
         coverage_error,
         events=events,
     )
-    healthy = coverage["status"] == "full" and not problems and not missed
+    outcomes = _collect_outcomes(events, cutoff)
+    healthy = (
+        coverage["status"] == "full"
+        and not problems
+        and not missed
+        and not outcomes["problems"]
+        and outcomes["pending_required"] == 0
+    )
     return {
         "window_hours": hours,
         "generated_at": now.isoformat(),
@@ -157,6 +234,7 @@ def build_digest(
         "missed": missed,
         "coverage": coverage,
         "projection_backlog": len(pending_events(events)),
+        "outcomes": outcomes,
         "healthy": healthy,
     }
 
@@ -236,10 +314,34 @@ def render_markdown(d: dict[str, Any]) -> str:
         for m in d["missed"]:
             detail = f" overdue={m.get('overdue_seconds')}s" if m.get("overdue_seconds") else ""
             lines.append(f"- `{m['job']}`: {m['reason']}{detail}")
+    outcomes = d["outcomes"]
+    lines += ["", "## 业务结果证据（outcome evidence）"]
+    if not outcomes["items"]:
+        lines.append("- （窗口内无 artifact/eval/signoff 事件）")
+    else:
+        lines.append(
+            f"- artifact {outcomes['registered']} · eval 通过 {outcomes['eval_pass']} / "
+            f"失败 {outcomes['eval_fail']} · 审签通过 {outcomes['approved']} / "
+            f"退回 {outcomes['changes_requested']} · 必签待审 {outcomes['pending_required']}"
+        )
+        for item in outcomes["items"]:
+            state = (
+                "❌"
+                if item in outcomes["problems"]
+                else "⏳"
+                if item["pending_signoff"]
+                else "✅"
+            )
+            lines.append(
+                f"- {state} `{item['logical_name']}` sha256=`{str(item['sha256'])[:12]}` "
+                f"eval={item['eval'] or '-'} signoff={item['signoff'] or '-'} "
+                f"artifact=`{item['event_id']}`"
+            )
     lines += [
         "",
-        "_execution-evidence-based：证明进程行为（运行/退出码/时长），不证明业务结果；"
-        f"outcome 证据（artifact hash/eval/审批）随 P4 接入 · {d['generated_at']}_",
+        "_execution-evidence-based：execution evidence 证明进程行为；"
+        "outcome evidence 来自 artifact hash/eval/审签。"
+        f"两者互不替代 · {d['generated_at']}_",
     ]
     return "\n".join(lines)
 
@@ -299,5 +401,12 @@ def render_telegram_html(d: dict[str, Any]) -> str:
         parts.append(
             "<b>漏跑</b>\n" + "\n".join(f"{code(m['job'])}: {m['reason']}" for m in d["missed"])
         )
-    parts.append("<i>execution-evidence-based · 不证明业务结果</i>")
+    outcomes = d["outcomes"]
+    if outcomes["items"]:
+        parts.append(
+            "<b>业务结果证据</b>\n"
+            f"artifact {outcomes['registered']} · eval失败 {outcomes['eval_fail']} · "
+            f"审签退回 {outcomes['changes_requested']} · 必签待审 {outcomes['pending_required']}"
+        )
+    parts.append("<i>execution evidence 与 outcome evidence 分开计算</i>")
     return "\n\n".join(parts)
