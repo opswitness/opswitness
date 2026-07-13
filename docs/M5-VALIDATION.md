@@ -12,6 +12,8 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   generates an SPDX JSON SBOM, creates GitHub artifact attestations, and attaches the
   files to a GitHub release. A tag fails closed unless the repository variable
   `PUBLIC_RELEASE_APPROVED` is exactly `true`.
+  Its OIDC, attestations, and artifact-metadata permissions match the current official
+  `actions/attest@v4` contract.
 - `NOTICE`, `SECURITY.md`, and a secret-free synthetic fleet showcase are committed release
   inputs. The showcase covers wrapped execution, outage backlog, ordered replay,
   reconcile-without-repost, one-shot approval evidence, artifact eval/signoff, and the
