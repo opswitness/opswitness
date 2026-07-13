@@ -9,6 +9,7 @@ Legacy escape hatch: the Paperclip API key is also honored from the env var name
 """
 
 import os
+import re
 import stat
 from pathlib import Path
 
@@ -20,6 +21,8 @@ from pydantic_settings import (
     SettingsConfigDict,
     YamlConfigSettingsSource,
 )
+
+from quarterdeck.fsutil import atomic_write
 
 
 def config_dir() -> Path:
@@ -168,3 +171,48 @@ def validate_config_files(root: Path | None = None) -> None:
         if leaked:
             rendered = ", ".join(".".join(path) for path in leaked)
             raise ValueError(f"{config_path}: secret fields must move to secrets.yaml: {rendered}")
+
+
+_TELEGRAM_BOT_TOKEN = re.compile(r"^[0-9]+:[A-Za-z0-9_-]+$")
+_TELEGRAM_CHAT_ID = re.compile(r"^(?:-?[0-9]+|@[A-Za-z][A-Za-z0-9_]{4,31})$")
+
+
+def save_telegram_credentials(
+    bot_token: str,
+    chat_id: str,
+    *,
+    replace: bool = False,
+    root: Path | None = None,
+) -> Path:
+    """Atomically merge Telegram credentials into the permission-checked secret file."""
+    bot_token = bot_token.strip()
+    chat_id = chat_id.strip()
+    if not _TELEGRAM_BOT_TOKEN.fullmatch(bot_token):
+        raise ValueError("Telegram bot token has an invalid format")
+    if not _TELEGRAM_CHAT_ID.fullmatch(chat_id):
+        raise ValueError("Telegram chat ID has an invalid format")
+
+    root = (root or config_dir()).expanduser()
+    if root.is_symlink():
+        raise ValueError(f"{root}: config directory must not be a symlink")
+    secrets_path = root / "secrets.yaml"
+    if root.exists():
+        if secrets_path.is_symlink():
+            raise ValueError(f"{secrets_path}: secrets file must not be a symlink")
+        validate_config_files(root)
+    else:
+        root.mkdir(parents=True, mode=0o700)
+        root.chmod(0o700)
+
+    raw = _yaml_mapping(secrets_path) if secrets_path.exists() else {}
+    telegram = raw.get("telegram", {})
+    if not isinstance(telegram, dict):
+        raise ValueError(f"{secrets_path}: telegram must be a mapping")
+    if not replace and (telegram.get("bot_token") or telegram.get("chat_id")):
+        raise ValueError("Telegram credentials already exist; pass --replace to overwrite them")
+
+    raw["telegram"] = {"bot_token": bot_token, "chat_id": chat_id}
+    payload = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True).encode()
+    atomic_write(secrets_path, payload, mode=0o600)
+    validate_config_files(root)
+    return secrets_path

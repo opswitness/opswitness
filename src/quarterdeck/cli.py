@@ -25,6 +25,8 @@ gate_app = typer.Typer(no_args_is_help=True)
 app.add_typer(gate_app, name="gate", help="Fail-closed Claude Code tool approvals")
 artifacts_app = typer.Typer(no_args_is_help=True)
 app.add_typer(artifacts_app, name="artifacts", help="Content-addressed outcome evidence")
+telegram_app = typer.Typer(no_args_is_help=True)
+app.add_typer(telegram_app, name="telegram", help="Configure and test Telegram delivery")
 
 
 def _load_settings_cli() -> "Settings":
@@ -136,6 +138,34 @@ def backup_restore(
 def version() -> None:
     """Print the Quarterdeck version."""
     typer.echo(__version__)
+
+
+@telegram_app.command("configure")
+def telegram_configure(
+    replace: bool = typer.Option(False, "--replace", help="Replace existing Telegram values"),
+) -> None:
+    """Prompt locally for Telegram credentials and atomically store them with mode 0600."""
+    from quarterdeck.config import save_telegram_credentials
+
+    bot_token = typer.prompt("Telegram bot token", hide_input=True)
+    chat_id = typer.prompt("Telegram chat ID", hide_input=True)
+    try:
+        path = save_telegram_credentials(bot_token, chat_id, replace=replace)
+    except (ValueError, OSError) as exc:
+        typer.echo(f"configuration error: {exc}", err=True)
+        raise typer.Exit(code=2) from None
+    typer.echo(f"Telegram credentials stored securely in {path}")
+
+
+@telegram_app.command("test")
+def telegram_test() -> None:
+    """Send one fixed, non-sensitive delivery probe using the configured credentials."""
+    from quarterdeck.notify.telegram import send_telegram
+
+    if not send_telegram("Quarterdeck Telegram delivery test", _load_settings_cli()):
+        typer.echo("Telegram delivery test failed", err=True)
+        raise typer.Exit(code=1)
+    typer.echo("Telegram delivery test sent")
 
 
 @app.command()

@@ -72,6 +72,16 @@ paperclip:
 `config.yaml` 的 database URL/API key/TG secret，也会拒绝 `secrets.yaml` 中的
 非 secret 字段。
 
+Telegram 凭据只通过本机隐藏提示录入，不能放进命令参数或聊天：
+
+```bash
+qd telegram configure
+qd telegram test
+```
+
+`configure` 原子合并 `secrets.yaml` 并强制 `0700/0600` 权限；已有值默认拒绝覆盖，
+只有明确传入 `--replace` 才会替换。`test` 只发送固定的非敏感测试文案。
+
 ### 4. Onboard 与治理对象
 
 先停止并核验临时 npx Paperclip/embedded Postgres，再确保 3100/3101 无监听。

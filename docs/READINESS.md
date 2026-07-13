@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 147 tests pass; ruff, mypy, DCO, worktree gitleaks, and full-history
+- Full suite: 152 tests pass; ruff, mypy, DCO, worktree gitleaks, and full-history
   gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -61,8 +61,10 @@ blocked by the current open gates below.
 1. **Canary elapsed time** — register-trigger must remain healthy for 24–48 hours.
 2. **Seven-day soak** — only after the canary passes may feed-monitor and sox-monitor
    be adopted; M2 remains incomplete until seven days pass.
-3. **Telegram digest** — not configured in Quarterdeck secrets yet; must be exercised
-   during soak without exposing or copying tokens into repo/plists.
+3. **Telegram digest** — secure hidden-input `qd telegram configure/test` tooling is
+   implemented, atomically writes only the `0600` secret file, and refuses silent
+   replacement. Production credentials are still absent and delivery must be exercised
+   during soak without exposing or copying tokens into chat, repo, argv, logs, or plists.
 4. **Brand gate** — `QUARTERDECK` has an active US class-42 software registration and
    substantial software-name usage. `OpsWitness` is the preliminary recommended replacement,
    and its exact/broader official USPTO queries plus live package, GitHub, and domain checks
