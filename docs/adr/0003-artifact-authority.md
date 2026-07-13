@@ -1,4 +1,4 @@
-# ADR-0002: Artifact authority is CAS plus the local ledger
+# ADR-0003: Artifact authority is CAS plus the local ledger
 
 Status: accepted
 

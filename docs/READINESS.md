@@ -7,9 +7,11 @@ blocked by the current open gates below.
 
 ## Current baseline
 
-- M0-M2 are committed through `dede83f`; M2 permanent install and live integration
-  executed successfully. The current worktree is the M3 implementation.
-- Full suite: 130 tests pass; ruff, mypy, and full-history gitleaks are clean.
+- M0-M4 are committed through `759963f`; M2 permanent install and live integration
+  executed successfully, while its elapsed soak gates remain open. The current worktree
+  contains M5 release preparation.
+- Full suite: 131 tests pass at the last M5 run; ruff, mypy, and full-history gitleaks
+  are clean. All checks must be rerun before the M5 commit.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
   `(pid, create_time)`, verifies descendants, escalates after 750ms, and emits
@@ -35,7 +37,12 @@ blocked by the current open gates below.
   rebuildable indexes, work-product reconciliation, outcome digest, and backup/restore
   coverage. Live canary projection and zero-repost drain pass. Evidence:
   [M4-VALIDATION.md](M4-VALIDATION.md) and
-  [ADR-0002](adr/0002-artifact-authority.md).
+  [ADR-0003](adr/0003-artifact-authority.md).
+- M5 name-independent release preparation includes cross-platform CI, DCO enforcement,
+  wheel/sdist hashes, SPDX SBOM, GitHub provenance attestation, release assets, an
+  end-to-end synthetic showcase, and an eight-tool MCP console. The first-run local core
+  clears the ten-minute target. Public release remains blocked by the brand and remote
+  gates. Evidence: [M5-VALIDATION.md](M5-VALIDATION.md).
 
 ## Open gates (blocking, in order)
 
@@ -47,8 +54,14 @@ blocked by the current open gates below.
 4. **M3 live defer** — the machine's Claude Code 2.1.146 is not logged in. A harmless
    real defer -> Paperclip board approval -> resume -> consume -> execute-once drill must
    pass before installing gate recovery.
-5. **No git remote** — GitHub Actions CI has never actually run.
-6. **Brand gate** before any publish (org name collision, trademark, domain).
+5. **Brand gate** — `QUARTERDECK` has an active US class-42 software registration and
+   substantial software-name usage. Select and clear a replacement before any publish.
+6. **No git remote** — GitHub Actions, attestations, private vulnerability reporting,
+   and the release workflow have never actually run.
+7. **AionUi handshake** — local secret-free MCP config is present and the MCP extra is
+   installed, but the post-fix in-app availability result must be recorded after unlock.
+8. **M6 commercial gate** — no practitioner UI or private product repository until a
+   design partner gives a written paid commitment or deposit.
 
 ## P3 defer contract (implemented; live acceptance pending)
 
@@ -76,9 +89,11 @@ blocked by the current open gates below.
 
 ## Next task
 
-Keep register-trigger under observation for 24–48 hours. After the user completes normal
-Claude login, run the harmless M3 live acceptance drill. Do not adopt feed-monitor/sox-monitor
-or bootstrap gate recovery before their respective gates pass.
+Keep register-trigger under observation for 24–48 hours. Choose a replacement product name
+and complete clearance before creating a remote. After the user completes normal Claude
+login, run the harmless M3 live acceptance drill. Do not adopt feed-monitor/sox-monitor,
+bootstrap gate recovery, publish a release, or build the practitioner UI before their
+respective gates pass.
 
 ---
 

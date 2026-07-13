@@ -1,5 +1,8 @@
 # Quarterdeck
 
+> **Pre-release working name.** Public distribution is blocked until brand clearance and
+> the repository's explicit release gate are complete.
+
 **Run long-lived AI work with approvals, evidence, and recoverable execution.**
 
 Quarterdeck is a local-first bridge that puts your *existing* scheduled scripts and headless

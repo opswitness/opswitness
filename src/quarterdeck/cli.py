@@ -830,10 +830,13 @@ def mcp() -> None:
     """Serve the Quarterdeck MCP console over stdio (for AionUi or any MCP client)."""
     try:
         from quarterdeck.mcp_server import build_server
+        build_server().run()
     except ImportError:
-        typer.echo("mcp extra not installed — pip install 'quarterdeck[mcp]'", err=True)
+        typer.echo(
+            "mcp extra not installed — reinstall with `uv tool install --with mcp ...`",
+            err=True,
+        )
         raise typer.Exit(code=2) from None
-    build_server().run()
 
 
 if __name__ == "__main__":

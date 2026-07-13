@@ -4,16 +4,33 @@ on:
   pull_request:
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install -e ".[dev]"
+      - run: python -m pip install -e ".[dev,mcp]" build
       - run: ruff check .
       - run: mypy src/quarterdeck
       - run: pytest -q
+      - run: python -m build
+      - run: python scripts/build_manifest.py dist
+      - run: python examples/showcase/run.py --output "${RUNNER_TEMP}/showcase"
+  dco:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Verify DCO signoffs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python .github/scripts/check_dco.py "$BASE_SHA" "$HEAD_SHA"
   gitleaks:
     runs-on: ubuntu-latest
     steps:

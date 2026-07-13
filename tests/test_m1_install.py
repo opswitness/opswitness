@@ -1,5 +1,6 @@
 import json
 import plistlib
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -59,8 +60,9 @@ def test_launchd_templates_are_valid_secret_free_and_render_absolute(tmp_path, m
         assert "DATABASE_URL" not in rendered.decode()
         path = tmp_path / f"{name}.plist"
         path.write_bytes(rendered)
-        result = subprocess.run(["plutil", "-lint", str(path)], capture_output=True, text=True)
-        assert result.returncode == 0, result.stderr
+        if plutil := shutil.which("plutil"):
+            result = subprocess.run([plutil, "-lint", str(path)], capture_output=True, text=True)
+            assert result.returncode == 0, result.stderr
 
 
 def test_service_exec_keeps_database_secret_out_of_argv(tmp_path, monkeypatch):

@@ -49,6 +49,8 @@ def test_server_exposes_all_tools(seeded_env):
         "qd_runs",
         "qd_run_events",
         "qd_projection_backlog",
+        "qd_artifacts",
+        "qd_artifact_verify",
         "qd_watchdog",
         "qd_project_now",
     }

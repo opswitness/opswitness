@@ -1,0 +1,49 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python -m pip install build
+      - run: python -m build
+      - run: python scripts/build_manifest.py dist
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: dist
+          format: spdx-json
+          output-file: dist/sbom.spdx.json
+          artifact-name: distribution-sbom.spdx.json
+          upload-release-assets: false
+      - name: Attest distributions
+        uses: actions/attest@v4
+        with:
+          subject-path: "dist/*"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/*
+      - name: Enforce public-release gate
+        if: startsWith(github.ref, 'refs/tags/') && vars.PUBLIC_RELEASE_APPROVED != 'true'
+        run: |
+          echo "PUBLIC_RELEASE_APPROVED=true is required after brand and security gates pass."
+          exit 1
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/') && vars.PUBLIC_RELEASE_APPROVED == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes

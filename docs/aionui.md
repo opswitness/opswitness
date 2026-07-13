@@ -11,25 +11,27 @@
 
 ## AionUi 配置
 
+用户级工具必须包含 MCP extra：
+
+```bash
+uv tool install --force --with mcp /path/to/distribution.whl
+```
+
 在 AionUi 的 MCP 设置中加入：
 
 ```json
 {
   "mcpServers": {
     "quarterdeck": {
-      "command": "/绝对路径/quarterdeck/.venv/bin/qd",
-      "args": ["mcp"],
-      "env": {
-        "QD_PAPERCLIP__COMPANY_ID": "<company-id>",
-        "PAPERCLIP_API_KEY": "<agent-api-key>"
-      }
+      "command": "/Users/<you>/.local/bin/qd",
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-> 注意：AionUi 会把 env 写进它的本地 SQLite。若不希望 key 落在 AionUi 侧，可去掉 env、
-> 只用读工具（fleet/runs/watchdog），把 `qd project` 留在终端或 launchd 定时任务里。
+Quarterdeck 从权限为 0700/0600 的本机配置目录读取凭据；不要把 key 复制进 AionUi
+的 env/SQLite。若只需读工具，`qd_project_now` 不应由模型调用。
 
 ## 提供的工具
 
@@ -39,7 +41,9 @@
 | `qd_runs` | 最近 runs（可按 job 过滤） |
 | `qd_run_events` | 单 run 完整事件链（started/finished/acks） |
 | `qd_projection_backlog` | 未投影事件数、最老时间戳、按 job 分布 |
+| `qd_artifacts` | artifact lineage（可按 run 过滤） |
+| `qd_artifact_verify` | 对一个 registration 重新计算 CAS hash |
 | `qd_watchdog` | overdue / never-run / unsupported（fail-closed）裁决 |
 | `qd_project_now` | 立即排空投影（唯一写操作，at-least-once） |
 
-验证：`npx @modelcontextprotocol/inspector /path/.venv/bin/qd mcp` 应列出全部 6 个工具。
+验证：`npx @modelcontextprotocol/inspector ~/.local/bin/qd mcp` 应列出全部 8 个工具。

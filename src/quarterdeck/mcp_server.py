@@ -56,6 +56,26 @@ def projection_backlog() -> dict[str, Any]:
     }
 
 
+def artifacts(run_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    from quarterdeck.index import query_artifacts
+
+    settings = _settings()
+    rebuild(_index_db(settings), Ledger(settings.ledger_dir))
+    return query_artifacts(_index_db(settings), run_id=run_id, limit=limit)
+
+
+def artifact_verify(event_id: str) -> dict[str, Any]:
+    from quarterdeck.artifacts import registration, verify_registration
+
+    settings = _settings()
+    ledger = Ledger(settings.ledger_dir)
+    try:
+        event = registration(ledger.read_all(), event_id)
+        return verify_registration(ledger, event)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "event_id": event_id}
+
+
 def _count_by_job(events: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for e in events:
@@ -143,6 +163,14 @@ def build_server() -> Any:
     @server.tool(description="Projection backlog: events not yet mirrored into Paperclip")
     def qd_projection_backlog() -> str:
         return json.dumps(projection_backlog(), ensure_ascii=False)
+
+    @server.tool(description="Artifact registrations from the local authoritative ledger")
+    def qd_artifacts(run_id: str = "", limit: int = 50) -> str:
+        return json.dumps(artifacts(run_id or None, limit), ensure_ascii=False)
+
+    @server.tool(description="Hash-verify one content-addressed artifact registration")
+    def qd_artifact_verify(event_id: str) -> str:
+        return json.dumps(artifact_verify(event_id), ensure_ascii=False)
 
     @server.tool(description="Watchdog verdict: overdue / never-run / unsupported schedules (fail-closed)")
     def qd_watchdog() -> str:
