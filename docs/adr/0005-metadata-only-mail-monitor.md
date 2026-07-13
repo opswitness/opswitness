@@ -21,8 +21,9 @@ Quarterdeck adds a narrow evidence adapter, not a mail agent:
 
 1. The executable is an absolute, administrator-configured path and its version must equal
    `0.22.5`.
-2. Production readiness requires encrypted OAuth credentials with a refresh token and valid
-   local decryption. Plaintext credentials and token environment variables are not ready.
+2. Every mailbox call revalidates encrypted OAuth credentials, a live token, and a least-privilege
+   Gmail scope. `gmail.readonly` is required; full-mail or any Gmail mutation scope is rejected.
+   Plaintext credentials and token environment variables are not ready.
 3. The Gmail query is fixed in permission-checked local `config.yaml`. CLI and MCP accept no
    query, account, label, message id, or other mailbox selector.
 4. The result is limited to sender, subject, date, and message id. Message bodies and snippets
@@ -35,11 +36,16 @@ Quarterdeck adds a narrow evidence adapter, not a mail agent:
    third-party stderr.
 7. Every returned mail field is explicitly untrusted data. No body, draft, reply, send, delete,
    label mutation, link opening, attachment, or generic `gws` tool is exposed.
-8. AionUi's native Custom Assistant owns the main-screen icon and common prompts. Its native
+8. Mail tools live only on `qd mcp --profile mail`. The normal Quarterdeck MCP excludes them,
+   while the mail profile excludes every fleet, projection, workflow, shell, and browser action.
+   AionUi must bind the two profiles to different assistants and conversations.
+9. AionUi's native Custom Assistant owns the main-screen icon and common prompts. Its native
    Scheduled Task owns the daily trigger. Quarterdeck builds neither UI nor scheduler.
-9. Before enabling a model-backed daily task, the operator must explicitly approve transmission
-   of sender/subject/date/message-id to the configured model provider. Without that approval,
-   local CLI inspection remains available.
+10. Before enabling a model-backed daily task, the operator sets
+    `mail.model_metadata_consent: true` to record explicit approval for transmitting
+    sender/subject/date/message-id to the configured model provider. MCP checks fail before
+    invoking `gws` without it; local CLI inspection remains available.
+11. Child output is bounded to 1 MiB and the process group is killed on timeout or overflow.
 
 ## Consequences
 

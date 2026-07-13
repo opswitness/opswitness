@@ -983,17 +983,26 @@ def digest(
 
 
 @app.command()
-def mcp() -> None:
+def mcp(
+    profile: str = typer.Option(
+        "full",
+        "--profile",
+        help="Tool surface: full or isolated mail-only",
+    ),
+) -> None:
     """Serve the Quarterdeck MCP console over stdio (for AionUi or any MCP client)."""
     try:
         from quarterdeck.mcp_server import build_server
 
-        build_server().run()
+        build_server(profile).run()
     except ImportError:
         typer.echo(
             "mcp extra not installed — reinstall with `uv tool install --with mcp ...`",
             err=True,
         )
+        raise typer.Exit(code=2) from None
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from None
 
 

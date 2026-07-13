@@ -49,7 +49,8 @@ blocked by the current open gates below.
   [ADR-0003](adr/0003-artifact-authority.md).
 - M5 name-independent release preparation includes cross-platform CI, DCO enforcement,
   wheel/sdist hashes, SPDX SBOM, GitHub provenance attestation, release assets, an
-  end-to-end synthetic showcase, and a thirteen-tool MCP console. The first-run local core
+  end-to-end synthetic showcase, an eleven-tool ops MCP, and a structurally isolated two-tool
+  mail MCP. The first-run local core
   clears the ten-minute target. Public release remains blocked by the brand and remote
   gates. Evidence: [M5-VALIDATION.md](M5-VALIDATION.md).
 - The AionUi launch adapter is code-complete: a strict `0600` workflow allowlist, fixed absolute
@@ -58,11 +59,11 @@ blocked by the current open gates below.
   only that showcase. Live AionUi Manual Task acceptance now passes through a guarded custom
   Claude ACP agent whose persisted mode is `default`; a one-click run completed with full ledger
   evidence and projection acknowledgements. Production qd and launchd remained unchanged.
-- AionUi now shows the enabled custom Assistant `📬 每日工作台` on its Assistants screen,
-  bound only to the Quarterdeck MCP. The live AionUi MCP connection exposes all 13 tools,
-  including no-argument `qd_mail_status` and `qd_mail_check`. The mail adapter is fixed-query,
-  metadata-only, pinned to `gws 0.22.5`, and disabled by default; the local binary is installed,
-  but Gmail OAuth is absent and no mailbox access has occurred. No daily mail task exists yet.
+- AionUi now shows the enabled custom Assistant `每日工作台`, bound to the eleven-tool ops MCP.
+  Mail data is intentionally excluded from that surface: a future `邮件回复` assistant must bind
+  only `qd mcp --profile mail`, whose two tools cannot launch workflows or mutate the fleet. The
+  adapter is fixed-query, metadata-only, pinned to `gws 0.22.5`, and disabled by default; the
+  local binary is installed, but Gmail OAuth is absent and no mailbox access has occurred.
 - M6 is recruitment-ready but intentionally has no product code. The paid-design-partner
   gate, data boundary, implementation order, and success evidence are fixed in
   [M6-PILOT-GATE.md](M6-PILOT-GATE.md).
@@ -79,8 +80,9 @@ blocked by the current open gates below.
 4. **Daily mail consent and OAuth** — before enabling the adapter or creating the AionUi
    09:00 America/Los_Angeles task, the operator must explicitly approve Gmail readonly OAuth
    and sending sender/subject/date/message-id metadata to the model provider configured in
-   AionUi. Then run one real metadata-only acceptance check; automatic send/draft/delete/label
-   mutation remains out of scope.
+   AionUi, set `mail.model_metadata_consent: true`, and bind a separate assistant only to the
+   mail profile. Then run one real metadata-only acceptance check; automatic
+   send/draft/delete/label mutation remains out of scope.
 5. **Brand gate** — `QUARTERDECK` has an active US class-42 software registration and
    substantial software-name usage. `OpsWitness` is the preliminary recommended replacement,
    and its exact/broader official USPTO queries plus live package, GitHub, and domain checks
@@ -119,10 +121,11 @@ The former M3 and AionUi blockers are closed without weakening their acceptance 
   success, with requested, dispatched, started, finished, and projection acknowledgements.
   Session recreation can require the two tool confirmations again, and AionUi upgrades require
   revalidating the guarded agent's versioned ACP runtime path.
-- ADR-0005 subsequently added two metadata-only mail tools, bringing the live AionUi handshake
-  to 13. `gws 0.22.5` is installed under the user-owned Quarterdeck prefix, but mail remains
-  disabled, OAuth status is unauthenticated, no Gmail request was made, and no daily schedule
-  was created. These gates require an explicit data-transmission decision from the operator.
+- ADR-0005 subsequently added a separate two-tool metadata-only mail profile while preserving
+  the normal eleven-tool ops surface. `gws 0.22.5` is installed under the user-owned Quarterdeck
+  prefix, but mail remains disabled, OAuth status is unauthenticated, no Gmail request was made,
+  and no daily schedule was created. These gates require an explicit data-transmission decision
+  from the operator.
 - Gate-recovery is installed. One uv-tool replacement-window import failure exposed an
   upgrade race; the service recovered to latest exit 0, doctor now checks runtime state, and
   the install runbook requires quiescing all qd consumers during upgrades.

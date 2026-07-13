@@ -85,7 +85,9 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
    administrator-owned metadata query. Quarterdeck persists `mail_check_requested` before
    access and `mail_check_finished` before returning sender/subject/date/message-id fields;
    neither event stores those fields. No body, draft, send, delete, label mutation, or runtime
-   query exists in the CLI or MCP surface. See
+   query exists in the CLI or MCP surface. The normal 11-tool MCP excludes mail entirely;
+   `qd mcp --profile mail` exposes only status/check, and model transmission additionally
+   requires an explicit local consent bit. See
    [ADR-0005](adr/0005-metadata-only-mail-monitor.md).
 
 ## Necessity and shrinkability
@@ -169,7 +171,7 @@ users still never see Quarterdeck itself — they see the workbench it makes tru
 | job lifecycle | `src/quarterdeck/lifecycle.py` | ✅ P2 |
 | bootstrap (candidates, two-file model) | `src/quarterdeck/bootstrap.py` | ✅ P2 |
 | adopt (dry-run plist wrapping) | `src/quarterdeck/adopt.py` | ✅ P2 (`--apply` gated on install) |
-| MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ P2 + allowlisted launch |
+| MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ 11-tool ops + isolated 2-tool mail profile |
 | allowlisted workflow launcher | `src/quarterdeck/workflows.py`, `workflow_worker.py` | ✅ code + tests; live AionUi task pending |
 | metadata-only mail monitor | `src/quarterdeck/mail.py` | ✅ code + tests; OAuth and AionUi schedule pending |
 | install doctor / secure services / disaster recovery | `src/quarterdeck/doctor.py`, `service.py`, `backup.py` | ✅ M1 + M2 live validation; soak pending |

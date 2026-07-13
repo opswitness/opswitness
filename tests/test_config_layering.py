@@ -54,10 +54,17 @@ def test_mail_settings_are_non_secret_config_and_strict(tmp_path, monkeypatch):
     _write_config_dir(
         tmp_path,
         monkeypatch,
-        config_yaml=("mail:\n  enabled: true\n  gws_bin: /opt/tools/gws\n  max_messages: 7\n"),
+        config_yaml=(
+            "mail:\n"
+            "  enabled: true\n"
+            "  model_metadata_consent: true\n"
+            "  gws_bin: /opt/tools/gws\n"
+            "  max_messages: 7\n"
+        ),
     )
     settings = Settings()
     assert settings.mail.enabled is True
+    assert settings.mail.model_metadata_consent is True
     assert str(settings.mail.gws_bin) == "/opt/tools/gws"
     assert settings.mail.max_messages == 7
 

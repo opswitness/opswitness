@@ -132,11 +132,6 @@ def _gws_executable(settings: Settings) -> Path:
     return executable
 
 
-def _safe_error(result: CommandResult) -> str:
-    text = result.stderr.strip() or result.stdout.strip() or f"gws exited {result.returncode}"
-    return _clean_text(redact_text(text), 500)
-
-
 def _clean_text(value: Any, limit: int) -> str:
     text = _CONTROL.sub(" ", str(value)).strip()
     return text[:limit]
@@ -145,6 +140,22 @@ def _clean_text(value: Any, limit: int) -> str:
 def _parse_version(output: str) -> str | None:
     match = _VERSION.search(output.strip())
     return match.group(1) if match else None
+
+
+def _scope_is_read_only(auth: dict[str, Any]) -> bool:
+    scopes = auth.get("scopes")
+    if not isinstance(scopes, list) or not all(isinstance(scope, str) for scope in scopes):
+        return False
+    scope_set = set(scopes)
+    gmail_scopes = {
+        scope
+        for scope in scope_set
+        if scope == GMAIL_FULL_SCOPE or scope.startswith(GMAIL_SCOPE_PREFIX)
+    }
+    return GMAIL_READONLY_SCOPE in scope_set and gmail_scopes <= {
+        GMAIL_READONLY_SCOPE,
+        GMAIL_METADATA_SCOPE,
+    }
 
 
 def mail_status(
@@ -156,6 +167,8 @@ def mail_status(
         "available": False,
         "authenticated": False,
         "ready": False,
+        "mcp_ready": False,
+        "model_metadata_consent": settings.mail.model_metadata_consent,
         "required_version": settings.mail.required_version,
         "privacy": "metadata_only",
     }
@@ -166,8 +179,8 @@ def mail_status(
         return status
 
     try:
-        version_result = runner(
-            [str(executable), "--version"], min(settings.mail.timeout_seconds, 10)
+        version_result = _check_output_size(
+            runner([str(executable), "--version"], min(settings.mail.timeout_seconds, 10))
         )
     except ValueError as exc:
         status["error"] = _clean_text(redact_text(str(exc)), 500)
@@ -181,7 +194,7 @@ def mail_status(
         }
     )
     if not status["available"]:
-        status["error"] = _safe_error(version_result)
+        status["error"] = "gws version check failed"
         return status
     if not status["version_match"]:
         status["error"] = (
@@ -190,14 +203,17 @@ def mail_status(
         return status
 
     try:
-        auth_result = runner(
-            [str(executable), "auth", "status"], min(settings.mail.timeout_seconds, 15)
+        auth_result = _check_output_size(
+            runner(
+                [str(executable), "auth", "status"],
+                min(settings.mail.timeout_seconds, 15),
+            )
         )
     except ValueError as exc:
         status["error"] = _clean_text(redact_text(str(exc)), 500)
         return status
     if auth_result.returncode != 0:
-        status["error"] = _safe_error(auth_result)
+        status["error"] = "gws authentication status check failed"
         return status
     try:
         auth = json.loads(auth_result.stdout)
@@ -210,17 +226,25 @@ def mail_status(
 
     storage = auth.get("storage")
     safe_storage = storage if storage in {"encrypted", "plaintext", "none"} else "unknown"
+    token_valid = auth.get("token_valid") is True
+    scope_read_only = _scope_is_read_only(auth)
     authenticated = bool(
         auth.get("auth_method") == "oauth2"
         and safe_storage == "encrypted"
         and auth.get("has_refresh_token") is True
         and auth.get("encryption_valid") is True
+        and token_valid
+        and scope_read_only
     )
+    ready = bool(settings.mail.enabled and authenticated)
     status.update(
         {
             "authenticated": authenticated,
             "credential_storage": safe_storage,
-            "ready": bool(settings.mail.enabled and authenticated),
+            "token_valid": token_valid,
+            "scope_read_only": scope_read_only,
+            "ready": ready,
+            "mcp_ready": bool(ready and settings.mail.model_metadata_consent),
         }
     )
     if not settings.mail.enabled:
@@ -262,6 +286,27 @@ def _normalise_messages(raw: Any, maximum: int) -> tuple[list[dict[str, str]], i
     return normalised, estimate
 
 
+def _record_failure(
+    ledger: Ledger,
+    run_id: str,
+    source: Literal["cli", "mcp"],
+    reason: str,
+) -> None:
+    failed = ledger.append(
+        "mail_check_failed",
+        run_id,
+        {
+            "schema_version": MAIL_SCHEMA_VERSION,
+            "source": source,
+            "reason": reason,
+        },
+        fsync=True,
+        degraded=True,
+    )
+    if failed is None:
+        alert(f"audit evidence lost after failed mailbox check run={run_id}")
+
+
 def check_mail(
     *,
     source: Literal["cli", "mcp"] = "cli",
@@ -301,6 +346,25 @@ def check_mail(
         alert(message)
         return {"ok": False, "run_id": run_id, "error": message, "privacy": "metadata_only"}
 
+    if source == "mcp" and not settings.mail.model_metadata_consent:
+        _record_failure(ledger, run_id, source, "model_metadata_consent_missing")
+        return {
+            "ok": False,
+            "run_id": run_id,
+            "error": "model metadata transmission consent is not configured",
+            "privacy": "metadata_only",
+        }
+
+    readiness = mail_status(settings, runner=runner)
+    if readiness.get("ready") is not True:
+        _record_failure(ledger, run_id, source, "mail_not_ready")
+        return {
+            "ok": False,
+            "run_id": run_id,
+            "error": "mail adapter is not ready; run qd mail status locally",
+            "privacy": "metadata_only",
+        }
+
     argv = [
         str(executable),
         "gmail",
@@ -313,25 +377,13 @@ def check_mail(
         "json",
     ]
     try:
-        result = runner(argv, settings.mail.timeout_seconds)
+        result = _check_output_size(runner(argv, settings.mail.timeout_seconds))
         if result.returncode != 0:
             raise ValueError("gws mailbox check failed")
         raw = json.loads(result.stdout) if result.stdout.strip() else None
         messages, estimate = _normalise_messages(raw, settings.mail.max_messages)
     except (json.JSONDecodeError, ValueError):
-        failed = ledger.append(
-            "mail_check_failed",
-            run_id,
-            {
-                "schema_version": MAIL_SCHEMA_VERSION,
-                "source": source,
-                "reason": "gws_check_failed",
-            },
-            fsync=True,
-            degraded=True,
-        )
-        if failed is None:
-            alert(f"audit evidence lost after failed mailbox check run={run_id}")
+        _record_failure(ledger, run_id, source, "gws_check_failed")
         return {
             "ok": False,
             "run_id": run_id,
