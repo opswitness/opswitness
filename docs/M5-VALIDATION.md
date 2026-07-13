@@ -49,8 +49,11 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   dedicated assistant bound only to the Quarterdeck MCP.
 - A second enabled custom Assistant named `每日工作台` is visible on AionUi's main Assistants
   screen. A post-implementation threat review rejected placing mail data and workflow mutation
-  tools in that same assistant: the normal profile remains eleven tools, and a future mail
-  assistant must bind only the two-tool mail profile in a separate conversation. The pinned
+  tools in that same assistant: its persisted permission is `fixed/default`, its mail prompt and
+  rules were removed, and the normal profile remains exactly eleven tools. AionUi connection
+  `mcp_019f5d9b-b884-7831-b991-eda395e98cb6` passed a test exposing only `qd_mail_status` and
+  `qd_mail_check`, but remains disabled; a future mail assistant must bind only that profile in
+  a separate conversation. The pinned
   `gws 0.22.5` binary is installed, but Gmail OAuth, metadata-transmission consent, and the daily
   task are intentionally absent; no mailbox was accessed during this validation.
 - Initial confirmation granted session-level access only to `qd_workflow_start` and the read-only

@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 178 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
+- Full suite: 186 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
   gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -29,8 +29,9 @@ blocked by the current open gates below.
   and fails on unhealthy launchd runtime state; encrypted backup + isolated restore and the
   projector four-test matrix pass.
 - `com.tianyuzhou.register-trigger` is the sole canary; its pristine `.qd-bak` exists,
-  five runs succeeded, watchdog/digest are green, and projection backlog is zero. The
-  last observation at 2026-07-13 12:07 PDT was still short of the 24-hour gate.
+  six runs succeeded, watchdog/digest are green, and projection backlog is zero. A 22-minute
+  schema-mismatch interruption required controlled recovery, so continuous evidence restarted
+  at 2026-07-13 15:23 PDT and cannot pass 24 hours before 2026-07-14 15:23 PDT.
   Evidence: [M2-VALIDATION.md](M2-VALIDATION.md).
 - Feed-monitor and sox-monitor are not adopted. Their production source hashes, dry-run
   diffs, executable paths, schedule semantics, and isolated
@@ -58,12 +59,15 @@ blocked by the current open gates below.
   fsync dispatch barrier. The isolated complete showcase passed and the real manifest contains
   only that showcase. Live AionUi Manual Task acceptance now passes through a guarded custom
   Claude ACP agent whose persisted mode is `default`; a one-click run completed with full ledger
-  evidence and projection acknowledgements. Production qd and launchd remained unchanged.
-- AionUi now shows the enabled custom Assistant `每日工作台`, bound to the eleven-tool ops MCP.
+  evidence and projection acknowledgements. That acceptance itself left production qd and
+  launchd unchanged; the later mail-schema recovery used the documented maintenance procedure.
+- AionUi now shows the enabled custom Assistant `每日工作台`, fixed to `Permission=default` and
+  bound only to the eleven-tool ops MCP.
   Mail data is intentionally excluded from that surface: a future `邮件回复` assistant must bind
   only `qd mcp --profile mail`, whose two tools cannot launch workflows or mutate the fleet. The
-  adapter is fixed-query, metadata-only, pinned to `gws 0.22.5`, and disabled by default; the
-  local binary is installed, but Gmail OAuth is absent and no mailbox access has occurred.
+  adapter is fixed-query, metadata-only, pinned to `gws 0.22.5`, and disabled by default. The
+  separate `quarterdeck-mail` connection is tested at exactly two tools but remains disabled;
+  Gmail OAuth is absent and no mailbox access has occurred.
 - M6 is recruitment-ready but intentionally has no product code. The paid-design-partner
   gate, data boundary, implementation order, and success evidence are fixed in
   [M6-PILOT-GATE.md](M6-PILOT-GATE.md).
@@ -98,9 +102,10 @@ blocked by the current open gates below.
 The operator resumed the project after completing normal Claude login and unlocking macOS.
 The former M3 and AionUi blockers are closed without weakening their acceptance criteria:
 
-- Production now reports nine ledger runs, five successful canary runs, and zero projection
-  backlog. The earliest 24-hour checkpoint remains approximately 2026-07-13 17:32 PDT;
-  elapsed time cannot be replaced by tests or a manual trigger.
+- Production now reports twelve ledger runs, six successful canary runs, and zero projection
+  backlog. The configuration mismatch and recovery window at 15:01-15:23 PDT reset continuous
+  canary evidence; the earliest 24-hour checkpoint is 2026-07-14 15:23 PDT. Elapsed time cannot
+  be replaced by tests or a manual trigger.
 - Two harmless real Claude sessions completed the full
   `defer -> board approval -> resume -> consume -> execute once` chain. Duplicate recovery
   and hook replay did not re-execute. No auth material was inspected or copied.
@@ -124,8 +129,9 @@ The former M3 and AionUi blockers are closed without weakening their acceptance 
 - ADR-0005 subsequently added a separate two-tool metadata-only mail profile while preserving
   the normal eleven-tool ops surface. `gws 0.22.5` is installed under the user-owned Quarterdeck
   prefix, but mail remains disabled, OAuth status is unauthenticated, no Gmail request was made,
-  and no daily schedule was created. These gates require an explicit data-transmission decision
-  from the operator.
+  and no daily schedule was created. AionUi connection
+  `mcp_019f5d9b-b884-7831-b991-eda395e98cb6` passed a two-tool test but remains disabled. These
+  gates require an explicit data-transmission decision from the operator.
 - Gate-recovery is installed. One uv-tool replacement-window import failure exposed an
   upgrade race; the service recovered to latest exit 0, doctor now checks runtime state, and
   the install runbook requires quiescing all qd consumers during upgrades.
@@ -140,9 +146,9 @@ The former M3 and AionUi blockers are closed without weakening their acceptance 
 
 Continue in this order:
 
-1. At or after the 24-hour checkpoint, rerun production doctor, status, digest, watchdog,
-   projector, backup, and canary evidence checks. Continue observation up to 48 hours if any
-   result is ambiguous.
+1. At or after the restarted 24-hour checkpoint on 2026-07-14 15:23 PDT, rerun production
+   doctor, status, digest, watchdog, projector, backup, and canary evidence checks. Continue
+   observation up to 48 hours if any result is ambiguous.
 2. Only after that gate passes, follow the hash-locked, idle-PID adoption procedure in
    `M2-VALIDATION.md` for feed-monitor and sox-monitor. Start the seven-day soak only when
    both jobs are wrapped, enrolled by exact label, and healthy.
@@ -180,7 +186,8 @@ own independent acceptance gates.
 
 ## Next task
 
-Keep register-trigger under observation until the 24–48 hour canary gate can be evaluated.
+Keep register-trigger under observation until the restarted 24–48 hour canary gate can be
+evaluated no earlier than 2026-07-14 15:23 PDT.
 Approve or reject the `OpsWitness` candidate before starting the atomic rename. Revalidate the
 guarded AionUi agent after any AionUi upgrade.
 Do not adopt feed-monitor/sox-monitor, publish a release, or build the practitioner UI before

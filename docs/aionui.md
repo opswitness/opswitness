@@ -100,6 +100,12 @@ Do not call any mail mutation, workflow-start, projection, shell, browser, or li
 做摘要，并在本机设置 `model_metadata_consent: true`。若用户不接受第三项，仍可只用本地
 `qd mail check` 查看 JSON。
 
+2026-07-13 的结构验收：AionUi 连接
+`mcp_019f5d9b-b884-7831-b991-eda395e98cb6` 只列出 `qd_mail_status` 和
+`qd_mail_check`，并保持 disabled。现有 `每日工作台` 已移除邮件提示和规则，固定为
+`Permission=default` 且只绑定 11 工具运维 profile。OAuth、consent、独立邮件 Assistant
+和 09:00 任务均未创建，因此没有邮箱请求或模型数据传输。
+
 ## 一键启动完整工作流
 
 Quarterdeck 不在 MCP 中开放 shell。先由本机管理员把完整流程的**唯一入口命令**登记

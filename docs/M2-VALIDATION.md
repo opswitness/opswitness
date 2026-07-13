@@ -152,3 +152,29 @@ After the 24-48 hour canary gate passes, adoption must remain fail-closed and or
 
 The maintenance-triggered fifth run proves upgrade recovery only. It does not replace elapsed
 time and does not move the earliest 24-hour canary gate from approximately 17:32 PDT.
+
+### Mail-schema recovery checkpoint: 2026-07-13 15:23 PDT
+
+- At 15:01 PDT, production `config.yaml` gained the default-disabled `mail` block before the
+  installed uv tool understood that schema. The old binary failed closed: `qd doctor` was red,
+  while projector, watchdog, and gate-recovery each exited 2. Paperclip remained running and
+  the ledger stayed intact. Mail was disabled, OAuth was absent, and no mailbox was accessed.
+- A threat review then hardened the adapter before installation: every call revalidates the
+  pinned gws version, encrypted credentials, live token, and least-privilege Gmail scope;
+  model calls require an explicit consent bit; full gws output is bounded; and the normal
+  11-tool MCP is structurally separate from the 2-tool mail profile.
+- The same maintenance discipline was repeated. There was no active `qd wrap` or
+  `qd gated-claude`; projector, watchdog, gate-recovery, and register-trigger were booted out;
+  the committed wheel at `ee2499a` was installed with the MCP extra; then all four original
+  plists were bootstrapped and the three periodic services were kicked once.
+- Installed MCP enumeration returned exactly 11 ops tools and exactly 2 mail tools. Production
+  doctor returned healthy; all four launchd jobs reported last exit 0; canary run 6 succeeded at
+  15:23:39 PDT; indexed runs became 12; projection backlog returned to zero; watchdog reported
+  all active jobs within expectations; and the 24-hour digest was healthy.
+- A secret-safe Paperclip database backup and an age-encrypted full-instance backup were created
+  after recovery. Both output files are mode `0600`.
+
+The 15:01-15:23 observability interruption invalidates continuous-soak evidence even though no
+ledger event was lost. The 24-hour canary clock therefore restarts at 2026-07-13 15:23 PDT; the
+earliest admissible gate is 2026-07-14 15:23 PDT. Tests and earlier successful runs cannot replace
+that elapsed time.
