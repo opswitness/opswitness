@@ -3,5 +3,6 @@ This distribution is Copyright 2026 Tianyu Zhou.
 Licensed under the Apache License, Version 2.0. See LICENSE.
 
 The software interoperates with Paperclip but contains no copied Paperclip source code and
-is not affiliated with or endorsed by the Paperclip project. Third-party Python dependency
-licenses and exact versions are enumerated in the release SBOM.
+is not affiliated with or endorsed by the Paperclip project. Release artifacts include an
+SBOM for the packaged distribution. Runtime dependencies remain governed by their own
+licenses and package metadata.
