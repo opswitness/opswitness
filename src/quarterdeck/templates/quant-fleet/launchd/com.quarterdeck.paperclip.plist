@@ -4,6 +4,7 @@
   <key>Label</key><string>com.quarterdeck.paperclip</string>
   <key>ProgramArguments</key><array><string>__QD_BIN__</string><string>service</string><string>exec</string><string>paperclip</string></array>
   <key>EnvironmentVariables</key><dict><key>QD_CONFIG_DIR</key><string>__QD_CONFIG_DIR__</string></dict>
+  <key>Umask</key><integer>63</integer>
   <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>__QD_LOG_DIR__/paperclip.out.log</string>
   <key>StandardErrorPath</key><string>__QD_LOG_DIR__/paperclip.err.log</string>

@@ -6,6 +6,7 @@ import os
 import plistlib
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
@@ -60,6 +61,30 @@ def _paperclip_processes() -> list[int]:
     return sorted(found)
 
 
+def _paperclip_backup_security(settings: Settings) -> tuple[bool, str]:
+    backup_dir = (
+        settings.services.paperclip_home.expanduser()
+        / "instances"
+        / "default"
+        / "data"
+        / "backups"
+    )
+    if backup_dir.is_symlink() or not backup_dir.is_dir():
+        return False, f"missing or unsafe directory: {backup_dir}"
+    directory_mode = stat.S_IMODE(backup_dir.stat().st_mode)
+    if directory_mode & 0o077 or not os.access(backup_dir, os.R_OK | os.W_OK | os.X_OK):
+        return False, f"directory must be private and writable: {backup_dir} mode={directory_mode:04o}"
+    backups = sorted(backup_dir.glob("*.sql.gz"))
+    unsafe: list[str] = []
+    for path in backups:
+        mode = stat.S_IMODE(path.stat().st_mode)
+        if path.is_symlink() or not path.is_file() or mode & 0o077:
+            unsafe.append(f"{path.name}:{mode:04o}")
+    if unsafe:
+        return False, "backup files must not grant group/other access: " + ", ".join(unsafe)
+    return True, f"private directory mode={directory_mode:04o}; files={len(backups)}"
+
+
 def run_doctor(
     *,
     settings_loader: Callable[[], Settings] = Settings,
@@ -104,6 +129,7 @@ def run_doctor(
                 DoctorCheck("paperclip_command", "fail", "settings unavailable"),
                 DoctorCheck("paperclip_credentials", "fail", "settings unavailable"),
                 DoctorCheck("backup_target", "fail", "settings unavailable"),
+                DoctorCheck("paperclip_backup_security", "fail", "settings unavailable"),
             ]
         )
     else:
@@ -150,18 +176,32 @@ def run_doctor(
                 f"{backup_dir} recipient={'configured' if settings.backup.age_recipient else 'missing'}",
             )
         )
+        backup_security_ok, backup_security_detail = _paperclip_backup_security(settings)
+        checks.append(
+            DoctorCheck(
+                "paperclip_backup_security",
+                "pass" if backup_security_ok else "fail",
+                backup_security_detail,
+            )
+        )
 
     for name in SERVICE_NAMES:
         try:
             raw = _template_bytes(name)
             parsed = plistlib.loads(raw)
             serialized = repr(parsed)
-            safe = "DATABASE_URL" not in serialized and "api_key" not in serialized.lower()
+            safe = (
+                "DATABASE_URL" not in serialized
+                and "api_key" not in serialized.lower()
+                and parsed.get("Umask") == 0o077
+            )
             checks.append(
                 DoctorCheck(
                     f"template_{name}",
                     "pass" if safe else "fail",
-                    "valid plist; no secret fields" if safe else "secret field found",
+                    "valid plist; private umask; no secret fields"
+                    if safe
+                    else "secret field found or private umask missing",
                 )
             )
         except (OSError, ValueError, plistlib.InvalidFileException) as exc:

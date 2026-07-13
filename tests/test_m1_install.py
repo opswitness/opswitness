@@ -18,7 +18,7 @@ from quarterdeck.backup import (
 from quarterdeck.cli import app
 from quarterdeck.config import Settings
 from quarterdeck.doctor import run_doctor
-from quarterdeck.service import SERVICE_NAMES, build_service_exec, render_launchd
+from quarterdeck.service import SERVICE_NAMES, build_service_exec, exec_service, render_launchd
 
 
 def _executable(path: Path) -> Path:
@@ -36,13 +36,17 @@ def _settings(tmp_path, monkeypatch) -> Settings:
     node = _executable(tmp_path / "node")
     paperclip_script = tmp_path / "paperclip-index.js"
     paperclip_script.write_text("// fixture\n")
+    paperclip_home = tmp_path / "paperclip"
+    paperclip_backups = paperclip_home / "instances" / "default" / "data" / "backups"
+    paperclip_backups.mkdir(parents=True, mode=0o700)
+    paperclip_backups.chmod(0o700)
     return Settings(
         database_url="postgresql://qd:secret@127.0.0.1:5432/quarterdeck",
         paperclip={"api_key": "api-key", "company_id": "company"},
         services={
             "qd_bin": qd,
             "paperclip_command": [str(node), str(paperclip_script)],
-            "paperclip_home": tmp_path / "paperclip",
+            "paperclip_home": paperclip_home,
             "log_dir": tmp_path / "logs",
         },
         backup={"directory": tmp_path / "backups", "age_recipient": "age1test"},
@@ -57,6 +61,7 @@ def test_launchd_templates_are_valid_secret_free_and_render_absolute(tmp_path, m
         parsed = plistlib.loads(rendered)
         args = parsed["ProgramArguments"]
         assert args[0] == str(settings.services.qd_bin.resolve())
+        assert parsed["Umask"] == 0o077
         assert "DATABASE_URL" not in rendered.decode()
         path = tmp_path / f"{name}.plist"
         path.write_bytes(rendered)
@@ -87,6 +92,21 @@ def test_service_exec_keeps_database_secret_out_of_argv(tmp_path, monkeypatch):
     assert "DATABASE_URL" not in recovery_env
 
 
+def test_service_exec_sets_private_umask_before_execve(tmp_path, monkeypatch):
+    settings = _settings(tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr("quarterdeck.service.os.umask", lambda mask: calls.append(("umask", mask)))
+    monkeypatch.setattr(
+        "quarterdeck.service.os.execve",
+        lambda executable, argv, env: calls.append(("execve", executable, argv, env)),
+    )
+
+    exec_service("projector", settings)
+
+    assert calls[0] == ("umask", 0o077)
+    assert calls[1][0] == "execve"
+
+
 def test_service_render_is_dry_run_by_default(tmp_path, monkeypatch):
     settings = _settings(tmp_path, monkeypatch)
     monkeypatch.setenv("QD_SERVICES__QD_BIN", str(settings.services.qd_bin))
@@ -110,6 +130,30 @@ def test_doctor_fake_toolchain_all_green(tmp_path, monkeypatch):
     )
     assert result["healthy"] is True
     assert all(check["status"] == "pass" for check in result["checks"])
+
+
+def test_doctor_rejects_readable_paperclip_backups(tmp_path, monkeypatch):
+    settings = _settings(tmp_path, monkeypatch)
+    backup_dir = settings.services.paperclip_home / "instances" / "default" / "data" / "backups"
+    backup = backup_dir / "paperclip-test.sql.gz"
+    backup.write_bytes(b"fixture")
+    backup.chmod(0o644)
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for tool in ("node", "psql", "pg_dump", "age"):
+        _executable(tools / tool)
+
+    result = run_doctor(
+        settings_loader=lambda: settings,
+        which=lambda name: str(tools / name),
+        version=lambda _path, _args: "fixture",
+        port_open=lambda _host, _port: True,
+        paperclip_processes=lambda: [123],
+    )
+
+    check = next(item for item in result["checks"] if item["name"] == "paperclip_backup_security")
+    assert check["status"] == "fail"
+    assert "paperclip-test.sql.gz:0644" in check["detail"]
 
 
 def test_doctor_reports_missing_tools_without_traceback(tmp_path, monkeypatch):
@@ -225,7 +269,7 @@ def test_backup_restore_round_trip_preserves_artifact_cas(tmp_path, monkeypatch)
     cas.parent.mkdir(parents=True)
     cas.write_bytes(b"restorable-artifact")
     instance = settings.services.paperclip_home / "instances" / "default"
-    instance.mkdir(parents=True)
+    instance.mkdir(parents=True, exist_ok=True)
     (instance / "config.json").write_text(
         json.dumps(
             {

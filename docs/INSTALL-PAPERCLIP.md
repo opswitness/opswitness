@@ -105,7 +105,9 @@ launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.quarterdeck.projector.pl
 launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.quarterdeck.watchdog.plist
 ```
 
-Paperclip plist 使用 KeepAlive；projector 每 30 秒、watchdog 每 60 秒运行。plist 只
+Paperclip plist 使用 KeepAlive；projector 每 30 秒、watchdog 每 60 秒运行。所有
+服务同时由 launchd `Umask=077` 和 `qd service exec` 的进程内 `umask(077)` 保护，
+因此数据库备份、派生状态和日志默认不会对其他本机用户开放。plist 只
 包含 `QD_CONFIG_DIR`，不包含数据库 URL、API key 或 token。
 
 ## 安装后闸门

@@ -109,4 +109,5 @@ def build_service_exec(
 
 def exec_service(name: str, settings: Settings, *, paperclip_mode: str = "run") -> None:
     argv, env = build_service_exec(name, settings, paperclip_mode=paperclip_mode)
+    os.umask(0o077)
     os.execve(argv[0], argv, env)
