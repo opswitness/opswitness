@@ -85,7 +85,9 @@ The former M3 and AionUi blockers are closed without weakening their acceptance 
   `defer -> board approval -> resume -> consume -> execute once` chain. Duplicate recovery
   and hook replay did not re-execute. No auth material was inspected or copied.
 - AionUi's own Check MCP Availability action succeeded and displayed all eight Quarterdeck
-  tools, closing the in-app acceptance gate.
+  tools, closing the in-app acceptance gate. The full Paperclip MCP is intentionally not
+  mounted: its pinned package exposes approval writes and a generic API escape hatch without
+  a server-enforced read-only mode. Approval decisions remain in Paperclip Web UI.
 - Gate-recovery is installed. One uv-tool replacement-window import failure exposed an
   upgrade race; the service recovered to latest exit 0, doctor now checks runtime state, and
   the install runbook requires quiescing all qd consumers during upgrades.

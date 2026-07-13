@@ -36,6 +36,10 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   reinstalled with `--with mcp`. A direct MCP client handshake against that stable binary
   listed exactly eight expected tools. On 2026-07-13, AionUi's own Settings -> Tools ->
   quarterdeck -> Check MCP Availability succeeded and expanded the same eight-tool list.
+- The separate `@paperclipai/mcp-server@2026.707.0` package was audited but deliberately
+  not mounted. It exposes approval decisions, other mutations, and a general `/api` escape
+  hatch, requires a bearer token in its environment, and offers no documented read-only
+  mode or scoped read-only token. Paperclip Web UI remains the sole approval-decision door.
 - Paperclip governance UI and artifact work-product projection were already accepted live
   under M2/M4; see `M2-VALIDATION.md` and `M4-VALIDATION.md`.
 

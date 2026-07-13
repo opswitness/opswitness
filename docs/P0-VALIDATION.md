@@ -16,7 +16,12 @@ on :54329, server on :3100 (`local_trusted`, loopback). Smoke company `bosun-smo
   aggregation and by-provider queries immediately consistent).
 - CLI exposes the full approval lifecycle (`approval create/approve/reject/request-revision/
   resubmit/comment`) and run inspection (`run list/live/get/events/log`).
-- MCP server built in: 35 task-management tools; **no approval tools** (gap Quarterdeck fills).
+- Correction verified 2026-07-13: MCP is a separate pinned package,
+  `@paperclipai/mcp-server@2026.707.0`, not a `paperclipai` CLI subcommand or server OpenAPI
+  path. Its compiled surface has 41 tools (23 read, 17 write, one `/api` escape hatch),
+  including approval creation and decision. The original “35 tools; no approval tools”
+  observation was wrong. Quarterdeck fills the **enforcement and independent-evidence** gap,
+  not missing approval CRUD.
 
 ### Crash recovery (issue #8023 assessment)
 Two independent observations, one deliberate experiment:

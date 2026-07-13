@@ -29,7 +29,7 @@ flowchart BT
     end
     subgraph C["Console layer (three replaceable doors)"]
         C1["Paperclip Web UI"]
-        C2["AionUi (dual MCP)"]
+        C2["AionUi (Quarterdeck MCP, no approval writes)"]
         C3["qd CLI + Telegram"]
     end
     subgraph V["Vertical case layer (P5, paid)"]
@@ -104,6 +104,12 @@ human identity** stay with Paperclip while the **authoritative approval evidence
 outcome) stays in the local ledger — law 1 admits no exception: if Paperclip loses its
 database, pending calls stay denied and every past decision remains locally auditable;
 sessions stay with the agent CLIs.
+
+The standalone Paperclip MCP is deliberately not mounted in AionUi. Its pinned
+v2026.707.0 surface includes approval decisions, other mutations, and a general `/api`
+escape hatch, with no documented read-only mode or scoped read-only token. Prompt-level
+instructions are not an authorization boundary. Paperclip Web UI therefore remains the
+only approval-decision door; AionUi receives Quarterdeck's evidence-oriented MCP surface.
 
 ## Entry doctrine: the platform doesn't fight for the door; the product must BE the door
 
