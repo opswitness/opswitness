@@ -42,10 +42,11 @@ Alpha. Built against Paperclip v2026.707. Not affiliated with Paperclip.
 The local P2 code path and M1 install-readiness tooling are test-complete. Permanent
 Paperclip/Postgres/launchd installation was explicitly approved and completed. The sole
 register-trigger canary is under observation; feed-monitor and sox-monitor remain blocked
-until the elapsed-time gates in READINESS pass. M3 gate code and deterministic tests are
-complete, but live defer/resume remains NO-GO until local Claude login and board approval
-acceptance pass. M4 content-addressed artifact/eval/signoff and live Paperclip work-product
-reconciliation pass.
+until the elapsed-time gates in READINESS pass. M3's non-interactive Claude gate passed two
+live defer/board-approval/resume drills; its one-minute recovery service is installed and
+fail-closed. M4 content-addressed artifact/eval/signoff and live Paperclip work-product
+reconciliation pass. These claims do not extend M3 enforcement to interactive Claude, Codex,
+or other agent runtimes.
 
 Start with [ARCHITECTURE.md](docs/ARCHITECTURE.md) — layer position, design laws, and why
 this layer is deliberately designed to shrink. Release gates live in

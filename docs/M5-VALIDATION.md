@@ -34,8 +34,8 @@ Status: name-independent release engineering is ready; public release is **NO-GO
 - Existing AionUi 2.1.33 is notarized and arm64. The local MCP entry was added without an
   env block. The first handshake exposed a missing MCP extra; the user-level tool was then
   reinstalled with `--with mcp`. A direct MCP client handshake against that stable binary
-  listed exactly eight expected tools. Final in-app handshake confirmation is still pending
-  because the Mac locked before the result could be read.
+  listed exactly eight expected tools. On 2026-07-13, AionUi's own Settings -> Tools ->
+  quarterdeck -> Check MCP Availability succeeded and expanded the same eight-tool list.
 - Paperclip governance UI and artifact work-product projection were already accepted live
   under M2/M4; see `M2-VALIDATION.md` and `M4-VALIDATION.md`.
 
@@ -51,9 +51,6 @@ Status: name-independent release engineering is ready; public release is **NO-GO
 3. **No release publication:** no tag, GitHub release, package index upload, org creation,
    domain purchase, or public announcement may occur until the name is settled and the
    resulting metadata is updated consistently.
-4. **AionUi acceptance:** unlock the Mac and rerun `Check MCP Availability`; record a
-   successful local handshake and eight-tool listing.
-
 The release workflow intentionally does not publish to PyPI yet. Trusted publishing,
 repository URLs, package name, SBOM identity, and provenance subject must be configured only
 after the final brand and remote are known.

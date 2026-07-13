@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 135 tests pass; ruff, mypy, DCO, worktree gitleaks, and full-history
+- Full suite: 147 tests pass; ruff, mypy, DCO, worktree gitleaks, and full-history
   gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -25,22 +25,23 @@ blocked by the current open gates below.
 - `uv build` succeeds; the wheel was installed into an isolated `/tmp` tool root,
   `qd version` ran, and a packaged watchdog plist rendered and passed `plutil -lint`.
 - Permanent Paperclip/Postgres/launchd are installed. `qd doctor` is fully green and now
-  verifies installed plist drift, rejects symlinks, and checks private log/backup leaf
-  modes; encrypted backup + isolated restore and the projector four-test matrix pass.
+  verifies installed plist drift, rejects symlinks, checks private log/backup leaf modes,
+  and fails on unhealthy launchd runtime state; encrypted backup + isolated restore and the
+  projector four-test matrix pass.
 - `com.tianyuzhou.register-trigger` is the sole canary; its pristine `.qd-bak` exists,
-  two runs succeeded, watchdog/digest are green, and projection backlog is zero. The
-  last observation at 2026-07-13 00:56 PDT was only about 7.4 hours after the first
-  wrapped run, so the 24–48 hour gate remains open.
+  five runs succeeded, watchdog/digest are green, and projection backlog is zero. The
+  last observation at 2026-07-13 12:07 PDT was still short of the 24-hour gate.
   Evidence: [M2-VALIDATION.md](M2-VALIDATION.md).
 - Feed-monitor and sox-monitor are not adopted. Their production source hashes, dry-run
   diffs, executable paths, schedule semantics, and isolated
   `apply -> lint -> rollback -> identical hash` drills are recorded in
   [M2-VALIDATION.md](M2-VALIDATION.md). Both labels had last exit status 0; adoption must
   wait for the canary gate and for each target to have no active PID.
-- M3 repository implementation now includes the append-only gate state machine,
-  `gated-claude`, Paperclip approval reconciliation, one-shot recovery, and a fourth
-  secret-free launchd template. Deterministic spike coverage passes; live Claude auth is
-  not available yet. Evidence: [M3-VALIDATION.md](M3-VALIDATION.md).
+- M3 is GO for its stated non-interactive `qd gated-claude` boundary. Two real Bash calls
+  stopped at Paperclip approvals, resumed the same sessions, consumed once, executed once,
+  and produced complete local evidence chains. Contextual command redaction passed live;
+  gate-recovery is installed with a 60-second cadence and latest exit 0. Evidence:
+  [M3-VALIDATION.md](M3-VALIDATION.md).
 - M4 repository implementation now includes atomic CAS, artifact lineage/eval/signoff,
   rebuildable indexes, work-product reconciliation, outcome digest, and backup/restore
   coverage. Live canary projection and zero-repost drain pass. Evidence:
@@ -62,35 +63,30 @@ blocked by the current open gates below.
    be adopted; M2 remains incomplete until seven days pass.
 3. **Telegram digest** — not configured in Quarterdeck secrets yet; must be exercised
    during soak without exposing or copying tokens into repo/plists.
-4. **M3 live defer** — the machine's Claude Code 2.1.146 is not logged in. A harmless
-   real defer -> Paperclip board approval -> resume -> consume -> execute-once drill must
-   pass before installing gate recovery.
-5. **Brand gate** — `QUARTERDECK` has an active US class-42 software registration and
+4. **Brand gate** — `QUARTERDECK` has an active US class-42 software registration and
    substantial software-name usage. `OpsWitness` is the preliminary recommended replacement,
    but no rename or reservation has been approved. Evidence: [BRAND-CLEARANCE.md](BRAND-CLEARANCE.md).
-6. **No git remote** — GitHub Actions, attestations, private vulnerability reporting,
+5. **No git remote** — GitHub Actions, attestations, private vulnerability reporting,
    and the release workflow have never actually run.
-7. **AionUi handshake** — local secret-free MCP config is present and the MCP extra is
-   installed, but the post-fix in-app availability result must be recorded after unlock.
-8. **M6 commercial gate** — no practitioner UI or private product repository until a
+6. **M6 commercial gate** — no practitioner UI or private product repository until a
    design partner gives a written paid commitment or deposit.
 
-## Blocked handoff (2026-07-13 00:56 PDT)
+## Resumption update (2026-07-13 11:59 PDT)
 
-The project goal is deliberately blocked rather than narrowed or declared complete. Three
-consecutive continuation audits found the same external conditions, while all locally safe
-work available before those gates was completed:
+The operator resumed the project after completing normal Claude login and unlocking macOS.
+The former M3 and AionUi blockers are closed without weakening their acceptance criteria:
 
-- Production remained healthy: six ledger runs, zero projection backlog, two successful
-  canary runs, full watchdog coverage, and a fully green `qd doctor`.
-- Repository HEAD was `d7504c5` with a clean worktree. The latest commit records the
-  production soak adoption preflight; it does not modify HOME, launchd, or schedules.
-- The earliest 24-hour canary checkpoint is approximately 2026-07-13 17:32 PDT. Elapsed
-  time is evidence and cannot be replaced by tests or a manually triggered run.
-- Claude Code reported `loggedIn: false`; normal operator login is required. No API key,
-  browser token, or credential may be copied into this repository or the handoff record.
-- AionUi could not be inspected because macOS was locked. The operator must unlock the Mac;
-  automatic unlock or lock-screen bypass is prohibited.
+- Production now reports nine ledger runs, five successful canary runs, and zero projection
+  backlog. The earliest 24-hour checkpoint remains approximately 2026-07-13 17:32 PDT;
+  elapsed time cannot be replaced by tests or a manual trigger.
+- Two harmless real Claude sessions completed the full
+  `defer -> board approval -> resume -> consume -> execute once` chain. Duplicate recovery
+  and hook replay did not re-execute. No auth material was inspected or copied.
+- AionUi's own Check MCP Availability action succeeded and displayed all eight Quarterdeck
+  tools, closing the in-app acceptance gate.
+- Gate-recovery is installed. One uv-tool replacement-window import failure exposed an
+  upgrade race; the service recovered to latest exit 0, doctor now checks runtime state, and
+  the install runbook requires quiescing all qd consumers during upgrades.
 - `OpsWitness` remains only a preliminary replacement candidate. No package rename, GitHub
   remote, identifier reservation, or public release is authorized until the operator makes
   an explicit brand decision.
@@ -100,7 +96,7 @@ work available before those gates was completed:
 - M6 remains behind its paid-design-partner gate; no practitioner UI should be built merely
   to create the appearance of Pilot progress.
 
-Resume in this order:
+Continue in this order:
 
 1. At or after the 24-hour checkpoint, rerun production doctor, status, digest, watchdog,
    projector, backup, and canary evidence checks. Continue observation up to 48 hours if any
@@ -108,20 +104,15 @@ Resume in this order:
 2. Only after that gate passes, follow the hash-locked, idle-PID adoption procedure in
    `M2-VALIDATION.md` for feed-monitor and sox-monitor. Start the seven-day soak only when
    both jobs are wrapped, enrolled by exact label, and healthy.
-3. After normal Claude login, execute one harmless real
-   `defer -> Paperclip approval -> resume -> consume -> execute once` acceptance drill before
-   installing gate recovery.
-4. After macOS unlock, record AionUi's in-app MCP availability rather than relying only on
-   the already-passing direct MCP handshake.
-5. Obtain an explicit brand decision before creating a remote or changing public
+3. Obtain an explicit brand decision before creating a remote or changing public
    identifiers. Run real GitHub Actions and provenance only after that decision.
-6. Build the private practitioner product only after written paid commitment or deposit.
+4. Build the private practitioner product only after written paid commitment or deposit.
 
 M2 is complete only after the seven-day soak passes with zero unexplained loss, duplicate,
 false-green state, process-tree survivor, or unrecovered backlog. M3, M5, and M6 retain their
 own independent acceptance gates.
 
-## P3 defer contract (implemented; live acceptance pending)
+## P3 defer contract (implemented and accepted live)
 
 - Non-interactive `claude -p` only; minimum version **v2.1.89** (machine: 2.1.146).
 - Hook returns `permissionDecision: "defer"` → run exits with
@@ -135,7 +126,7 @@ own independent acceptance gates.
   forbidden under the gate.
 - Deterministic matrix passes: single defer/resume · parallel two-tool · approval timeout ·
   duplicate resume · one-shot consumption · MCP/hook missing on resume · old Claude
-  version · bypassPermissions rejection. Real model execution is blocked by local login.
+  version · bypassPermissions rejection. Two real single-tool sessions also pass.
 
 ## Truth split for approvals (P3)
 
@@ -149,9 +140,8 @@ own independent acceptance gates.
 
 Keep register-trigger under observation for 24–48 hours. Approve or reject the `OpsWitness`
 candidate before starting the atomic rename.
-After the user completes normal Claude login, run the harmless M3 live acceptance drill.
-Do not adopt feed-monitor/sox-monitor, bootstrap gate recovery, publish a release, or build
-the practitioner UI before their respective gates pass.
+Do not adopt feed-monitor/sox-monitor, publish a release, or build the practitioner UI before
+their respective gates pass.
 
 ---
 

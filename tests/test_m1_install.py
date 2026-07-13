@@ -17,7 +17,7 @@ from quarterdeck.backup import (
 )
 from quarterdeck.cli import app
 from quarterdeck.config import Settings
-from quarterdeck.doctor import run_doctor
+from quarterdeck.doctor import _launchd_service_runtime, run_doctor
 from quarterdeck.service import SERVICE_NAMES, build_service_exec, exec_service, render_launchd
 
 
@@ -127,7 +127,7 @@ def test_doctor_fake_toolchain_all_green(tmp_path, monkeypatch):
     settings = _settings(tmp_path, monkeypatch)
     launchagents = tmp_path / "LaunchAgents"
     launchagents.mkdir()
-    for name in ("paperclip", "projector", "watchdog"):
+    for name in SERVICE_NAMES:
         (launchagents / f"com.quarterdeck.{name}.plist").write_bytes(
             render_launchd(name, settings)
         )
@@ -139,9 +139,37 @@ def test_doctor_fake_toolchain_all_green(tmp_path, monkeypatch):
         port_open=lambda host, port: True,
         paperclip_processes=lambda: [123],
         launchagents_dir=launchagents,
+        launchd_runtime=lambda name: (
+            True,
+            "state=running" if name == "paperclip" else "runs=1 last_exit=0",
+        ),
     )
     assert result["healthy"] is True
     assert all(check["status"] == "pass" for check in result["checks"])
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["installed_gate-recovery"]["status"] == "pass"
+    assert checks["runtime_gate-recovery"]["status"] == "pass"
+
+
+def test_launchd_runtime_check_is_fail_closed():
+    def completed(stdout: str, returncode: int = 0):
+        return subprocess.CompletedProcess(["launchctl"], returncode, stdout, "missing")
+
+    paperclip_ok, _ = _launchd_service_runtime(
+        "paperclip", run=lambda *args, **kwargs: completed("state = running\nruns = 1\n")
+    )
+    periodic_ok, detail = _launchd_service_runtime(
+        "gate-recovery",
+        run=lambda *args, **kwargs: completed("state = not running\nruns = 4\nlast exit code = 0\n"),
+    )
+    failed, failed_detail = _launchd_service_runtime(
+        "gate-recovery",
+        run=lambda *args, **kwargs: completed("state = not running\nruns = 5\nlast exit code = 1\n"),
+    )
+
+    assert paperclip_ok is True
+    assert periodic_ok is True and detail == "runs=4 last_exit=0"
+    assert failed is False and failed_detail == "runs=5 last_exit=1"
 
 
 def test_doctor_rejects_readable_paperclip_backups(tmp_path, monkeypatch):

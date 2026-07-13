@@ -16,6 +16,7 @@ from quarterdeck.gate import (
     handle_pre_tool_use,
     record_decision,
     record_linked,
+    request_hash,
 )
 from quarterdeck.gated_claude import (
     _approval_for_request,
@@ -146,6 +147,17 @@ def test_gate_redacts_input_and_detects_execution_without_consumption(tmp_path):
     missing = no_request.read_all()[0]
     assert missing["kind"] == "tool_gate_failed"
     assert missing["payload"]["reason"] == "execution_without_request"
+
+
+def test_gate_redacts_short_secret_embedded_in_bash_command(tmp_path):
+    ledger = Ledger(tmp_path / "ledger")
+    event = _hook(tool_input={"command": "API_TOKEN=short-value deploy"})
+
+    handle_pre_tool_use(ledger, event, ttl_seconds=60)
+
+    requested = ledger.read_all()[0]["payload"]
+    assert requested["tool_input"]["command"] == "API_TOKEN=«redacted» deploy"
+    assert requested["request_hash"] == request_hash(event)
 
 
 def test_gate_bounds_large_redacted_input(tmp_path):

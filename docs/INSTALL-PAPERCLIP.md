@@ -21,7 +21,7 @@ brew services start postgresql@17
 
 cd /Users/tianyuzhou/trade/quarterdeck
 uv build
-uv tool install --force dist/quarterdeck-0.0.1-py3-none-any.whl
+uv tool install --force --with mcp dist/quarterdeck-0.0.1-py3-none-any.whl
 test -x "$HOME/.local/bin/qd"
 
 npm config set prefix "$HOME/.local/npm"
@@ -116,6 +116,23 @@ Paperclip plist 使用 KeepAlive；projector 每 30 秒、watchdog 每 60 秒运
 ```bash
 qd service exec paperclip --paperclip-mode backup
 ```
+
+### 6. Quarterdeck 升级维护窗口
+
+`uv tool install --force` 会替换当前 tool environment。稳定入口路径不代表替换期间的
+Python 包目录始终完整；实测 gate-recovery 恰在这个窗口启动时发生过一次 import
+failure。因此升级前必须先进入维护窗口：
+
+1. 确认没有运行中的 `qd gated-claude` 或 `qd wrap` 进程。
+2. `bootout` projector、watchdog、gate-recovery，以及所有已经由 `qd wrap` 接管的
+   launchd 任务。Paperclip 已经 `execve` 成 Node，不依赖 qd 的 Python 环境，可保持
+   运行。
+3. 构建并执行用户级 `uv tool install --force --with mcp <wheel>`；立刻运行
+   `qd version`、`qd doctor` 和 MCP handshake。
+4. 按原 plist 逐项 bootstrap 周期服务和接管任务；验证每项最近退出码为 0、投影
+   backlog 为 0、watchdog/digest 无假绿后才退出维护窗口。
+
+不得在 qd 周期服务或接管任务仍可能被 launchd 触发时原地更新 tool environment。
 
 ## 安装后闸门
 

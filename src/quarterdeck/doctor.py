@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import plistlib
+import re
 import shutil
 import socket
 import stat
@@ -133,6 +134,41 @@ def _installed_service_security(name: str, settings: Settings, launchagents_dir:
     return True, f"installed plist has private umask and stable qd path: {path}"
 
 
+def _launchd_service_runtime(
+    name: str,
+    *,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> tuple[bool, str]:
+    label = f"com.quarterdeck.{name}"
+    domain = f"gui/{os.getuid()}/{label}"
+    try:
+        result = run(
+            ["launchctl", "print", domain],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"cannot inspect {label}: {exc}"
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip().splitlines()
+        return False, f"launchd service unavailable: {detail[0] if detail else label}"
+
+    output = result.stdout
+    state = re.search(r"^\s*state = ([^\s]+)\s*$", output, re.MULTILINE)
+    runs = re.search(r"^\s*runs = (\d+)\s*$", output, re.MULTILINE)
+    if name == "paperclip":
+        running = state is not None and state.group(1) == "running"
+        return running, f"state={state.group(1) if state else 'unknown'}"
+
+    last_exit = re.search(r"^\s*last exit code = (-?\d+)\s*$", output, re.MULTILINE)
+    if last_exit is None:
+        return False, f"runs={runs.group(1) if runs else 'unknown'} last_exit=unknown"
+    code = int(last_exit.group(1))
+    return code == 0, f"runs={runs.group(1) if runs else 'unknown'} last_exit={code}"
+
+
 def run_doctor(
     *,
     settings_loader: Callable[[], Settings] = Settings,
@@ -141,6 +177,7 @@ def run_doctor(
     port_open: Callable[[str, int], bool] = _port_open,
     paperclip_processes: Callable[[], list[int]] = _paperclip_processes,
     launchagents_dir: Path | None = None,
+    launchd_runtime: Callable[[str], tuple[bool, str]] | None = None,
 ) -> dict:
     checks: list[DoctorCheck] = []
 
@@ -267,7 +304,11 @@ def run_doctor(
 
     if settings is not None:
         installed_dir = launchagents_dir or (Path.home() / "Library" / "LaunchAgents")
-        for name in ("paperclip", "projector", "watchdog"):
+        installed_names = ["paperclip", "projector", "watchdog"]
+        optional_gate = installed_dir / "com.quarterdeck.gate-recovery.plist"
+        if optional_gate.exists() or optional_gate.is_symlink():
+            installed_names.append("gate-recovery")
+        for name in installed_names:
             installed_ok, installed_detail = _installed_service_security(
                 name, settings, installed_dir
             )
@@ -278,6 +319,19 @@ def run_doctor(
                     installed_detail,
                 )
             )
+        runtime_probe = launchd_runtime
+        if runtime_probe is None and launchagents_dir is None and sys.platform == "darwin":
+            runtime_probe = _launchd_service_runtime
+        if runtime_probe is not None:
+            for name in installed_names:
+                runtime_ok, runtime_detail = runtime_probe(name)
+                checks.append(
+                    DoctorCheck(
+                        f"runtime_{name}",
+                        "pass" if runtime_ok else "fail",
+                        runtime_detail,
+                    )
+                )
 
     for name, port in (("postgres_port", 5432), ("paperclip_port", 3100)):
         opened = port_open("127.0.0.1", port)
