@@ -93,9 +93,11 @@ seven-day soak remains mandatory before M2 is called operationally complete.
   and backup-file permissions, in addition to templates. The production result is fully
   green across those new checks.
 
-Open evidence: inspect the first automatic database backup created after this restart and
-prove it is born as mode 0600. Existing files were corrected, so they cannot prove process
-creation semantics by themselves.
+The creation-mode evidence was then closed without waiting for the hourly timer: the pinned
+Paperclip `db:backup` command was exposed through `qd service exec paperclip
+--paperclip-mode backup`, which injects `DATABASE_URL` only in-process and inherits the same
+077 umask. It created `paperclip-20260713-004017.sql.gz` as mode 0600. A following production
+doctor run remained fully green and counted seven secure backup files.
 
 Current verification after permission hardening: 134 tests pass; ruff, mypy, and
 full-history gitleaks pass. No secret values were printed or committed.

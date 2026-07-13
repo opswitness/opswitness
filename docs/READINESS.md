@@ -8,7 +8,7 @@ blocked by the current open gates below.
 ## Current baseline
 
 - M0-M4 are committed through `759963f`; M5/M6 preparation and production permission
-  hardening are committed through `a0a5ab5`. M2 permanent install and live integration
+  hardening are committed through `51f6a44`. M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
 - Full suite: 134 tests pass; ruff, mypy, DCO, worktree gitleaks, and full-history
   gitleaks are clean.
@@ -51,8 +51,7 @@ blocked by the current open gates below.
 
 ## Open gates (blocking, in order)
 
-1. **Canary elapsed time** — register-trigger must remain healthy for 24–48 hours. Also
-   verify the first post-restart automatic Paperclip backup is created as mode 0600.
+1. **Canary elapsed time** — register-trigger must remain healthy for 24–48 hours.
 2. **Seven-day soak** — only after the canary passes may feed-monitor and sox-monitor
    be adopted; M2 remains incomplete until seven days pass.
 3. **Telegram digest** — not configured in Quarterdeck secrets yet; must be exercised
@@ -96,12 +95,11 @@ blocked by the current open gates below.
 
 ## Next task
 
-Verify the next automatic backup mode, then keep register-trigger under observation for
-24–48 hours. Approve or reject the `OpsWitness` candidate before starting the atomic rename.
+Keep register-trigger under observation for 24–48 hours. Approve or reject the `OpsWitness`
+candidate before starting the atomic rename.
 After the user completes normal Claude login, run the harmless M3 live acceptance drill.
-Do not adopt feed-monitor/sox-monitor,
-bootstrap gate recovery, publish a release, or build the practitioner UI before their
-respective gates pass.
+Do not adopt feed-monitor/sox-monitor, bootstrap gate recovery, publish a release, or build
+the practitioner UI before their respective gates pass.
 
 ---
 
