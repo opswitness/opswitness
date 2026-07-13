@@ -89,6 +89,11 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
    `qd mcp --profile mail` exposes only status/check, and model transmission additionally
    requires an explicit local consent bit. See
    [ADR-0005](adr/0005-metadata-only-mail-monitor.md).
+9. **Elapsed rollout gates are ledger contracts, not prose timestamps.** `qd soak` freezes
+   each tracked job's interval/grace and recomputes first/intermediate/trailing cadence gaps,
+   terminal/degraded evidence, schedule drift, torn lines, and projection backlog. A hard
+   failure remains failed until a reasoned append-only reset; checkpoints never become a
+   second truth source. See [ADR-0006](adr/0006-append-only-soak-gates.md).
 
 ## Necessity and shrinkability
 
@@ -169,6 +174,7 @@ users still never see Quarterdeck itself — they see the workbench it makes tru
 | index (disposable SQLite) | `src/quarterdeck/index.py` | ✅ P2 |
 | watchdog / digest / coverage | `src/quarterdeck/watchdog.py`, `digest.py`, `schedules.py` | ✅ P2 |
 | job lifecycle | `src/quarterdeck/lifecycle.py` | ✅ P2 |
+| canary / soak evidence gate | `src/quarterdeck/soak.py` | ✅ append-only contract + CLI |
 | bootstrap (candidates, two-file model) | `src/quarterdeck/bootstrap.py` | ✅ P2 |
 | adopt (dry-run plist wrapping) | `src/quarterdeck/adopt.py` | ✅ P2 (`--apply` gated on install) |
 | MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ 11-tool ops + isolated 2-tool mail profile |

@@ -31,6 +31,8 @@ workflow_app = typer.Typer(no_args_is_help=True)
 app.add_typer(workflow_app, name="workflow", help="Run fixed, allowlisted workflows")
 mail_app = typer.Typer(no_args_is_help=True)
 app.add_typer(mail_app, name="mail", help="Audit metadata-only Gmail reply checks")
+soak_app = typer.Typer(no_args_is_help=True)
+app.add_typer(soak_app, name="soak", help="Append-only canary and production soak gates")
 
 
 def _load_settings_cli() -> "Settings":
@@ -275,6 +277,166 @@ def mail_check_command() -> None:
     result = check_mail(source="cli", settings=_load_settings_cli())
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
     raise typer.Exit(code=0 if result["ok"] else 1)
+
+
+def _effective_soak_schedules() -> list[dict]:
+    from quarterdeck.bootstrap import load_effective_schedules
+    from quarterdeck.config import config_dir
+
+    try:
+        effective = load_effective_schedules(config_dir())
+    except ValueError as exc:
+        typer.echo(f"schedules config error: {exc}", err=True)
+        raise typer.Exit(code=2) from None
+    return effective["schedules"]
+
+
+def _render_soak(result: dict) -> None:
+    mark = "PASS" if result["state"] == "passed" else result["state"].upper()
+    typer.echo(
+        f"{mark} soak={result['name']} elapsed={result['elapsed_seconds']}s "
+        f"remaining={result['remaining_seconds']}s contract={result['contract_event_id']}"
+    )
+    for job, detail in result["jobs"].items():
+        typer.echo(
+            f"  {job}: starts={detail['starts']} succeeded={detail['successes']} "
+            f"failed={detail['failures']} running={detail['running']} "
+            f"max_gap={detail['max_gap_seconds']}s/{detail['allowed_gap_seconds']}s"
+        )
+    for blocker in result["blockers"]:
+        detail = " ".join(
+            f"{key}={value}"
+            for key, value in blocker.items()
+            if key not in {"code", "severity"}
+        )
+        typer.echo(f"  - {blocker['severity']}:{blocker['code']} {detail}".rstrip())
+
+
+@soak_app.command("start")
+def soak_start(
+    name: str,
+    job: list[str] = typer.Option(..., "--job", help="Repeat for every tracked job"),
+    minimum_hours: float = typer.Option(24.0, "--minimum-hours", min=0.001),
+    reason: str = typer.Option("initial soak", "--reason"),
+    since_run_id: str = typer.Option(
+        "", "--since-run-id", help="Single-job only: anchor to a verified successful run"
+    ),
+) -> None:
+    """Freeze cadence and append a new soak contract."""
+    import json
+
+    from quarterdeck.ledger import Ledger
+    from quarterdeck.soak import record_contract
+
+    settings = _load_settings_cli()
+    try:
+        event = record_contract(
+            Ledger(settings.ledger_dir),
+            name,
+            job,
+            _effective_soak_schedules(),
+            minimum_seconds=max(1, round(minimum_hours * 3600)),
+            reason=reason,
+            since_run_id=since_run_id or None,
+        )
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+    typer.echo(json.dumps(event, ensure_ascii=False, indent=2))
+
+
+@soak_app.command("reset")
+def soak_reset(
+    name: str,
+    reason: str = typer.Option(..., "--reason"),
+    since_run_id: str = typer.Option(
+        "", "--since-run-id", help="Single-job only: anchor to a verified successful run"
+    ),
+) -> None:
+    """Append a reasoned replacement contract; prior evidence remains immutable."""
+    import json
+
+    from quarterdeck.ledger import Ledger
+    from quarterdeck.soak import contract_details, record_contract
+
+    settings = _load_settings_cli()
+    ledger = Ledger(settings.ledger_dir)
+    try:
+        previous = contract_details(ledger.read_all(), name)
+        event = record_contract(
+            ledger,
+            name,
+            [schedule["job"] for schedule in previous["schedules"]],
+            _effective_soak_schedules(),
+            minimum_seconds=previous["minimum_seconds"],
+            reason=reason,
+            reset=True,
+            since_run_id=since_run_id or None,
+        )
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+    typer.echo(json.dumps(event, ensure_ascii=False, indent=2))
+
+
+@soak_app.command("status")
+def soak_status(
+    name: str,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Recompute a soak verdict; only a fully passed gate exits zero."""
+    import json
+    from datetime import UTC, datetime
+
+    from quarterdeck.ledger import Ledger
+    from quarterdeck.soak import evaluate_ledger_soak
+
+    settings = _load_settings_cli()
+    try:
+        result = evaluate_ledger_soak(
+            Ledger(settings.ledger_dir),
+            name,
+            datetime.now(UTC),
+            _effective_soak_schedules(),
+        )
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+    if json_output:
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        _render_soak(result)
+    raise typer.Exit(code=0 if result["healthy"] else 1)
+
+
+@soak_app.command("checkpoint")
+def soak_checkpoint(name: str) -> None:
+    """Append the recomputed verdict as a non-authoritative audit snapshot."""
+    import json
+    from datetime import UTC, datetime
+
+    from quarterdeck.ledger import Ledger
+    from quarterdeck.soak import record_checkpoint
+
+    settings = _load_settings_cli()
+    try:
+        result, event = record_checkpoint(
+            Ledger(settings.ledger_dir),
+            name,
+            datetime.now(UTC),
+            _effective_soak_schedules(),
+        )
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+    typer.echo(
+        json.dumps(
+            {"checkpoint_event_id": event["event_id"], "verdict": result},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    raise typer.Exit(code=0 if result["healthy"] else 1)
 
 
 @app.command()

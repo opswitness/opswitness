@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 186 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
+- Full suite: 201 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
   gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -19,6 +19,10 @@ blocked by the current open gates below.
 - Watchdog, digest, and bootstrap share one `classify_schedule()` definition.
 - Mutable `retired:` config has been removed. `qd retire/unretire --reason` records
   lifecycle events; a post-retirement run becomes `resurrected` and breaks health.
+- Canary and seven-day elapsed gates now use append-only `soak_started`, `soak_reset`, and
+  non-authoritative `soak_checkpoint` events. `qd soak status` freezes cadence and fails on
+  trigger gaps, bad/degraded runs, schedule drift, torn lines, lifecycle violations, or
+  unreconciled projection events. See [ADR-0006](adr/0006-append-only-soak-gates.md).
 - M1 install readiness is implemented without touching production: structured
   `qd doctor --json`; strict config/secrets permissions; secure `qd service exec`;
   three M2 launchd templates; encrypted backup and isolated restore dry-runs.
