@@ -35,7 +35,9 @@ blocked by the current open gates below.
 - `com.tianyuzhou.register-trigger` is the sole canary; its pristine `.qd-bak` exists,
   six runs succeeded, watchdog/digest are green, and projection backlog is zero. A 22-minute
   schema-mismatch interruption required controlled recovery, so continuous evidence restarted
-  at 2026-07-13 15:23 PDT and cannot pass 24 hours before 2026-07-14 15:23 PDT.
+  at 2026-07-13 15:23 PDT and cannot pass 24 hours before 2026-07-14 15:23 PDT. Append-only
+  contract `01KXETZM2A7BXN7D4Z54MF7RH0` now enforces that gate as `m2-canary`; its first
+  production status correctly returned pending/exit 1 with only elapsed time outstanding.
   Evidence: [M2-VALIDATION.md](M2-VALIDATION.md).
 - Feed-monitor and sox-monitor are not adopted. Their production source hashes, dry-run
   diffs, executable paths, schedule semantics, and isolated
@@ -78,7 +80,9 @@ blocked by the current open gates below.
 
 ## Open gates (blocking, in order)
 
-1. **Canary elapsed time** — register-trigger must remain healthy for 24–48 hours.
+1. **Canary elapsed time** — `qd soak status m2-canary` must remain non-green until at least
+   2026-07-14 15:23:32 PDT, then pass together with the independent production checks;
+   register-trigger must remain healthy for 24–48 hours.
 2. **Seven-day soak** — only after the canary passes may feed-monitor and sox-monitor
    be adopted; M2 remains incomplete until seven days pass.
 3. **Telegram digest** — secure hidden-input `qd telegram configure/test` tooling is
@@ -151,7 +155,8 @@ The former M3 and AionUi blockers are closed without weakening their acceptance 
 Continue in this order:
 
 1. At or after the restarted 24-hour checkpoint on 2026-07-14 15:23 PDT, rerun production
-   doctor, status, digest, watchdog, projector, backup, and canary evidence checks. Continue
+   `qd soak status m2-canary`, doctor, status, digest, watchdog, projector, backup, and canary
+   evidence checks. Append `qd soak checkpoint m2-canary` only after recomputing the verdict. Continue
    observation up to 48 hours if any result is ambiguous.
 2. Only after that gate passes, follow the hash-locked, idle-PID adoption procedure in
    `M2-VALIDATION.md` for feed-monitor and sox-monitor. Start the seven-day soak only when
@@ -190,8 +195,8 @@ own independent acceptance gates.
 
 ## Next task
 
-Keep register-trigger under observation until the restarted 24–48 hour canary gate can be
-evaluated no earlier than 2026-07-14 15:23 PDT.
+Keep register-trigger under observation until `qd soak status m2-canary` can be evaluated no
+earlier than 2026-07-14 15:23:32 PDT.
 Approve or reject the `OpsWitness` candidate before starting the atomic rename. Revalidate the
 guarded AionUi agent after any AionUi upgrade.
 Do not adopt feed-monitor/sox-monitor, publish a release, or build the practitioner UI before

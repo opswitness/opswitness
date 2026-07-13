@@ -178,3 +178,26 @@ The 15:01-15:23 observability interruption invalidates continuous-soak evidence 
 ledger event was lost. The 24-hour canary clock therefore restarts at 2026-07-13 15:23 PDT; the
 earliest admissible gate is 2026-07-14 15:23 PDT. Tests and earlier successful runs cannot replace
 that elapsed time.
+
+### Machine-enforced canary contract: 2026-07-13 15:53 PDT
+
+- Commit `5ddcc5f` adds ADR-0006 and `qd soak start/reset/status/checkpoint`. The verdict freezes
+  each job's interval/grace and recomputes elapsed time, every cadence boundary, terminal and
+  degraded evidence, schedule drift, torn lines, lifecycle state, and projection backlog from the
+  authoritative ledger. A checkpoint is only an audit snapshot; it cannot make a gate pass.
+- Production event `01KXETZM2A7BXN7D4Z54MF7RH0` (`soak_started`) defines `m2-canary` for
+  `com.tianyuzhou.register-trigger`, minimum 86400 seconds, frozen interval 21600 seconds plus
+  4320 seconds grace. It is anchored to verified successful run
+  `01KXES8445NZP2KAVFY6BD859S`, whose `run_started` timestamp is
+  `2026-07-13T22:23:32.485475+00:00` (15:23:32 PDT).
+- The first `qd soak status m2-canary --json` returned exit 1, `state=pending`, one success,
+  zero failures, zero projection backlog, and exactly one blocker: `minimum_duration`. This is the
+  required non-green result before elapsed time completes.
+- The contract was appended with the repository venv. The production uv tool and all launchd
+  jobs were left running and unchanged: no install, bootout, bootstrap, or kickstart occurred.
+  A post-append production doctor remained healthy; Paperclip remained a single instance; ledger
+  run count remained 12 and projection backlog remained zero.
+
+The machine gate cannot pass before 2026-07-14 15:23:32 PDT. At that time it is still only the
+elapsed canary gate: doctor, digest, watchdog, projector, backup, and the remaining M2 acceptance
+checks must pass independently before adopting feed-monitor or sox-monitor.
