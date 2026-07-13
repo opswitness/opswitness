@@ -136,3 +136,19 @@ After the 24-48 hour canary gate passes, adoption must remain fail-closed and or
 4. Any wrapper, coverage, projection, or process-tree anomaly triggers immediate
    `qd adopt launchd LABEL --rollback`, launchd reload, and removal of that label from the
    enrollment list. The seven-day soak clock starts only after both jobs are healthy.
+
+### Upgrade maintenance checkpoint: 2026-07-13 12:07 PDT
+
+- Before maintenance, the canary had four successful wrapped runs and zero projection
+  backlog. It was idle when inspected.
+- Projector, watchdog, gate-recovery, and the sole adopted canary were booted out; a process
+  scan found no remaining `qd wrap`, periodic-service, or gated-Claude process before the uv
+  environment was replaced.
+- The final wheel was installed with the MCP extra. Each original plist was then bootstrapped;
+  periodic services were kicked once to establish an explicit runtime baseline.
+- Runtime-aware production doctor reported Paperclip running and projector, watchdog, and
+  gate-recovery at last exit 0. The canary's `RunAtLoad` invocation became its fifth successful
+  ledger run; total indexed runs became nine and projection backlog returned to zero.
+
+The maintenance-triggered fifth run proves upgrade recovery only. It does not replace elapsed
+time and does not move the earliest 24-hour canary gate from approximately 17:32 PDT.
