@@ -1,4 +1,5 @@
 import json
+import os
 import plistlib
 import shutil
 import subprocess
@@ -257,6 +258,23 @@ def test_doctor_reports_missing_tools_without_traceback(tmp_path, monkeypatch):
     assert result["healthy"] is False
     failed = {check["name"] for check in result["checks"] if check["status"] == "fail"}
     assert {"node", "psql", "pg_dump", "age", "postgres_port", "paperclip_port"} <= failed
+
+
+def test_doctor_rejects_insecure_workflow_manifest(tmp_path, monkeypatch):
+    settings = _settings(tmp_path, monkeypatch)
+    manifest = Path(os.environ["QD_CONFIG_DIR"]) / "workflows.yaml"
+    manifest.write_text("schema_version: 1\nworkflows: {}\n")
+    manifest.chmod(0o644)
+    result = run_doctor(
+        settings_loader=lambda: settings,
+        which=lambda name: None,
+        version=lambda path, args: "unused",
+        port_open=lambda host, port: False,
+        paperclip_processes=lambda: [],
+    )
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["workflow_manifest"]["status"] == "fail"
+    assert "0600" in checks["workflow_manifest"]["detail"]
 
 
 def test_backup_and_restore_are_non_mutating_by_default(tmp_path, monkeypatch):

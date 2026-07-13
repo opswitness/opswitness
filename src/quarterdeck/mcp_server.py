@@ -1,8 +1,9 @@
 """Quarterdeck MCP server — the AionUi (or any MCP client) console surface.
 
 Deliberately thin: every tool delegates to the same functions the CLI uses, so the
-conversational console and the terminal can never disagree. Read-mostly by design;
-the only mutating tool is project_now (idempotent, at-least-once).
+conversational console and the terminal can never disagree. Read-mostly by design.
+Mutations are limited to reconciled projection and fixed, allowlisted workflow
+dispatch; arbitrary shell input is never accepted.
 
 Complements — does not duplicate — Paperclip's own 35-tool MCP server: Paperclip
 covers issues/projects/comments; Quarterdeck covers the external-fleet ledger,
@@ -135,16 +136,45 @@ def project_now() -> dict[str, Any]:
     return projector.drain()
 
 
+def workflow_catalog() -> dict[str, Any]:
+    from quarterdeck.workflows import workflow_catalog as get_catalog
+
+    try:
+        return {"workflows": get_catalog()}
+    except (OSError, ValueError) as exc:
+        return {"error": str(exc), "workflows": []}
+
+
+def workflow_start(workflow_id: str) -> dict[str, Any]:
+    from quarterdeck.workflows import start_workflow
+
+    try:
+        return start_workflow(workflow_id, source="mcp", settings=_settings())
+    except (OSError, ValueError) as exc:
+        return {"accepted": False, "workflow_id": workflow_id, "error": str(exc)}
+
+
+def workflow_status(run_id: str = "", limit: int = 20) -> dict[str, Any]:
+    from quarterdeck.workflows import workflow_status as get_status
+
+    try:
+        return {"runs": get_status(run_id or None, limit=limit, settings=_settings())}
+    except (OSError, ValueError) as exc:
+        return {"error": str(exc), "runs": []}
+
+
 def build_server() -> Any:
     """Construct the FastMCP server (import deferred so the [mcp] extra stays optional)."""
     from mcp.server.fastmcp import FastMCP
+    from mcp.types import ToolAnnotations
 
     server = FastMCP(
         "quarterdeck",
         instructions=(
             "Quarterdeck: run ledger, watchdog, and Paperclip projection control for an "
             "external script/agent fleet. Read tools are safe; project_now writes to "
-            "Paperclip (at-least-once, idempotent via reconciliation)."
+            "Paperclip by reconciliation; workflow_start can launch only fixed ids from "
+            "the local 0600 workflow allowlist and never accepts shell input."
         ),
     )
 
@@ -179,5 +209,28 @@ def build_server() -> Any:
     @server.tool(description="Drain unacked ledger events into Paperclip now (at-least-once)")
     def qd_project_now() -> str:
         return json.dumps(project_now(), ensure_ascii=False)
+
+    @server.tool(description="List fixed workflow ids approved in the local 0600 allowlist")
+    def qd_workflows() -> str:
+        return json.dumps(workflow_catalog(), ensure_ascii=False)
+
+    @server.tool(
+        description=(
+            "Start one allowlisted workflow by exact id; returns immediately with an audited run_id"
+        ),
+        annotations=ToolAnnotations(
+            title="Run approved workflow",
+            readOnlyHint=False,
+            destructiveHint=True,
+            idempotentHint=False,
+            openWorldHint=False,
+        ),
+    )
+    def qd_workflow_start(workflow_id: str) -> str:
+        return json.dumps(workflow_start(workflow_id), ensure_ascii=False)
+
+    @server.tool(description="Get authoritative status for recent workflow launches or one run_id")
+    def qd_workflow_status(run_id: str = "", limit: int = 20) -> str:
+        return json.dumps(workflow_status(run_id, limit), ensure_ascii=False)
 
     return server

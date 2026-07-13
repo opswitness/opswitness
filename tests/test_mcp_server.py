@@ -53,6 +53,9 @@ def test_server_exposes_all_tools(seeded_env):
         "qd_artifact_verify",
         "qd_watchdog",
         "qd_project_now",
+        "qd_workflows",
+        "qd_workflow_start",
+        "qd_workflow_status",
     }
 
 

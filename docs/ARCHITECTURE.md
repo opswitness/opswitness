@@ -23,13 +23,14 @@ flowchart BT
         Q2["projector (commit order, fail-stop)"]
         Q3["watchdog + digest (fail-closed)"]
         Q4["gate (P3) + artifacts (P4)"]
+        Q5["allowlisted workflow launch"]
     end
     subgraph P["Governance layer — Paperclip (73.4k★ MIT, off the shelf)"]
         P1["issues · approvals · budgets · audit · Postgres"]
     end
     subgraph C["Console layer (three replaceable doors)"]
         C1["Paperclip Web UI"]
-        C2["AionUi (Quarterdeck MCP, no approval writes)"]
+        C2["AionUi (evidence + allowlisted launch; no approval writes)"]
         C3["qd CLI + Telegram"]
     end
     subgraph V["Vertical case layer (P5, paid)"]
@@ -74,6 +75,11 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
    vertical case layer, where the curated rules corpus is itself the paid content —
    shape defined in [ADR-0002](adr/0002-knowledge-layer.md): deterministic-first split,
    markdown vault as source, structured-first retrieval, verifiable citations.
+7. **A workflow button is an allowlisted launch, never a remote shell.** AionUi owns the
+   Manual Task and **Run now** UI. Quarterdeck accepts only an exact id from a local `0600`
+   manifest, then enforces fixed argv, no runtime parameters, single-workflow concurrency,
+   a detached supervisor, and fsync-before-exec dispatch order. See
+   [ADR-0004](adr/0004-allowlisted-workflow-launch.md).
 
 ## Necessity and shrinkability
 
@@ -104,6 +110,12 @@ human identity** stay with Paperclip while the **authoritative approval evidence
 outcome) stays in the local ledger — law 1 admits no exception: if Paperclip loses its
 database, pending calls stay denied and every past decision remains locally auditable;
 sessions stay with the agent CLIs.
+
+AionUi's native Manual Scheduled Task already owns the button, history, and **Run now** action.
+Quarterdeck therefore builds no workflow UI and no DAG runtime. It contributes only the missing
+security/evidence adapter: fixed local definitions become asynchronous MCP launches whose
+requested/dispatched/run events share one run id. Internal workflow orchestration stays with the
+registered command (for example LangGraph).
 
 The standalone Paperclip MCP is deliberately not mounted in AionUi. Its pinned
 v2026.707.0 surface includes approval decisions, other mutations, and a general `/api`
@@ -150,7 +162,8 @@ users still never see Quarterdeck itself — they see the workbench it makes tru
 | job lifecycle | `src/quarterdeck/lifecycle.py` | ✅ P2 |
 | bootstrap (candidates, two-file model) | `src/quarterdeck/bootstrap.py` | ✅ P2 |
 | adopt (dry-run plist wrapping) | `src/quarterdeck/adopt.py` | ✅ P2 (`--apply` gated on install) |
-| MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ P2 |
+| MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ P2 + allowlisted launch |
+| allowlisted workflow launcher | `src/quarterdeck/workflows.py`, `workflow_worker.py` | ✅ code + tests; live AionUi task pending |
 | install doctor / secure services / disaster recovery | `src/quarterdeck/doctor.py`, `service.py`, `backup.py` | ✅ M1 + M2 live validation; soak pending |
 | gate (PreToolUse `defer` → Paperclip approval → resume) | `gate.py`, `gated_claude.py` | M3 code complete; live auth/acceptance pending |
 | artifacts (ledger events + content-addressed projection) | `artifacts.py`, `index.py` | ✅ M4 code + live projection |

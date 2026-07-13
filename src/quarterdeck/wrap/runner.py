@@ -19,6 +19,7 @@ import sys
 import threading
 import time
 from collections import deque
+from pathlib import Path
 from typing import IO, Any
 
 from quarterdeck.config import Settings
@@ -43,18 +44,26 @@ def _ring_tail(ring: deque[bytes], limit: int) -> str:
     return data.decode(errors="replace")
 
 
-def run_wrapped(job: str, argv: list[str], settings: Settings | None = None) -> int:
+def run_wrapped(
+    job: str,
+    argv: list[str],
+    settings: Settings | None = None,
+    *,
+    run_id: str | None = None,
+    cwd: Path | str | None = None,
+) -> int:
     settings = settings or Settings()
     ledger = Ledger(settings.ledger_dir)
-    run_id = new_ulid()
+    run_id = run_id or new_ulid()
     started_at = time.monotonic()
     degraded = False
 
+    execution_cwd = os.fspath(cwd) if cwd is not None else os.getcwd()
     argv_recorded = redact_argv(argv) if settings.redact else list(argv)
     started = ledger.append(
         "run_started",
         run_id,
-        {"job": job, "argv": argv_recorded, "cwd": os.getcwd(), "pid": os.getpid()},
+        {"job": job, "argv": argv_recorded, "cwd": execution_cwd, "pid": os.getpid()},
         fsync=True,  # durable BEFORE exec — power loss must not yield a ran-but-unrecorded job
     )
     if started is None:
@@ -67,6 +76,7 @@ def run_wrapped(job: str, argv: list[str], settings: Settings | None = None) -> 
             argv,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            cwd=execution_cwd,
             start_new_session=True,  # own process group: signals reach the whole tree
         )
     except OSError as exc:

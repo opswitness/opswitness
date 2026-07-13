@@ -16,6 +16,7 @@ It adds the three things the platforms don't cover:
 | **`qd wrap`** | Zero-modification onboarding for launchd/cron jobs: runs land in a local append-only ledger (crash-safe JSONL + SQLite index) and are projected into Paperclip as issues/comments/work-products ([ADR-0001](docs/adr/0001-run-ledger-write-model.md)). Never breaks the wrapped job (offline spool, exit-code mirroring). | Paperclip's watchdog only verifies its *own* issue trees; external heartbeat runs are read-only by design — nothing monitors external scheduled scripts. |
 | **`qd gate`** | Fail-closed, *tool-call-level* human approval for non-interactive Claude Code via the official PreToolUse defer contract: defer → Paperclip board decision → same-session resume. Every transition lands in the local evidence ledger. | Paperclip approvals are issue-level sign-offs ([#3017](https://github.com/paperclipai/paperclip/issues/3017) is open); hobby hooks have no independent evidence ledger behind them. |
 | **`qd artifacts`** | Authoritative artifact events in the local ledger; queries served by the disposable SQLite index; content stored content-addressed (attachment / immutable blob); Paperclip work-products are a rebuildable projection. | Work-products carry no content hashes and no server-side idempotency (`externalId` has no unique constraint) — evidence-grade artifacts need an authority outside the platform. |
+| **`qd workflow`** | Register a fixed, shell-free workflow once, then launch it asynchronously from AionUi's native **Run now** button. Dispatch order, single-workflow concurrency, and terminal state are ledger evidence. | AionUi supplies the button and agent session; Quarterdeck supplies the command allowlist and evidence boundary. No second workflow engine or generic remote shell is built. |
 
 ## Design rules
 
@@ -26,6 +27,8 @@ It adds the three things the platforms don't cover:
   never mutable config that can erase a known job from coverage.
 - **Your credentials stay yours.** Quarterdeck never handles Claude subscription tokens; it talks to
   the `claude` CLI *you* installed and authenticated. Hosted/product deployments must use API keys.
+- **Launch is not a shell.** AionUi can start only ids in the local `0600` workflow manifest;
+  it cannot submit paths, commands, environment variables, or runtime arguments.
 
 ## Showcases
 

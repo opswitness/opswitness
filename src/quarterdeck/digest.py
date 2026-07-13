@@ -130,6 +130,7 @@ def build_coverage(
     schedules: list[dict[str, Any]] | None,
     error: str | None = None,
     events: list[dict[str, Any]] | None = None,
+    on_demand_jobs: set[str] | None = None,
 ) -> dict[str, Any]:
     """Structured coverage verdict.
 
@@ -139,6 +140,8 @@ def build_coverage(
     - the coverage universe is EVERY job the ledger has ever seen — the report
       window scopes performance stats, never the universe (a stray that ran
       48h ago is still a stray today);
+    - a run tied by run_id to a durable workflow_launch_requested event is explicitly
+      on-demand, not a missing schedule; its execution result still affects health;
     - retirement is excused only by append-only job lifecycle events; a subsequent
       run resurrects the job and breaks coverage until an explicit unretire.
     """
@@ -172,6 +175,7 @@ def build_coverage(
         "observed_unregistered": observed_unregistered,
         "observed_disabled": observed_disabled,
         "observed_unsupported": observed_unsupported,
+        "on_demand": sorted(on_demand_jobs or set()),
         "error": error,
     }
 
@@ -187,8 +191,20 @@ def build_digest(
     cutoff = now - timedelta(hours=hours)
     all_runs = _collect_runs(events)
     runs = [r for r in all_runs.values() if _in_window(r, cutoff)]
-    # Coverage universe: every job the ledger has EVER seen, not just this window.
-    observed_all = {r["job"] for r in all_runs.values()}
+    # Coverage universe: every scheduled/external job the ledger has EVER seen, not just
+    # this window. A durable workflow request marks its matching run_id as intentionally
+    # on-demand; it remains in performance/health, but is not a missing schedule.
+    on_demand_run_ids = {
+        str(event.get("run_id"))
+        for event in events
+        if event.get("kind") == "workflow_launch_requested"
+    }
+    on_demand_jobs = {
+        run["job"] for run_id, run in all_runs.items() if run_id in on_demand_run_ids
+    }
+    observed_all = {
+        run["job"] for run_id, run in all_runs.items() if run_id not in on_demand_run_ids
+    }
 
     jobs: dict[str, dict[str, int]] = {}
     for run in runs:
@@ -216,6 +232,7 @@ def build_digest(
         schedules,
         coverage_error,
         events=events,
+        on_demand_jobs=on_demand_jobs,
     )
     outcomes = _collect_outcomes(events, cutoff)
     healthy = (
@@ -276,7 +293,8 @@ def render_markdown(d: dict[str, Any]) -> str:
     ]
     lines[-1] += (
         f"（活跃 {len(cov['active_covered'])} · 停用 {len(cov['disabled'])} · "
-        f"不支持 {len(cov['unsupported'])} · 退役 {len(cov['retired'])}）"
+        f"不支持 {len(cov['unsupported'])} · 退役 {len(cov['retired'])} · "
+        f"按需 {len(cov['on_demand'])}）"
     )
     def _gap_lines(c: dict[str, Any]) -> list[str]:
         out = [f"- `{job}`（未登记）" for job in c["observed_unregistered"]]
@@ -366,6 +384,7 @@ def render_telegram_html(d: dict[str, Any]) -> str:
         f"<b>舰队日报（近 {d['window_hours']}h）— {verdict}</b>",
         f"总运行 {d['total_runs']} · 问题 {len(d['problems'])} · 积压 {d['projection_backlog']}"
         f" · 覆盖 {_COVERAGE_ZH[cov['status']]}"
+        f" · 按需 {len(cov['on_demand'])}"
         + (f" · 漏跑 {len(d['missed'])}" if cov["status"] == "full" else ""),
     ]
     gaps = (
@@ -461,7 +480,8 @@ def render_page_html(d: dict[str, Any]) -> str:
         f"总运行 {esc(d['total_runs'])} · 问题 {len(d['problems'])} · "
         f"投影积压 {esc(d['projection_backlog'])} · watchdog 覆盖：{_COVERAGE_ZH[cov['status']]}"
         f"（活跃 {len(cov['active_covered'])} · 停用 {len(cov['disabled'])} · "
-        f"不支持 {len(cov['unsupported'])} · 退役 {len(cov['retired'])}）"
+        f"不支持 {len(cov['unsupported'])} · 退役 {len(cov['retired'])} · "
+        f"按需 {len(cov['on_demand'])}）"
     )
     if cov["status"] == "full":
         cov_line += f" · 漏跑 {len(d['missed'])}"

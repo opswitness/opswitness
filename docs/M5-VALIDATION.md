@@ -18,7 +18,8 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   inputs. The showcase covers wrapped execution, outage backlog, ordered replay,
   reconcile-without-repost, one-shot approval evidence, artifact eval/signoff, and the
   execution/outcome digest split.
-- Quarterdeck MCP now exposes eight tools, including artifact listing and CAS verification.
+- Quarterdeck MCP now exposes eleven tools: the original evidence/projection surface plus
+  allowlisted workflow catalog, asynchronous start, and ledger-folded status.
   The stable user-level MCP command is `~/.local/bin/qd mcp`; credentials are read only by
   Quarterdeck from its permission-checked local configuration, not copied into AionUi.
 
@@ -36,6 +37,13 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   reinstalled with `--with mcp`. A direct MCP client handshake against that stable binary
   listed exactly eight expected tools. On 2026-07-13, AionUi's own Settings -> Tools ->
   quarterdeck -> Check MCP Availability succeeded and expanded the same eight-tool list.
+- ADR-0004 adds three tools without replacing the canary's production uv tool. A direct stdio
+  handshake against the isolated repository environment listed exactly eleven tools. An
+  isolated fixed-command launch completed `requested -> dispatched -> run_started ->
+  run_finished` with exit 0, while a dispatch-fsync fault test proved the worker never executes.
+  The real `0600` manifest now contains only `quarterdeck-showcase`. Rebinding AionUi to the
+  isolated MCP and exercising its Manual Task **Run now** button remain pending macOS unlock;
+  the production `~/.local/bin/qd` will not be replaced before the canary time gate.
 - The separate `@paperclipai/mcp-server@2026.707.0` package was audited but deliberately
   not mounted. It exposes approval decisions, other mutations, and a general `/api` escape
   hatch, requires a bearer token in its environment, and offers no documented read-only

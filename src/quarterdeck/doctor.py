@@ -18,6 +18,7 @@ import psutil
 
 from quarterdeck.config import Settings, config_dir, resolve_api_key, validate_config_files
 from quarterdeck.service import SERVICE_NAMES, _template_bytes
+from quarterdeck.workflows import load_workflows, workflow_catalog
 
 
 @dataclass(frozen=True)
@@ -188,6 +189,23 @@ def run_doctor(
     except (ValueError, OSError) as exc:
         settings = None
         checks.append(DoctorCheck("config_security", "fail", str(exc)))
+
+    try:
+        manifest = load_workflows()
+        catalog = workflow_catalog()
+        invalid = [row for row in catalog if row["error"]]
+        ready = sum(bool(row["ready"]) for row in catalog)
+        checks.append(
+            DoctorCheck(
+                "workflow_manifest",
+                "pass" if not invalid else "fail",
+                f"registered={len(manifest.workflows)} ready={ready}"
+                if not invalid
+                else "; ".join(str(row["error"]) for row in invalid),
+            )
+        )
+    except (OSError, ValueError) as exc:
+        checks.append(DoctorCheck("workflow_manifest", "fail", str(exc)))
 
     python_ok = sys.version_info >= (3, 12)
     checks.append(

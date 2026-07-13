@@ -27,6 +27,8 @@ artifacts_app = typer.Typer(no_args_is_help=True)
 app.add_typer(artifacts_app, name="artifacts", help="Content-addressed outcome evidence")
 telegram_app = typer.Typer(no_args_is_help=True)
 app.add_typer(telegram_app, name="telegram", help="Configure and test Telegram delivery")
+workflow_app = typer.Typer(no_args_is_help=True)
+app.add_typer(workflow_app, name="workflow", help="Run fixed, allowlisted workflows")
 
 
 def _load_settings_cli() -> "Settings":
@@ -37,6 +39,85 @@ def _load_settings_cli() -> "Settings":
     except (ValueError, OSError) as exc:
         typer.echo(f"configuration error: {exc}", err=True)
         raise typer.Exit(code=2) from None
+
+
+@workflow_app.command(
+    "register", context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
+def workflow_register(
+    ctx: typer.Context,
+    workflow_id: str,
+    title: str = typer.Option("", "--title"),
+    description: str = typer.Option("", "--description"),
+    cwd: str = typer.Option(..., "--cwd", help="Absolute working directory"),
+    replace: bool = typer.Option(False, "--replace"),
+) -> None:
+    """Register a fixed command: qd workflow register ID --cwd DIR -- /abs/cmd args."""
+    from pathlib import Path
+
+    from quarterdeck.workflows import register_workflow
+
+    argv = list(ctx.args)
+    if argv and argv[0] == "--":
+        argv = argv[1:]
+    if not argv:
+        typer.echo("workflow command is required after --", err=True)
+        raise typer.Exit(code=2)
+    try:
+        path = register_workflow(
+            workflow_id,
+            title=title.strip() or workflow_id,
+            description=description.strip(),
+            argv=argv,
+            cwd=Path(cwd),
+            replace=replace,
+        )
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+    typer.echo(f"registered {workflow_id} in {path}")
+
+
+@workflow_app.command("list")
+def workflow_list() -> None:
+    """List the only workflow ids that AionUi is allowed to start."""
+    import json
+
+    from quarterdeck.workflows import workflow_catalog
+
+    try:
+        rows = workflow_catalog()
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+    typer.echo(json.dumps(rows, ensure_ascii=False, indent=2))
+
+
+@workflow_app.command("start")
+def workflow_start(workflow_id: str) -> None:
+    """Dispatch one registered workflow and return its run id immediately."""
+    import json
+
+    from quarterdeck.workflows import start_workflow
+
+    result = start_workflow(workflow_id, source="cli", settings=_load_settings_cli())
+    typer.echo(json.dumps(result, ensure_ascii=False))
+    if not result["accepted"]:
+        raise typer.Exit(code=1)
+
+
+@workflow_app.command("status")
+def workflow_status(
+    run_id: str = typer.Option("", "--run-id"),
+    limit: int = typer.Option(20, "--limit", min=1, max=200),
+) -> None:
+    """Fold authoritative ledger events into workflow launch states."""
+    import json
+
+    from quarterdeck.workflows import workflow_status as get_status
+
+    rows = get_status(run_id or None, limit=limit, settings=_load_settings_cli())
+    typer.echo(json.dumps(rows, ensure_ascii=False, indent=2))
 
 
 @service_app.command("exec")

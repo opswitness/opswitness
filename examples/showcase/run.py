@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -153,9 +154,13 @@ def run_showcase(output: Path) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    print(json.dumps(run_showcase(args.output), indent=2))
+    output = args.output or (
+        Path(tempfile.gettempdir())
+        / f"quarterdeck-showcase-{datetime.now(UTC):%Y%m%dT%H%M%S}-{os.getpid()}"
+    )
+    print(json.dumps(run_showcase(output), indent=2))
     return 0
 
 

@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 152 tests pass; ruff, mypy, DCO, worktree gitleaks, and full-history
+- Full suite: 164 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
   gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -49,9 +49,14 @@ blocked by the current open gates below.
   [ADR-0003](adr/0003-artifact-authority.md).
 - M5 name-independent release preparation includes cross-platform CI, DCO enforcement,
   wheel/sdist hashes, SPDX SBOM, GitHub provenance attestation, release assets, an
-  end-to-end synthetic showcase, and an eight-tool MCP console. The first-run local core
+  end-to-end synthetic showcase, and an eleven-tool MCP console. The first-run local core
   clears the ten-minute target. Public release remains blocked by the brand and remote
   gates. Evidence: [M5-VALIDATION.md](M5-VALIDATION.md).
+- The AionUi launch adapter is code-complete: a strict `0600` workflow allowlist, fixed absolute
+  argv, no runtime parameters or shell, per-workflow concurrency lock, detached supervisor, and
+  fsync dispatch barrier. The isolated complete showcase passed and the real manifest contains
+  only that showcase. AionUi Manual Task binding remains a live UI acceptance item; production
+  qd was deliberately not replaced while its 24-hour canary is still accumulating.
 - M6 is recruitment-ready but intentionally has no product code. The paid-design-partner
   gate, data boundary, implementation order, and success evidence are fixed in
   [M6-PILOT-GATE.md](M6-PILOT-GATE.md).
@@ -65,14 +70,18 @@ blocked by the current open gates below.
    implemented, atomically writes only the `0600` secret file, and refuses silent
    replacement. Production credentials are still absent and delivery must be exercised
    during soak without exposing or copying tokens into chat, repo, argv, logs, or plists.
-4. **Brand gate** — `QUARTERDECK` has an active US class-42 software registration and
+4. **AionUi one-click acceptance** — after macOS is unlocked, point the AionUi MCP entry at the
+   isolated repository qd, confirm all eleven tools, create one Existing-conversation Manual
+   Task, grant session-level permission only to `qd_workflow_start`, and prove **Run now** yields
+   one successful ledger run. Do not enable YOLO or allow the whole MCP server.
+5. **Brand gate** — `QUARTERDECK` has an active US class-42 software registration and
    substantial software-name usage. `OpsWitness` is the preliminary recommended replacement,
    and its exact/broader official USPTO queries plus live package, GitHub, and domain checks
    are clear at the recorded snapshot. No rename or reservation has been approved. Evidence:
    [BRAND-CLEARANCE.md](BRAND-CLEARANCE.md).
-5. **No git remote** — GitHub Actions, attestations, private vulnerability reporting,
+6. **No git remote** — GitHub Actions, attestations, private vulnerability reporting,
    and the release workflow have never actually run.
-6. **M6 commercial gate** — no practitioner UI or private product repository until a
+7. **M6 commercial gate** — no practitioner UI or private product repository until a
    design partner gives a written paid commitment or deposit.
 
 ## Resumption update (2026-07-13 11:59 PDT)
@@ -90,6 +99,9 @@ The former M3 and AionUi blockers are closed without weakening their acceptance 
   tools, closing the in-app acceptance gate. The full Paperclip MCP is intentionally not
   mounted: its pinned package exposes approval writes and a generic API escape hatch without
   a server-enforced read-only mode. Approval decisions remain in Paperclip Web UI.
+- That eight-tool acceptance remains valid for the evidence console. ADR-0004 subsequently
+  added three allowlisted launch tools. Their direct eleven-tool handshake and isolated complete
+  workflow pass, but the new Manual Task button is not yet accepted in-app.
 - Gate-recovery is installed. One uv-tool replacement-window import failure exposed an
   upgrade race; the service recovered to latest exit 0, doctor now checks runtime state, and
   the install runbook requires quiescing all qd consumers during upgrades.
@@ -104,15 +116,17 @@ The former M3 and AionUi blockers are closed without weakening their acceptance 
 
 Continue in this order:
 
-1. At or after the 24-hour checkpoint, rerun production doctor, status, digest, watchdog,
+1. After macOS unlock, finish the isolated AionUi Manual Task acceptance without replacing the
+   production uv tool or changing any launchd service.
+2. At or after the 24-hour checkpoint, rerun production doctor, status, digest, watchdog,
    projector, backup, and canary evidence checks. Continue observation up to 48 hours if any
    result is ambiguous.
-2. Only after that gate passes, follow the hash-locked, idle-PID adoption procedure in
+3. Only after that gate passes, follow the hash-locked, idle-PID adoption procedure in
    `M2-VALIDATION.md` for feed-monitor and sox-monitor. Start the seven-day soak only when
    both jobs are wrapped, enrolled by exact label, and healthy.
-3. Obtain an explicit brand decision before creating a remote or changing public
+4. Obtain an explicit brand decision before creating a remote or changing public
    identifiers. Run real GitHub Actions and provenance only after that decision.
-4. Build the private practitioner product only after written paid commitment or deposit.
+5. Build the private practitioner product only after written paid commitment or deposit.
 
 M2 is complete only after the seven-day soak passes with zero unexplained loss, duplicate,
 false-green state, process-tree survivor, or unrecovered backlog. M3, M5, and M6 retain their
@@ -144,8 +158,9 @@ own independent acceptance gates.
 
 ## Next task
 
-Keep register-trigger under observation for 24–48 hours. Approve or reject the `OpsWitness`
-candidate before starting the atomic rename.
+Unlock macOS and finish the AionUi Manual Task acceptance while keeping register-trigger under
+observation for 24–48 hours. Approve or reject the `OpsWitness` candidate before starting the
+atomic rename.
 Do not adopt feed-monitor/sox-monitor, publish a release, or build the practitioner UI before
 their respective gates pass.
 
