@@ -74,5 +74,28 @@ seven-day soak remains mandatory before M2 is called operationally complete.
 - An unsandboxed `qd doctor --json` remained fully green with ports 5432/3100 open and one
   matching Paperclip process.
 
-Verification after the live fixes: 106 tests pass; ruff, mypy, and full-history gitleaks
-pass. No secret values were printed or committed.
+### Permission hardening checkpoint: 2026-07-13 00:32 PDT
+
+- A leaf-mode audit found the Paperclip backup directory at 0755 and its `.sql.gz` files at
+  0644. The enclosing `~/.local/share/paperclip` directory was already 0700, so other local
+  users had no traversable path, but the leaf permissions violated the portable backup
+  invariant.
+- Existing backup and log directories/files were tightened to 0700/0600. Exact pre-change
+  launchd plists were preserved as `.pre-umask-20260713` rollback copies.
+- All four committed service templates now carry launchd `Umask=077`; `qd service exec`
+  independently calls `umask(077)` before `execve` as defense in depth.
+- The installed Paperclip/projector/watchdog plists were atomically replaced after a diff
+  proved the only change was `Umask=077`, and all three passed `plutil -lint`.
+- Paperclip restarted cleanly on one new PID; health returned `ok`. `launchctl print`
+  reported `umask = 77` for all three services. After reload, projector ran five times and
+  watchdog twice with exit code 0; status and digest remained green with zero backlog.
+- `qd doctor` now checks actual installed plists, service-log permissions, backup-directory
+  and backup-file permissions, in addition to templates. The production result is fully
+  green across those new checks.
+
+Open evidence: inspect the first automatic database backup created after this restart and
+prove it is born as mode 0600. Existing files were corrected, so they cannot prove process
+creation semantics by themselves.
+
+Current verification after permission hardening: 134 tests pass; ruff, mypy, and
+full-history gitleaks pass. No secret values were printed or committed.
