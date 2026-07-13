@@ -46,6 +46,8 @@ def test_drain_projects_creates_issue_and_acks(tmp_path):
     stats = Projector(led, _client(), tmp_path / "lease").drain()
     assert stats["projected"] == 2 and stats["pending_after"] == 0
     assert posted.call_count == 2
+    assert all("metadata" not in call.request.content.decode() for call in posted.calls)
+    assert all("qd:event:" in call.request.content.decode() for call in posted.calls)
     events = led.read_all()
     assert sum(1 for e in events if e["kind"] == "projection_ack") == 2
 

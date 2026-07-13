@@ -6,7 +6,13 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from quarterdeck.backup import backup_plan, create_backup, restore_plan
+from quarterdeck.backup import (
+    _pg_restore_command,
+    _rebase_paperclip_config,
+    backup_plan,
+    create_backup,
+    restore_plan,
+)
 from quarterdeck.cli import app
 from quarterdeck.config import Settings
 from quarterdeck.doctor import run_doctor
@@ -126,6 +132,7 @@ def test_backup_and_restore_are_non_mutating_by_default(tmp_path, monkeypatch):
         3310,
     )
     assert restored["target_root"] == str(target.resolve()) and not target.exists()
+    assert "already exist" in restored["precondition"]
 
 
 def test_backup_execute_uses_secure_atomic_output(tmp_path, monkeypatch):
@@ -176,6 +183,44 @@ def test_restore_rejects_production_paths_ports_and_database_names(tmp_path, mon
         restore_plan(*args, tmp_path / "restore", "qd_restore_x", 3100)
     with pytest.raises(ValueError, match="qd_restore_"):
         restore_plan(*args, tmp_path / "restore", "quarterdeck", 3310)
+
+
+def test_restore_implementation_passes_explicit_database_name():
+    assert _pg_restore_command("/opt/pg_restore", "qd_restore_smoke", Path("dump")) == [
+        "/opt/pg_restore",
+        "--exit-on-error",
+        "--dbname",
+        "qd_restore_smoke",
+        "dump",
+    ]
+
+
+def test_restored_paperclip_paths_are_rebased_to_isolated_root(tmp_path):
+    instance = tmp_path / "paperclip" / "instances" / "default"
+    instance.mkdir(parents=True)
+    config = {
+        "server": {"port": 3100},
+        "database": {
+            "connectionString": "postgresql://user:secret@localhost/production",
+            "embeddedPostgresDataDir": "/production/db",
+            "backup": {"dir": "/production/backups"},
+        },
+        "logging": {"logDir": "/production/logs"},
+        "storage": {"localDisk": {"baseDir": "/production/storage"}},
+        "secrets": {"localEncrypted": {"keyFilePath": "/production/master.key"}},
+    }
+    (instance / "config.json").write_text(json.dumps(config))
+    _rebase_paperclip_config(
+        tmp_path,
+        "postgresql://user:secret@localhost/production",
+        "qd_restore_smoke",
+        3310,
+    )
+    restored = json.loads((instance / "config.json").read_text())
+    assert restored["server"]["port"] == 3310
+    assert restored["database"]["connectionString"].endswith("/qd_restore_smoke")
+    assert "/production/" not in json.dumps(restored)
+    assert str(tmp_path) in restored["secrets"]["localEncrypted"]["keyFilePath"]
 
 
 def test_doctor_cli_json_is_machine_readable(monkeypatch):

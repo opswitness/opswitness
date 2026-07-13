@@ -2,13 +2,14 @@
 
 Snapshot date: 2026-07-12 · This file is a SINGLE current snapshot; all earlier review
 text is preserved verbatim under History. ADRs remain the source of design truth;
-`INSTALL-PAPERCLIP.md` remains a proposed runbook and must not be executed until every
-open gate below is closed.
+`INSTALL-PAPERCLIP.md` records the approved M2 procedure. Remaining rollout steps stay
+blocked by the current open gates below.
 
 ## Current baseline
 
-- HEAD `7ace392` contains M0. The current M1 worktree has 104 tests passing; ruff,
-  mypy, and full-history gitleaks are clean.
+- HEAD `0e4da81` contains M0+M1. M2 permanent install and live integration have
+  executed; the current worktree includes two fixes discovered by restore/live drills.
+- Full suite: 106 tests pass; ruff, mypy, and full-history gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
   `(pid, create_time)`, verifies descendants, escalates after 750ms, and emits
@@ -21,19 +22,19 @@ open gate below is closed.
   three packaged launchd templates; encrypted backup and isolated restore dry-runs.
 - `uv build` succeeds; the wheel was installed into an isolated `/tmp` tool root,
   `qd version` ran, and a packaged watchdog plist rendered and passed `plutil -lint`.
-- Real launchd plists untouched (zero `.qd-bak` on the machine); Paperclip permanent
-  install not executed; real HOME clean.
+- Permanent Paperclip/Postgres/launchd are installed. `qd doctor` is fully green;
+  encrypted backup + isolated restore and the projector four-test matrix pass.
+- `com.tianyuzhou.register-trigger` is the sole canary; its pristine `.qd-bak` exists,
+  first run succeeded, watchdog/digest are green, and projection backlog is zero.
+  Evidence: [M2-VALIDATION.md](M2-VALIDATION.md).
 
 ## Open gates (blocking, in order)
 
-1. **M2 operator approval** — the v3 runbook would install Postgres/age/user-level
-   Paperclip/qd, write config and launchd files, and stop the temporary npx instance.
-   No part has been executed.
-2. **Real doctor + isolated restore** — current read-only doctor correctly reports
-   missing psql/pg_dump/age/stable qd/config/5432; the restore path has only been
-   dry-run and unit tested.
-3. **Live-Paperclip integration tests** (projector against a real server: create,
-   replay, lost-ack reconcile) — pending install.
+1. **Canary elapsed time** — register-trigger must remain healthy for 24–48 hours.
+2. **Seven-day soak** — only after the canary passes may feed-monitor and sox-monitor
+   be adopted; M2 remains incomplete until seven days pass.
+3. **Telegram digest** — not configured in Quarterdeck secrets yet; must be exercised
+   during soak without exposing or copying tokens into repo/plists.
 4. **No git remote** — GitHub Actions CI has never actually run.
 5. **Brand gate** before any publish (org name collision, trademark, domain).
 
@@ -63,9 +64,8 @@ open gate below is closed.
 
 ## Next task
 
-Request explicit approval for [INSTALL-PAPERCLIP v3](INSTALL-PAPERCLIP.md), then run
-M2 install → real doctor/restore → live integration tests → 24-48h canary → 7-day
-soak. The P3 defer spike may run in parallel only after M2 services are stable.
+Keep register-trigger under observation for 24–48 hours. P3 defer spike may proceed
+in parallel; do not adopt feed-monitor/sox-monitor until the canary elapsed-time gate.
 
 ---
 

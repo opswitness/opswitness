@@ -69,10 +69,13 @@ class PaperclipClient:
         return _items(data, "comments", "items", "data")
 
     def post_comment(
-        self, issue_id: str, body: str, metadata: dict[str, Any]
+        self, issue_id: str, body: str, metadata: dict[str, Any] | None = None
     ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"body": body}
+        if metadata is not None:
+            payload["metadata"] = metadata
         return self._req(
             "POST",
             f"/api/issues/{issue_id}/comments",
-            json={"body": body, "metadata": metadata},
+            json=payload,
         )

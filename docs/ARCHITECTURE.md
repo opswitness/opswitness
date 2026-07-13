@@ -145,7 +145,7 @@ users still never see Quarterdeck itself — they see the workbench it makes tru
 | bootstrap (candidates, two-file model) | `src/quarterdeck/bootstrap.py` | ✅ P2 |
 | adopt (dry-run plist wrapping) | `src/quarterdeck/adopt.py` | ✅ P2 (`--apply` gated on install) |
 | MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ P2 |
-| install doctor / secure services / disaster recovery | `src/quarterdeck/doctor.py`, `service.py`, `backup.py` | ✅ M1 (dry-run; M2 execution pending) |
+| install doctor / secure services / disaster recovery | `src/quarterdeck/doctor.py`, `service.py`, `backup.py` | ✅ M1 + M2 live validation; soak pending |
 | gate (PreToolUse `defer` → Paperclip approval → resume) | — | P3 |
 | artifacts (ledger events + content-addressed projection) | — | P4 |
 | vertical case packs | separate private repo | P5 |
@@ -154,5 +154,5 @@ Status tracks code + tests in this repo. [READINESS.md](READINESS.md) is the sin
 current release-gate snapshot; ADRs remain the design authority.
 
 Related: [P0 validation](P0-VALIDATION.md) · [readiness gates](READINESS.md) ·
-[install runbook (NO-GO until gates close)](INSTALL-PAPERCLIP.md) ·
+[approved install runbook](INSTALL-PAPERCLIP.md) ·
 [AionUi console setup](aionui.md)

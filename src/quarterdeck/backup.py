@@ -11,9 +11,10 @@ import tarfile
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urlparse, urlunparse
 
 from quarterdeck.config import Settings, config_dir
+from quarterdeck.fsutil import atomic_write
 
 
 def _postgres_env(database_url: str, *, database: str | None = None) -> dict[str, str]:
@@ -31,6 +32,40 @@ def _postgres_env(database_url: str, *, database: str | None = None) -> dict[str
         }
     )
     return env
+
+
+def _pg_restore_command(tool: str, database_name: str, dump: Path) -> list[str]:
+    return [tool, "--exit-on-error", "--dbname", database_name, str(dump)]
+
+
+def _database_url_for(database_url: str, database_name: str) -> str:
+    parsed = urlparse(database_url)
+    return urlunparse(parsed._replace(path=f"/{database_name}"))
+
+
+def _rebase_paperclip_config(
+    target_root: Path,
+    database_url: str,
+    database_name: str,
+    paperclip_port: int,
+) -> Path:
+    instance = target_root / "paperclip" / "instances" / "default"
+    config = instance / "config.json"
+    try:
+        data = json.loads(config.read_text())
+        data["server"]["port"] = paperclip_port
+        data["database"]["connectionString"] = _database_url_for(database_url, database_name)
+        data["database"]["embeddedPostgresDataDir"] = str(instance / "db")
+        data["database"]["backup"]["dir"] = str(instance / "data" / "backups")
+        data["logging"]["logDir"] = str(instance / "logs")
+        data["storage"]["localDisk"]["baseDir"] = str(instance / "data" / "storage")
+        data["secrets"]["localEncrypted"]["keyFilePath"] = str(
+            instance / "secrets" / "master.key"
+        )
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot rebase restored Paperclip config: {exc}") from exc
+    atomic_write(config, (json.dumps(data, indent=2) + "\n").encode(), mode=0o600)
+    return config
 
 
 def _backup_sources(settings: Settings) -> list[tuple[str, Path]]:
@@ -174,6 +209,7 @@ def restore_plan(
         "database_name": database_name,
         "paperclip_port": paperclip_port,
         "writes": [str(target_root), f"postgres://.../{database_name}"],
+        "precondition": "isolated database must already exist and be owned by the service role",
         "next": "start Paperclip manually with restored paperclip/ dir, isolated DB, and this port",
     }
 
@@ -195,7 +231,7 @@ def restore_backup(
         raise ValueError("database_url is required for restore")
     if target_root.exists() and any(target_root.iterdir()):
         raise ValueError("restore target must not exist or must be empty")
-    for tool in ("age", "createdb", "pg_restore"):
+    for tool in ("age", "psql", "pg_restore"):
         if not shutil.which(tool):
             raise ValueError(f"{tool} must be installed")
     target_root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -208,11 +244,22 @@ def restore_backup(
         )
         with tarfile.open(decrypted, "r") as tar:
             tar.extractall(target_root, filter="data")
-    admin_env = _postgres_env(settings.database_url, database="postgres")
-    subprocess.run([shutil.which("createdb") or "createdb", database_name], env=admin_env, check=True)
+    _rebase_paperclip_config(
+        target_root, settings.database_url, database_name, paperclip_port
+    )
     restore_env = _postgres_env(settings.database_url, database=database_name)
     subprocess.run(
-        [shutil.which("pg_restore") or "pg_restore", "--exit-on-error", str(target_root / "database.dump")],
+        [shutil.which("psql") or "psql", "-Atqc", "SELECT current_database()"],
+        env=restore_env,
+        check=True,
+        stdout=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        _pg_restore_command(
+            shutil.which("pg_restore") or "pg_restore",
+            database_name,
+            target_root / "database.dump",
+        ),
         env=restore_env,
         check=True,
     )

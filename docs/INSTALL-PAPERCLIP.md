@@ -1,8 +1,8 @@
-# Paperclip 永久安装清单 v3（M2，等待单独批准）
+# Paperclip 永久安装清单 v3（M2，已批准执行）
 
-目标机器：用户 MacBook。本文是待执行 runbook，不是授权。M1 只提交代码、模板、
-诊断和 dry-run；任何 Homebrew/npm 安装、HOME 写入、Postgres 变更、进程停止或
-launchd bootstrap 都必须在 M2 获得单独批准后执行。
+目标机器：用户 MacBook。本文记录已获批准并执行的 M2 安装步骤。永久安装、真实
+doctor、隔离恢复和活库四连已经完成；register-trigger 正处于 24–48 小时 canary，
+后续真实任务仍受 [READINESS.md](READINESS.md) 的 soak 闸门约束。
 
 ## 当前只读基线
 
@@ -122,14 +122,16 @@ qd backup create --execute
 在隔离目录、隔离数据库和非生产端口演练恢复：
 
 ```bash
+createdb --owner=paperclip qd_restore_smoke   # 由本机管理员预创建；service role 无 CREATEDB
 qd backup restore <archive.age> --identity <age-key> \
   --target-root /private/tmp/qd-restore-smoke \
   --database-name qd_restore_smoke --paperclip-port 3310
 # 审计划后才添加 --execute
 ```
 
-恢复后用隔离 DB/目录在 3310 启动 Paperclip，确认 UI 可见历史，再销毁副本。未经
-这一验证，备份不算成立。
+Restore automatically rebases Paperclip's database, embedded DB, backup, log, storage,
+master-key, and server-port paths into the isolated root. 用隔离 DB/目录在 3310 启动
+Paperclip，确认 UI 可见历史，再销毁副本。未经这一验证，备份不算成立。
 
 ### 活库四连
 

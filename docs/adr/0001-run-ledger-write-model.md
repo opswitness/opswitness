@@ -16,7 +16,7 @@ Idempotency audit of the projection targets (verified against the live server):
 | Endpoint | Idempotency support | Reconciliation handle |
 |---|---|---|
 | `POST /api/companies/{id}/issues` | none | deterministic marker in title/label (`qd:job:<name>`) |
-| `POST /api/issues/{id}/comments` | none | **`metadata`** field (carries `qd_event_id`) |
+| `POST /api/issues/{id}/comments` | none | body marker `qd:event:<ULID>` for agent keys; metadata is board-only |
 | `POST /api/companies/{id}/activity` | none | `details` field; duplicate-tolerant by design |
 | `POST /api/companies/{id}/cost-events` | none; **requires `agentId`** | **`billingCode`** field (carries event ULID) |
 | `POST /api/issues/{id}/work-products` | **`externalId`** | native |
@@ -64,17 +64,18 @@ A single projector (exclusive `flock` lease file) drains unacked events in **com
 (file date, line position — never ULID sort):
 
 - **issue** (one per job): find-or-create by deterministic marker; ack caches the issue id.
-- **comment** (run transitions): comment `metadata` is a **strict schema**
-  (`version`/`sourceRunId`/`sections` only — arbitrary keys are rejected; verified on the live
-  spec). The event ULID travels in a legal structure:
+- **comment** (run transitions): pinned Paperclip returns 403 when an agent API key sets
+  structured presentation or metadata; granting a board key would violate least privilege.
+  Agent projections therefore carry the event ULID in a human-visible
+  `qd:event:<ULID>` trailer. Reconciliation scans body markers. For compatibility,
+  board-authored/older comments may also carry the strict legal metadata structure:
 
   ```json
   {"version": 1, "sections": [{"rows": [
     {"type": "key_value", "label": "qd_event_id", "value": "<ULID>"}]}]}
   ```
 
-  plus a human-visible `qd:event:<ULID>` trailer in the body. Reconciliation lists recent
-  comments and matches the metadata row first, body marker as fallback.
+  Reconciliation recognizes both forms; new service-agent writes are body-only.
 - **work-product**: `externalId = <event ULID>` — **verified on the pinned v2026.707
   source: plain index, NO unique constraint; creation is an unconditional insert.**
   `externalId` is therefore a reconciliation marker, never a server-side idempotency

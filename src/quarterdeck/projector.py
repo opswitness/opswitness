@@ -136,9 +136,10 @@ class Projector:
                         self._ack(event, "comment", "reconciled")
                         stats["reconciled"] += 1
                         continue
-                    created = self.client.post_comment(
-                        issue_id, _comment_body(event), qd_metadata(event["event_id"])
-                    )
+                    # Agent keys may post comments, but structured metadata is
+                    # board-only in pinned Paperclip. Body markers are therefore the
+                    # least-privilege write path; metadata remains read-compatible.
+                    created = self.client.post_comment(issue_id, _comment_body(event))
                     self._remote_ids_cache[issue_id].add(event["event_id"])
                     self._ack(event, "comment", str(created.get("id", "")))
                     stats["projected"] += 1

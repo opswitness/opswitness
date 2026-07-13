@@ -8,6 +8,8 @@ from quarterdeck.ledger import Ledger
 @pytest.fixture()
 def seeded_env(tmp_path, monkeypatch):
     monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "ledger"))
+    # Never let a unit test inherit the operator's real Paperclip credentials.
+    monkeypatch.setenv("QD_CONFIG_DIR", str(tmp_path / "config"))
     led = Ledger((tmp_path / "ledger"))
     led.append("run_started", "01MCP", {"job": "feed-monitor", "argv": ["true"]})
     led.append(
