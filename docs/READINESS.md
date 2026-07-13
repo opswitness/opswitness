@@ -7,10 +7,10 @@ blocked by the current open gates below.
 
 ## Current baseline
 
-- M0-M4 are committed through `759963f`; M5/M6 preparation and production permission
-  hardening are committed through `51f6a44`. M2 permanent install and live integration
+- M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
+  M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 134 tests pass; ruff, mypy, DCO, worktree gitleaks, and full-history
+- Full suite: 135 tests pass; ruff, mypy, DCO, worktree gitleaks, and full-history
   gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -25,8 +25,8 @@ blocked by the current open gates below.
 - `uv build` succeeds; the wheel was installed into an isolated `/tmp` tool root,
   `qd version` ran, and a packaged watchdog plist rendered and passed `plutil -lint`.
 - Permanent Paperclip/Postgres/launchd are installed. `qd doctor` is fully green and now
-  verifies installed plist drift plus private log/backup leaf modes; encrypted backup +
-  isolated restore and the projector four-test matrix pass.
+  verifies installed plist drift, rejects symlinks, and checks private log/backup leaf
+  modes; encrypted backup + isolated restore and the projector four-test matrix pass.
 - `com.tianyuzhou.register-trigger` is the sole canary; its pristine `.qd-bak` exists,
   two runs succeeded, watchdog/digest are green, and projection backlog is zero. The
   observation window is only about 6.5 hours, so the 24–48 hour gate remains open.

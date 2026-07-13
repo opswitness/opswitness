@@ -99,5 +99,5 @@ Paperclip `db:backup` command was exposed through `qd service exec paperclip
 077 umask. It created `paperclip-20260713-004017.sql.gz` as mode 0600. A following production
 doctor run remained fully green and counted seven secure backup files.
 
-Current verification after permission hardening: 134 tests pass; ruff, mypy, and
+Current verification after permission hardening: 135 tests pass; ruff, mypy, and
 full-history gitleaks pass. No secret values were printed or committed.

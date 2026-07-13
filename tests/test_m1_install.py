@@ -168,6 +168,27 @@ def test_doctor_rejects_readable_paperclip_backups(tmp_path, monkeypatch):
     assert "paperclip-test.sql.gz:0644" in check["detail"]
 
 
+def test_doctor_rejects_broken_backup_symlink_without_traceback(tmp_path, monkeypatch):
+    settings = _settings(tmp_path, monkeypatch)
+    backup_dir = settings.services.paperclip_home / "instances" / "default" / "data" / "backups"
+    (backup_dir / "paperclip-broken.sql.gz").symlink_to(backup_dir / "missing.sql.gz")
+    tools = {name: str(_executable(tmp_path / name)) for name in ("node", "psql", "pg_dump", "age")}
+
+    result = run_doctor(
+        settings_loader=lambda: settings,
+        which=lambda name: tools.get(name),
+        version=lambda _path, _args: "fixture",
+        port_open=lambda _host, _port: True,
+        paperclip_processes=lambda: [123],
+        launchagents_dir=tmp_path / "missing-launchagents",
+    )
+
+    check = next(item for item in result["checks"] if item["name"] == "paperclip_backup_security")
+    assert result["healthy"] is False
+    assert check["status"] == "fail"
+    assert "paperclip-broken.sql.gz" in check["detail"]
+
+
 def test_doctor_rejects_stale_installed_plist_and_readable_log(tmp_path, monkeypatch):
     settings = _settings(tmp_path, monkeypatch)
     log = settings.services.log_dir / "paperclip.out.log"

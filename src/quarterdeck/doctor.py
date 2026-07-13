@@ -77,7 +77,11 @@ def _paperclip_backup_security(settings: Settings) -> tuple[bool, str]:
     backups = sorted(backup_dir.glob("*.sql.gz"))
     unsafe: list[str] = []
     for path in backups:
-        mode = stat.S_IMODE(path.stat().st_mode)
+        try:
+            mode = stat.S_IMODE(path.lstat().st_mode)
+        except OSError:
+            unsafe.append(f"{path.name}:unreadable")
+            continue
         if path.is_symlink() or not path.is_file() or mode & 0o077:
             unsafe.append(f"{path.name}:{mode:04o}")
     if unsafe:
@@ -95,7 +99,11 @@ def _service_log_security(settings: Settings) -> tuple[bool, str]:
     logs = sorted(log_dir.glob("*.log"))
     unsafe: list[str] = []
     for path in logs:
-        mode = stat.S_IMODE(path.stat().st_mode)
+        try:
+            mode = stat.S_IMODE(path.lstat().st_mode)
+        except OSError:
+            unsafe.append(f"{path.name}:unreadable")
+            continue
         if path.is_symlink() or not path.is_file() or mode & 0o077:
             unsafe.append(f"{path.name}:{mode:04o}")
     if unsafe:
@@ -105,6 +113,8 @@ def _service_log_security(settings: Settings) -> tuple[bool, str]:
 
 def _installed_service_security(name: str, settings: Settings, launchagents_dir: Path) -> tuple[bool, str]:
     path = launchagents_dir / f"com.quarterdeck.{name}.plist"
+    if path.is_symlink() or not path.is_file():
+        return False, f"installed plist is missing or a symlink: {path}"
     try:
         parsed = plistlib.loads(path.read_bytes())
     except (OSError, ValueError, plistlib.InvalidFileException) as exc:
