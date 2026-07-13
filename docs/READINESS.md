@@ -65,7 +65,9 @@ blocked by the current open gates below.
    during soak without exposing or copying tokens into repo/plists.
 4. **Brand gate** — `QUARTERDECK` has an active US class-42 software registration and
    substantial software-name usage. `OpsWitness` is the preliminary recommended replacement,
-   but no rename or reservation has been approved. Evidence: [BRAND-CLEARANCE.md](BRAND-CLEARANCE.md).
+   and its exact/broader official USPTO queries plus live package, GitHub, and domain checks
+   are clear at the recorded snapshot. No rename or reservation has been approved. Evidence:
+   [BRAND-CLEARANCE.md](BRAND-CLEARANCE.md).
 5. **No git remote** — GitHub Actions, attestations, private vulnerability reporting,
    and the release workflow have never actually run.
 6. **M6 commercial gate** — no practitioner UI or private product repository until a

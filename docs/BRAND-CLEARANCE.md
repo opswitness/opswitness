@@ -1,6 +1,6 @@
 # Brand Clearance Gate
 
-Snapshot: 2026-07-13 00:09 America/Los_Angeles
+Snapshot: 2026-07-13 12:20 America/Los_Angeles
 
 Status: `Quarterdeck` is rejected for public commercial release. `OpsWitness` is the
 recommended replacement candidate, pending operator approval and a qualified similarity
@@ -8,7 +8,7 @@ search before publication.
 
 ## Knock-out result
 
-| Candidate | Exact web/product search | PyPI | GitHub org | `.com` RDAP | Verdict |
+| Candidate | Exact web/product search | PyPI | GitHub namespace | `.com` RDAP | Verdict |
 | --- | --- | --- | --- | --- | --- |
 | `Quarterdeck` | active software usage and US registration 7860652, class 42 | occupied/history risk | occupied | not relied on | reject |
 | `AuditLoom` | active AI compliance/GRC platform and another audit business | not material | not material | occupied/used | reject |
@@ -16,9 +16,26 @@ search before publication.
 | `TaskNotary` | no exact product found | 404 | 404 | unregistered response | reject: implies legal notarization |
 | `OpsWitness` | no exact product or indexed exact mark found | 404 | 404 | unregistered response | recommend |
 
-Evidence was checked live on the snapshot date using exact-name web searches, PyPI JSON
-endpoints, GitHub organization URLs, and Verisign `.com` RDAP. A `404` proves only that the
+Evidence was checked live on the snapshot date using exact-name web searches, PyPI and npm
+registry endpoints, the shared GitHub user/organization namespace, and Verisign `.com` RDAP.
+All four `OpsWitness` identifier checks returned `404`. A `404` proves only that the
 identifier was unregistered at that moment; it does not reserve it.
+
+## Official federal search checkpoint
+
+The USPTO Trademark Search system returned **No results found** for each of these live
+queries on the snapshot date:
+
+- `CM:"opswitness"`
+- `CM:"ops witness"`
+- `CM:(/.*ops.*/ AND /.*witness.*/)`
+- `FM:/op.*witness/`
+- `FM:/witness.*op/`
+
+These queries cover the exact joined and spaced forms, marks containing both component
+words, and broader full-mark orderings beginning with `op` or `witness`. They materially
+strengthen the knock-out result but do not search every phonetic equivalent, translation,
+common-law use, jurisdiction, or related mark in crowded `ops` and `witness` fields.
 
 ## Why OpsWitness fits
 

@@ -45,7 +45,10 @@ Status: name-independent release engineering is ready; public release is **NO-GO
    registration 7860652) in class 42 for online software, and the name has substantial
    historic and current software usage. Treat the working name as unavailable for public
    commercial release unless qualified counsel clears it. A project-wide rename is the
-   preferred path.
+   preferred path. On 2026-07-13, the official USPTO system returned no results for the
+   exact `OpsWitness` forms or the documented broader `op`/`witness` orderings; PyPI, npm,
+   the GitHub namespace, and the `.com` RDAP endpoint also returned `404`. This advances
+   `OpsWitness` to an operator-decision candidate, not to a legally cleared or reserved name.
 2. **No remote:** this repository has no git remote, so neither GitHub Actions nor private
    vulnerability reporting has run in the real hosting environment.
 3. **No release publication:** no tag, GitHub release, package index upload, org creation,
