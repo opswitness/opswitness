@@ -40,6 +40,9 @@ def _settings(tmp_path, monkeypatch) -> Settings:
     paperclip_backups = paperclip_home / "instances" / "default" / "data" / "backups"
     paperclip_backups.mkdir(parents=True, mode=0o700)
     paperclip_backups.chmod(0o700)
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir(mode=0o700)
+    log_dir.chmod(0o700)
     return Settings(
         database_url="postgresql://qd:secret@127.0.0.1:5432/quarterdeck",
         paperclip={"api_key": "api-key", "company_id": "company"},
@@ -47,7 +50,7 @@ def _settings(tmp_path, monkeypatch) -> Settings:
             "qd_bin": qd,
             "paperclip_command": [str(node), str(paperclip_script)],
             "paperclip_home": paperclip_home,
-            "log_dir": tmp_path / "logs",
+            "log_dir": log_dir,
         },
         backup={"directory": tmp_path / "backups", "age_recipient": "age1test"},
         ledger_dir=tmp_path / "state" / "ledger",
@@ -120,6 +123,12 @@ def test_service_render_is_dry_run_by_default(tmp_path, monkeypatch):
 
 def test_doctor_fake_toolchain_all_green(tmp_path, monkeypatch):
     settings = _settings(tmp_path, monkeypatch)
+    launchagents = tmp_path / "LaunchAgents"
+    launchagents.mkdir()
+    for name in ("paperclip", "projector", "watchdog"):
+        (launchagents / f"com.quarterdeck.{name}.plist").write_bytes(
+            render_launchd(name, settings)
+        )
     tools = {name: str(_executable(tmp_path / name)) for name in ("node", "psql", "pg_dump", "age")}
     result = run_doctor(
         settings_loader=lambda: settings,
@@ -127,6 +136,7 @@ def test_doctor_fake_toolchain_all_green(tmp_path, monkeypatch):
         version=lambda path, args: "test-version",
         port_open=lambda host, port: True,
         paperclip_processes=lambda: [123],
+        launchagents_dir=launchagents,
     )
     assert result["healthy"] is True
     assert all(check["status"] == "pass" for check in result["checks"])
@@ -154,6 +164,34 @@ def test_doctor_rejects_readable_paperclip_backups(tmp_path, monkeypatch):
     check = next(item for item in result["checks"] if item["name"] == "paperclip_backup_security")
     assert check["status"] == "fail"
     assert "paperclip-test.sql.gz:0644" in check["detail"]
+
+
+def test_doctor_rejects_stale_installed_plist_and_readable_log(tmp_path, monkeypatch):
+    settings = _settings(tmp_path, monkeypatch)
+    log = settings.services.log_dir / "paperclip.out.log"
+    log.write_text("fixture")
+    log.chmod(0o644)
+    launchagents = tmp_path / "LaunchAgents"
+    launchagents.mkdir()
+    for name in ("paperclip", "projector", "watchdog"):
+        payload = plistlib.loads(render_launchd(name, settings))
+        if name == "paperclip":
+            payload.pop("Umask")
+        (launchagents / f"com.quarterdeck.{name}.plist").write_bytes(plistlib.dumps(payload))
+    tools = {name: str(_executable(tmp_path / name)) for name in ("node", "psql", "pg_dump", "age")}
+
+    result = run_doctor(
+        settings_loader=lambda: settings,
+        which=lambda name: tools.get(name),
+        version=lambda _path, _args: "fixture",
+        port_open=lambda _host, _port: True,
+        paperclip_processes=lambda: [123],
+        launchagents_dir=launchagents,
+    )
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert checks["service_log_security"]["status"] == "fail"
+    assert checks["installed_paperclip"]["status"] == "fail"
 
 
 def test_doctor_reports_missing_tools_without_traceback(tmp_path, monkeypatch):

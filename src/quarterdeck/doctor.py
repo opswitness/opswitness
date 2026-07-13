@@ -85,6 +85,44 @@ def _paperclip_backup_security(settings: Settings) -> tuple[bool, str]:
     return True, f"private directory mode={directory_mode:04o}; files={len(backups)}"
 
 
+def _service_log_security(settings: Settings) -> tuple[bool, str]:
+    log_dir = settings.services.log_dir.expanduser()
+    if log_dir.is_symlink() or not log_dir.is_dir():
+        return False, f"missing or unsafe directory: {log_dir}"
+    directory_mode = stat.S_IMODE(log_dir.stat().st_mode)
+    if directory_mode & 0o077 or not os.access(log_dir, os.R_OK | os.W_OK | os.X_OK):
+        return False, f"directory must be private and writable: {log_dir} mode={directory_mode:04o}"
+    logs = sorted(log_dir.glob("*.log"))
+    unsafe: list[str] = []
+    for path in logs:
+        mode = stat.S_IMODE(path.stat().st_mode)
+        if path.is_symlink() or not path.is_file() or mode & 0o077:
+            unsafe.append(f"{path.name}:{mode:04o}")
+    if unsafe:
+        return False, "log files must not grant group/other access: " + ", ".join(unsafe)
+    return True, f"private directory mode={directory_mode:04o}; files={len(logs)}"
+
+
+def _installed_service_security(name: str, settings: Settings, launchagents_dir: Path) -> tuple[bool, str]:
+    path = launchagents_dir / f"com.quarterdeck.{name}.plist"
+    try:
+        parsed = plistlib.loads(path.read_bytes())
+    except (OSError, ValueError, plistlib.InvalidFileException) as exc:
+        return False, f"cannot read {path}: {exc}"
+    expected_args = [str(settings.services.qd_bin.expanduser().resolve()), "service", "exec", name]
+    serialized = repr(parsed)
+    safe = (
+        parsed.get("Label") == f"com.quarterdeck.{name}"
+        and parsed.get("ProgramArguments") == expected_args
+        and parsed.get("Umask") == 0o077
+        and "DATABASE_URL" not in serialized
+        and "api_key" not in serialized.lower()
+    )
+    if not safe:
+        return False, f"installed plist is stale, unsafe, or points at the wrong executable: {path}"
+    return True, f"installed plist has private umask and stable qd path: {path}"
+
+
 def run_doctor(
     *,
     settings_loader: Callable[[], Settings] = Settings,
@@ -92,6 +130,7 @@ def run_doctor(
     version: Callable[[str, tuple[str, ...]], str] = _version,
     port_open: Callable[[str, int], bool] = _port_open,
     paperclip_processes: Callable[[], list[int]] = _paperclip_processes,
+    launchagents_dir: Path | None = None,
 ) -> dict:
     checks: list[DoctorCheck] = []
 
@@ -130,6 +169,7 @@ def run_doctor(
                 DoctorCheck("paperclip_credentials", "fail", "settings unavailable"),
                 DoctorCheck("backup_target", "fail", "settings unavailable"),
                 DoctorCheck("paperclip_backup_security", "fail", "settings unavailable"),
+                DoctorCheck("service_log_security", "fail", "settings unavailable"),
             ]
         )
     else:
@@ -184,6 +224,14 @@ def run_doctor(
                 backup_security_detail,
             )
         )
+        log_security_ok, log_security_detail = _service_log_security(settings)
+        checks.append(
+            DoctorCheck(
+                "service_log_security",
+                "pass" if log_security_ok else "fail",
+                log_security_detail,
+            )
+        )
 
     for name in SERVICE_NAMES:
         try:
@@ -206,6 +254,20 @@ def run_doctor(
             )
         except (OSError, ValueError, plistlib.InvalidFileException) as exc:
             checks.append(DoctorCheck(f"template_{name}", "fail", str(exc)))
+
+    if settings is not None:
+        installed_dir = launchagents_dir or (Path.home() / "Library" / "LaunchAgents")
+        for name in ("paperclip", "projector", "watchdog"):
+            installed_ok, installed_detail = _installed_service_security(
+                name, settings, installed_dir
+            )
+            checks.append(
+                DoctorCheck(
+                    f"installed_{name}",
+                    "pass" if installed_ok else "fail",
+                    installed_detail,
+                )
+            )
 
     for name, port in (("postgres_port", 5432), ("paperclip_port", 3100)):
         opened = port_open("127.0.0.1", port)
