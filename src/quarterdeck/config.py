@@ -67,16 +67,30 @@ class GateConfig(BaseModel):
     poll_seconds: float = Field(default=2.0, ge=0.1, le=60)
 
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_prefix="QD_", env_nested_delimiter="__", extra="forbid"
+class MailConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    model_metadata_consent: bool = False
+    gws_bin: Path = Path.home() / ".local" / "bin" / "gws"
+    required_version: str = "0.22.5"
+    query: str = Field(
+        default="in:inbox is:unread newer_than:14d -in:spam -in:trash",
+        min_length=1,
+        max_length=512,
     )
+    max_messages: int = Field(default=20, ge=1, le=100)
+    timeout_seconds: float = Field(default=30.0, ge=1.0, le=120.0)
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="QD_", env_nested_delimiter="__", extra="forbid")
 
     paperclip: PaperclipConfig = PaperclipConfig()
     telegram: TelegramConfig = TelegramConfig()
     services: ServicesConfig = ServicesConfig()
     backup: BackupConfig = BackupConfig()
     gate: GateConfig = GateConfig()
+    mail: MailConfig = MailConfig()
     database_url: str = ""  # secrets.yaml or QD_DATABASE_URL only
     ledger_dir: Path = Path.home() / ".local" / "state" / "quarterdeck" / "ledger"
     log_tail_bytes: int = 8192

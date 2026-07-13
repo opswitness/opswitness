@@ -24,6 +24,7 @@ flowchart BT
         Q3["watchdog + digest (fail-closed)"]
         Q4["gate (P3) + artifacts (P4)"]
         Q5["allowlisted workflow launch"]
+        Q6["metadata-only mail evidence adapter"]
     end
     subgraph P["Governance layer — Paperclip (73.4k★ MIT, off the shelf)"]
         P1["issues · approvals · budgets · audit · Postgres"]
@@ -80,6 +81,12 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
    manifest, then enforces fixed argv, no runtime parameters, single-workflow concurrency,
    a detached supervisor, and fsync-before-exec dispatch order. See
    [ADR-0004](adr/0004-allowlisted-workflow-launch.md).
+8. **Mailbox content is untrusted external data.** AionUi can invoke only one fixed,
+   administrator-owned metadata query. Quarterdeck persists `mail_check_requested` before
+   access and `mail_check_finished` before returning sender/subject/date/message-id fields;
+   neither event stores those fields. No body, draft, send, delete, label mutation, or runtime
+   query exists in the CLI or MCP surface. See
+   [ADR-0005](adr/0005-metadata-only-mail-monitor.md).
 
 ## Necessity and shrinkability
 
@@ -164,6 +171,7 @@ users still never see Quarterdeck itself — they see the workbench it makes tru
 | adopt (dry-run plist wrapping) | `src/quarterdeck/adopt.py` | ✅ P2 (`--apply` gated on install) |
 | MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ P2 + allowlisted launch |
 | allowlisted workflow launcher | `src/quarterdeck/workflows.py`, `workflow_worker.py` | ✅ code + tests; live AionUi task pending |
+| metadata-only mail monitor | `src/quarterdeck/mail.py` | ✅ code + tests; OAuth and AionUi schedule pending |
 | install doctor / secure services / disaster recovery | `src/quarterdeck/doctor.py`, `service.py`, `backup.py` | ✅ M1 + M2 live validation; soak pending |
 | gate (PreToolUse `defer` → Paperclip approval → resume) | `gate.py`, `gated_claude.py` | M3 code complete; live auth/acceptance pending |
 | artifacts (ledger events + content-addressed projection) | `artifacts.py`, `index.py` | ✅ M4 code + live projection |

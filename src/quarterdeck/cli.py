@@ -29,6 +29,8 @@ telegram_app = typer.Typer(no_args_is_help=True)
 app.add_typer(telegram_app, name="telegram", help="Configure and test Telegram delivery")
 workflow_app = typer.Typer(no_args_is_help=True)
 app.add_typer(workflow_app, name="workflow", help="Run fixed, allowlisted workflows")
+mail_app = typer.Typer(no_args_is_help=True)
+app.add_typer(mail_app, name="mail", help="Audit metadata-only Gmail reply checks")
 
 
 def _load_settings_cli() -> "Settings":
@@ -176,7 +178,9 @@ def backup_create(
     from quarterdeck.backup import create_backup
 
     try:
-        result = create_backup(_load_settings_cli(), Path(output) if output else None, execute=execute)
+        result = create_backup(
+            _load_settings_cli(), Path(output) if output else None, execute=execute
+        )
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from None
@@ -247,6 +251,30 @@ def telegram_test() -> None:
         typer.echo("Telegram delivery test failed", err=True)
         raise typer.Exit(code=1)
     typer.echo("Telegram delivery test sent")
+
+
+@mail_app.command("status")
+def mail_status_command() -> None:
+    """Check the pinned gws binary and encrypted Gmail OAuth state."""
+    import json
+
+    from quarterdeck.mail import mail_status
+
+    result = mail_status(_load_settings_cli())
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+    raise typer.Exit(code=0 if result["ready"] else 1)
+
+
+@mail_app.command("check")
+def mail_check_command() -> None:
+    """Run the fixed metadata-only Gmail query under durable audit evidence."""
+    import json
+
+    from quarterdeck.mail import check_mail
+
+    result = check_mail(source="cli", settings=_load_settings_cli())
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+    raise typer.Exit(code=0 if result["ok"] else 1)
 
 
 @app.command()
@@ -438,11 +466,11 @@ def artifacts_show(event_id: str) -> None:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from None
     related = [
-        event
-        for event in events
-        if event.get("payload", {}).get("artifact_event_id") == event_id
+        event for event in events if event.get("payload", {}).get("artifact_event_id") == event_id
     ]
-    typer.echo(json.dumps({"registration": source, "outcomes": related}, ensure_ascii=False, indent=2))
+    typer.echo(
+        json.dumps({"registration": source, "outcomes": related}, ensure_ascii=False, indent=2)
+    )
 
 
 @artifacts_app.command("verify")
@@ -629,7 +657,11 @@ def status() -> None:
     db = _index_db(settings)
     info = rebuild(db, Ledger(settings.ledger_dir))
     for j in job_summary(db):
-        mark = "✅" if j["last_status"] == "succeeded" else ("🔄" if j["last_status"] == "running" else "❌")
+        mark = (
+            "✅"
+            if j["last_status"] == "succeeded"
+            else ("🔄" if j["last_status"] == "running" else "❌")
+        )
         typer.echo(
             f"{mark} {j['job']:<22} runs={j['runs']} failed={j['failed']} "
             f"last={j['last_status']} @ {j['last_ts']}"
@@ -656,9 +688,7 @@ def project() -> None:
             err=True,
         )
         raise typer.Exit(code=2)
-    client = PaperclipClient(
-        settings.paperclip.api_base, api_key, settings.paperclip.company_id
-    )
+    client = PaperclipClient(settings.paperclip.api_base, api_key, settings.paperclip.company_id)
     projector = Projector(
         Ledger(settings.ledger_dir),
         client,
@@ -757,13 +787,16 @@ def adopt_launchd(
 
 @app.command()
 def watchdog(
-    schedules_file: str = typer.Option("", "--schedules", help="YAML: jobs: [{job, expected_interval_seconds, grace_seconds}]"),
-    once: bool = typer.Option(True, "--once/--loop", help="Single check (loop mode lands with P2 soak)"),
+    schedules_file: str = typer.Option(
+        "", "--schedules", help="YAML: jobs: [{job, expected_interval_seconds, grace_seconds}]"
+    ),
+    once: bool = typer.Option(
+        True, "--once/--loop", help="Single check (loop mode lands with P2 soak)"
+    ),
 ) -> None:
     """Detect missed runs from the ledger against expected schedules."""
     from datetime import UTC, datetime
     from pathlib import Path
-
 
     from quarterdeck.config import config_dir
     from quarterdeck.ledger import Ledger
@@ -870,7 +903,7 @@ def init(
         "\nready now (zero further config):\n"
         "  qd wrap --job NAME -- <cmd>  ·  qd status / runs / digest\n"
         "to monitor jobs, enroll them ONCE (human confirmation by design):\n"
-        f"  edit {config_dir() / 'schedules.yaml'} → enroll: [\"com.yourprefix.*\"]\n"
+        f'  edit {config_dir() / "schedules.yaml"} → enroll: ["com.yourprefix.*"]\n'
         "  then: qd watchdog --once\n"
         "later, each with explicit approval: qd adopt launchd <label> · INSTALL-PAPERCLIP.md"
     )
@@ -880,7 +913,9 @@ def init(
 def digest(
     hours: int = typer.Option(24, "--hours", help="Report window"),
     telegram: bool = typer.Option(False, "--telegram", help="Also push to Telegram (secrets.yaml)"),
-    schedules_file: str = typer.Option("", "--schedules", help="schedules.yaml for missed-run section"),
+    schedules_file: str = typer.Option(
+        "", "--schedules", help="schedules.yaml for missed-run section"
+    ),
     html_out: str = typer.Option(
         "", "--html", help="Also write a self-contained static HTML report to this path"
     ),
@@ -952,6 +987,7 @@ def mcp() -> None:
     """Serve the Quarterdeck MCP console over stdio (for AionUi or any MCP client)."""
     try:
         from quarterdeck.mcp_server import build_server
+
         build_server().run()
     except ImportError:
         typer.echo(

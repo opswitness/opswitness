@@ -18,8 +18,9 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   inputs. The showcase covers wrapped execution, outage backlog, ordered replay,
   reconcile-without-repost, one-shot approval evidence, artifact eval/signoff, and the
   execution/outcome digest split.
-- Quarterdeck MCP now exposes eleven tools: the original evidence/projection surface plus
-  allowlisted workflow catalog, asynchronous start, and ledger-folded status.
+- Quarterdeck MCP now exposes thirteen tools: the original evidence/projection surface plus
+  allowlisted workflow catalog, asynchronous start, ledger-folded status, and the fixed-query
+  metadata-only mail status/check pair.
   The stable user-level MCP command is `~/.local/bin/qd mcp`; credentials are read only by
   Quarterdeck from its permission-checked local configuration, not copied into AionUi.
 
@@ -47,12 +48,19 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   to `bypassPermissions`; that task was deleted. The accepted task uses a connection-tested
   custom Claude ACP agent whose `yolo_id` and persisted task mode are both `default`, with a
   dedicated assistant bound only to the Quarterdeck MCP.
+- A second enabled custom Assistant named `每日工作台` is visible on AionUi's main Assistants
+  screen with the `📬` icon, five fixed common-action prompts, and rules that treat mail fields
+  as untrusted data. AionUi's scoped MCP connection test lists all 13 Quarterdeck tools. The
+  pinned `gws 0.22.5` binary is installed, but Gmail OAuth and the daily task are intentionally
+  absent pending explicit consent; no mailbox was accessed during this validation.
 - Initial confirmation granted session-level access only to `qd_workflow_start` and the read-only
   `qd_workflow_status`, never to the whole server. A later single **Run now** click required no
-  confirmation and created run `01KXEQM5PVHH43HDA6VYQCZHKP`. AionUi reported `succeeded`; the
-  authoritative ledger recorded `requested -> dispatched -> run_started -> run_finished`, exit
-  0, `degraded=false`, followed by both Paperclip comment projection acknowledgements. The task
-  remained `Permission = default` and AionUi recorded `last_status=ok`.
+  confirmation. Later UI verification inadvertently activated the synthetic task twice through
+  stale accessibility targets, creating `01KXEQE941TF2HD4CP9ZQ4RFHX` and
+  `01KXEQM5PVHH43HDA6VYQCZHKP`. Both runs were allowlisted, exited 0 with
+  `degraded=false`, and recorded the complete authoritative workflow event chain plus Paperclip
+  acknowledgements; no production fleet job ran. The task remained `Permission = default` and
+  AionUi recorded `last_status=ok`.
 - The acceptance used the repository virtual environment only. Production `~/.local/bin/qd` and
   every launchd service remained unchanged while the canary time gate continues to accumulate.
   The guarded agent references AionUi's versioned Node/ACP runtime, so every AionUi upgrade must

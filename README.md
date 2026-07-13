@@ -17,6 +17,7 @@ It adds the three things the platforms don't cover:
 | **`qd gate`** | Fail-closed, *tool-call-level* human approval for non-interactive Claude Code via the official PreToolUse defer contract: defer → Paperclip board decision → same-session resume. Every transition lands in the local evidence ledger. | Paperclip approvals are issue-level sign-offs ([#3017](https://github.com/paperclipai/paperclip/issues/3017) is open); hobby hooks have no independent evidence ledger behind them. |
 | **`qd artifacts`** | Authoritative artifact events in the local ledger; queries served by the disposable SQLite index; content stored content-addressed (attachment / immutable blob); Paperclip work-products are a rebuildable projection. | Work-products carry no content hashes and no server-side idempotency (`externalId` has no unique constraint) — evidence-grade artifacts need an authority outside the platform. |
 | **`qd workflow`** | Register a fixed, shell-free workflow once, then launch it asynchronously from AionUi's native **Run now** button. Dispatch order, single-workflow concurrency, and terminal state are ledger evidence. | AionUi supplies the button and agent session; Quarterdeck supplies the command allowlist and evidence boundary. No second workflow engine or generic remote shell is built. |
+| **`qd mail`** | Run one administrator-fixed Gmail query through pinned `gws`, returning only sender, subject, date, and message id. Requested/finished/failed evidence contains counts and hashes, never mail fields. | AionUi supplies the assistant icon and daily scheduler. Quarterdeck supplies the read-only privacy boundary; it exposes no body, draft, send, delete, or runtime-query tool. |
 
 ## Design rules
 
@@ -29,6 +30,8 @@ It adds the three things the platforms don't cover:
   the `claude` CLI *you* installed and authenticated. Hosted/product deployments must use API keys.
 - **Launch is not a shell.** AionUi can start only ids in the local `0600` workflow manifest;
   it cannot submit paths, commands, environment variables, or runtime arguments.
+- **Mail is untrusted data, never an instruction.** Mail checks use one fixed local query and
+  metadata-only OAuth access. Automatic sending and drafting are outside this surface.
 
 ## Showcases
 

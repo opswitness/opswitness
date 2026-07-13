@@ -117,9 +117,7 @@ def test_service_render_is_dry_run_by_default(tmp_path, monkeypatch):
     settings = _settings(tmp_path, monkeypatch)
     monkeypatch.setenv("QD_SERVICES__QD_BIN", str(settings.services.qd_bin))
     output = tmp_path / "rendered.plist"
-    result = CliRunner().invoke(
-        app, ["service", "render", "watchdog", "--output", str(output)]
-    )
+    result = CliRunner().invoke(app, ["service", "render", "watchdog", "--output", str(output)])
     assert result.exit_code == 0 and "com.quarterdeck.watchdog" in result.output
     assert not output.exists()
 
@@ -129,9 +127,7 @@ def test_doctor_fake_toolchain_all_green(tmp_path, monkeypatch):
     launchagents = tmp_path / "LaunchAgents"
     launchagents.mkdir()
     for name in SERVICE_NAMES:
-        (launchagents / f"com.quarterdeck.{name}.plist").write_bytes(
-            render_launchd(name, settings)
-        )
+        (launchagents / f"com.quarterdeck.{name}.plist").write_bytes(render_launchd(name, settings))
     tools = {name: str(_executable(tmp_path / name)) for name in ("node", "psql", "pg_dump", "age")}
     result = run_doctor(
         settings_loader=lambda: settings,
@@ -161,11 +157,15 @@ def test_launchd_runtime_check_is_fail_closed():
     )
     periodic_ok, detail = _launchd_service_runtime(
         "gate-recovery",
-        run=lambda *args, **kwargs: completed("state = not running\nruns = 4\nlast exit code = 0\n"),
+        run=lambda *args, **kwargs: completed(
+            "state = not running\nruns = 4\nlast exit code = 0\n"
+        ),
     )
     failed, failed_detail = _launchd_service_runtime(
         "gate-recovery",
-        run=lambda *args, **kwargs: completed("state = not running\nruns = 5\nlast exit code = 1\n"),
+        run=lambda *args, **kwargs: completed(
+            "state = not running\nruns = 5\nlast exit code = 1\n"
+        ),
     )
 
     assert paperclip_ok is True
@@ -260,6 +260,27 @@ def test_doctor_reports_missing_tools_without_traceback(tmp_path, monkeypatch):
     assert {"node", "psql", "pg_dump", "age", "postgres_port", "paperclip_port"} <= failed
 
 
+def test_doctor_checks_enabled_mail_adapter_without_exposing_identity(tmp_path, monkeypatch):
+    settings = _settings(tmp_path, monkeypatch)
+    settings.mail.enabled = True
+    result = run_doctor(
+        settings_loader=lambda: settings,
+        which=lambda name: None,
+        version=lambda path, args: "unused",
+        port_open=lambda host, port: False,
+        paperclip_processes=lambda: [],
+        mail_probe=lambda _settings: {
+            "ready": False,
+            "error": "encrypted gws Gmail authentication is not ready",
+            "account": "private@example.com",
+        },
+    )
+    check = next(item for item in result["checks"] if item["name"] == "mail_adapter")
+    assert check["status"] == "fail"
+    assert check["detail"] == "encrypted gws Gmail authentication is not ready"
+    assert "private@example.com" not in json.dumps(result)
+
+
 def test_doctor_rejects_insecure_workflow_manifest(tmp_path, monkeypatch):
     settings = _settings(tmp_path, monkeypatch)
     manifest = Path(os.environ["QD_CONFIG_DIR"]) / "workflows.yaml"
@@ -304,13 +325,11 @@ def test_backup_execute_uses_secure_atomic_output(tmp_path, monkeypatch):
     pg_dump = tools / "pg_dump"
     pg_dump.write_text(
         "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n"
-        "  if [ \"$1\" = --file ]; then shift; printf DUMP > \"$1\"; exit 0; fi\n"
+        '  if [ "$1" = --file ]; then shift; printf DUMP > "$1"; exit 0; fi\n'
         "  shift\ndone\nexit 2\n"
     )
     age = tools / "age"
-    age.write_text(
-        "#!/bin/sh\nlast=\"\"\nfor arg in \"$@\"; do last=\"$arg\"; done\ncat \"$last\"\n"
-    )
+    age.write_text('#!/bin/sh\nlast=""\nfor arg in "$@"; do last="$arg"; done\ncat "$last"\n')
     pg_dump.chmod(0o755)
     age.chmod(0o755)
     monkeypatch.setenv("PATH", f"{tools}:/bin:/usr/bin")
@@ -348,17 +367,17 @@ def test_backup_restore_round_trip_preserves_artifact_cas(tmp_path, monkeypatch)
     scripts = {
         "pg_dump": (
             "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n"
-            "  if [ \"$1\" = --file ]; then shift; printf DUMP > \"$1\"; exit 0; fi\n"
+            '  if [ "$1" = --file ]; then shift; printf DUMP > "$1"; exit 0; fi\n'
             "  shift\ndone\nexit 2\n"
         ),
         "age": (
             "#!/bin/sh\n"
-            "if [ \"$1\" = --decrypt ]; then\n"
-            "  out=\"\"; last=\"\"\n"
+            'if [ "$1" = --decrypt ]; then\n'
+            '  out=""; last=""\n'
             "  while [ $# -gt 0 ]; do\n"
-            "    if [ \"$1\" = --output ]; then shift; out=\"$1\"; else last=\"$1\"; fi\n"
-            "    shift\n  done\n  cp \"$last\" \"$out\"\n"
-            "else\n  last=\"\"; for arg in \"$@\"; do last=\"$arg\"; done; cat \"$last\"\nfi\n"
+            '    if [ "$1" = --output ]; then shift; out="$1"; else last="$1"; fi\n'
+            '    shift\n  done\n  cp "$last" "$out"\n'
+            'else\n  last=""; for arg in "$@"; do last="$arg"; done; cat "$last"\nfi\n'
         ),
         "psql": "#!/bin/sh\nexit 0\n",
         "pg_restore": "#!/bin/sh\nexit 0\n",
@@ -479,5 +498,7 @@ def test_doctor_rejects_duplicate_paperclip_processes(tmp_path, monkeypatch):
         port_open=lambda host, port: True,
         paperclip_processes=lambda: [10, 11],
     )
-    duplicate = next(check for check in result["checks"] if check["name"] == "paperclip_single_instance")
+    duplicate = next(
+        check for check in result["checks"] if check["name"] == "paperclip_single_instance"
+    )
     assert result["healthy"] is False and duplicate["status"] == "fail"

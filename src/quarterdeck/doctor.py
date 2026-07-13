@@ -65,17 +65,16 @@ def _paperclip_processes() -> list[int]:
 
 def _paperclip_backup_security(settings: Settings) -> tuple[bool, str]:
     backup_dir = (
-        settings.services.paperclip_home.expanduser()
-        / "instances"
-        / "default"
-        / "data"
-        / "backups"
+        settings.services.paperclip_home.expanduser() / "instances" / "default" / "data" / "backups"
     )
     if backup_dir.is_symlink() or not backup_dir.is_dir():
         return False, f"missing or unsafe directory: {backup_dir}"
     directory_mode = stat.S_IMODE(backup_dir.stat().st_mode)
     if directory_mode & 0o077 or not os.access(backup_dir, os.R_OK | os.W_OK | os.X_OK):
-        return False, f"directory must be private and writable: {backup_dir} mode={directory_mode:04o}"
+        return (
+            False,
+            f"directory must be private and writable: {backup_dir} mode={directory_mode:04o}",
+        )
     backups = sorted(backup_dir.glob("*.sql.gz"))
     unsafe: list[str] = []
     for path in backups:
@@ -113,7 +112,9 @@ def _service_log_security(settings: Settings) -> tuple[bool, str]:
     return True, f"private directory mode={directory_mode:04o}; files={len(logs)}"
 
 
-def _installed_service_security(name: str, settings: Settings, launchagents_dir: Path) -> tuple[bool, str]:
+def _installed_service_security(
+    name: str, settings: Settings, launchagents_dir: Path
+) -> tuple[bool, str]:
     path = launchagents_dir / f"com.quarterdeck.{name}.plist"
     if path.is_symlink() or not path.is_file():
         return False, f"installed plist is missing or a symlink: {path}"
@@ -179,6 +180,7 @@ def run_doctor(
     paperclip_processes: Callable[[], list[int]] = _paperclip_processes,
     launchagents_dir: Path | None = None,
     launchd_runtime: Callable[[str], tuple[bool, str]] | None = None,
+    mail_probe: Callable[[Settings], dict] | None = None,
 ) -> dict:
     checks: list[DoctorCheck] = []
 
@@ -222,7 +224,9 @@ def run_doctor(
             DoctorCheck(
                 tool,
                 "pass" if path else "fail",
-                f"{Path(path).resolve()} ({version(path, ('--version',))})" if path else "not found",
+                f"{Path(path).resolve()} ({version(path, ('--version',))})"
+                if path
+                else "not found",
             )
         )
 
@@ -277,7 +281,9 @@ def run_doctor(
         checks.append(
             DoctorCheck(
                 "backup_target",
-                "pass" if backup_dir.is_absolute() and bool(settings.backup.age_recipient) else "fail",
+                "pass"
+                if backup_dir.is_absolute() and bool(settings.backup.age_recipient)
+                else "fail",
                 f"{backup_dir} recipient={'configured' if settings.backup.age_recipient else 'missing'}",
             )
         )
@@ -297,6 +303,27 @@ def run_doctor(
                 log_security_detail,
             )
         )
+        if not settings.mail.enabled:
+            checks.append(DoctorCheck("mail_adapter", "pass", "disabled"))
+        else:
+            try:
+                if mail_probe is None:
+                    from quarterdeck.mail import mail_status
+
+                    mail_result = mail_status(settings)
+                else:
+                    mail_result = mail_probe(settings)
+                checks.append(
+                    DoctorCheck(
+                        "mail_adapter",
+                        "pass" if mail_result.get("ready") is True else "fail",
+                        "metadata-only Gmail adapter ready"
+                        if mail_result.get("ready") is True
+                        else str(mail_result.get("error", "mail adapter is not ready")),
+                    )
+                )
+            except (OSError, ValueError) as exc:
+                checks.append(DoctorCheck("mail_adapter", "fail", str(exc)))
 
     for name in SERVICE_NAMES:
         try:
@@ -354,7 +381,11 @@ def run_doctor(
     for name, port in (("postgres_port", 5432), ("paperclip_port", 3100)):
         opened = port_open("127.0.0.1", port)
         checks.append(
-            DoctorCheck(name, "pass" if opened else "fail", f"127.0.0.1:{port} " + ("open" if opened else "closed"))
+            DoctorCheck(
+                name,
+                "pass" if opened else "fail",
+                f"127.0.0.1:{port} " + ("open" if opened else "closed"),
+            )
         )
 
     try:

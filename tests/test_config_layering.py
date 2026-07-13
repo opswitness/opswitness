@@ -48,6 +48,28 @@ def test_missing_yaml_files_fall_back_to_defaults(tmp_path, monkeypatch):
     assert s.log_tail_bytes == 8192 and s.redact is True
 
 
+def test_mail_settings_are_non_secret_config_and_strict(tmp_path, monkeypatch):
+    import pytest
+
+    _write_config_dir(
+        tmp_path,
+        monkeypatch,
+        config_yaml=("mail:\n  enabled: true\n  gws_bin: /opt/tools/gws\n  max_messages: 7\n"),
+    )
+    settings = Settings()
+    assert settings.mail.enabled is True
+    assert str(settings.mail.gws_bin) == "/opt/tools/gws"
+    assert settings.mail.max_messages == 7
+
+    _write_config_dir(
+        tmp_path / "bad",
+        monkeypatch,
+        config_yaml="mail:\n  runtime_query: from:anyone\n",
+    )
+    with pytest.raises(ValueError, match="runtime_query"):
+        Settings()
+
+
 def test_resolve_api_key_prefers_secrets_then_env(tmp_path, monkeypatch):
     _write_config_dir(tmp_path, monkeypatch, secrets_yaml="paperclip:\n  api_key: sec-key\n")
     monkeypatch.setenv("PAPERCLIP_API_KEY", "env-key")

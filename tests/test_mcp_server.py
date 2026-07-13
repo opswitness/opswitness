@@ -52,6 +52,8 @@ def test_server_exposes_all_tools(seeded_env):
         "qd_artifacts",
         "qd_artifact_verify",
         "qd_watchdog",
+        "qd_mail_status",
+        "qd_mail_check",
         "qd_project_now",
         "qd_workflows",
         "qd_workflow_start",
@@ -64,3 +66,14 @@ def test_tool_call_roundtrip(seeded_env):
     result = anyio.run(server.call_tool, "qd_fleet_status", {})
     text = result[0][0].text if isinstance(result, tuple) else result[0].text
     assert "feed-monitor" in text
+
+
+def test_mail_mcp_surface_has_no_runtime_query_and_marks_open_world(seeded_env):
+    server = mcp_server.build_server()
+    tools = anyio.run(server.list_tools)
+    check = next(tool for tool in tools if tool.name == "qd_mail_check")
+    assert check.inputSchema.get("properties") == {}
+    assert check.annotations.readOnlyHint is True
+    assert check.annotations.destructiveHint is False
+    assert check.annotations.openWorldHint is True
+    assert "untrusted" in (check.description or "")
