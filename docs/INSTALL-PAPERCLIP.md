@@ -110,6 +110,13 @@ Paperclip plist 使用 KeepAlive；projector 每 30 秒、watchdog 每 60 秒运
 因此数据库备份、派生状态和日志默认不会对其他本机用户开放。plist 只
 包含 `QD_CONFIG_DIR`，不包含数据库 URL、API key 或 token。
 
+可通过同一 secret-safe 边界立即验证 Paperclip 备份创建权限，无需把
+`DATABASE_URL` 放入 shell：
+
+```bash
+qd service exec paperclip --paperclip-mode backup
+```
+
 ## 安装后闸门
 
 ### Doctor 与灾备

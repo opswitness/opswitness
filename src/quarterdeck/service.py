@@ -87,8 +87,10 @@ def build_service_exec(
             argv.append("run")
         elif paperclip_mode == "onboard":
             argv.extend(["onboard", "--yes"])
+        elif paperclip_mode == "backup":
+            argv.extend(["db:backup", "--json"])
         else:
-            raise ValueError("paperclip mode must be run or onboard")
+            raise ValueError("paperclip mode must be run, onboard, or backup")
         if not settings.database_url:
             raise ValueError("database_url is missing from secrets.yaml or QD_DATABASE_URL")
         env["DATABASE_URL"] = settings.database_url

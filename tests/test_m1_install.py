@@ -82,6 +82,8 @@ def test_service_exec_keeps_database_secret_out_of_argv(tmp_path, monkeypatch):
     assert argv[-1] == "run"
     onboard, _ = build_service_exec("paperclip", settings, paperclip_mode="onboard")
     assert onboard[-2:] == ["onboard", "--yes"]
+    backup, _ = build_service_exec("paperclip", settings, paperclip_mode="backup")
+    assert backup[-2:] == ["db:backup", "--json"]
     projector, projector_env = build_service_exec("projector", settings)
     assert projector == [str(settings.services.qd_bin.resolve()), "project"]
     assert "DATABASE_URL" not in projector_env

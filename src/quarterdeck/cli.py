@@ -41,7 +41,7 @@ def _load_settings_cli() -> "Settings":
 def service_exec(
     name: str,
     paperclip_mode: str = typer.Option(
-        "run", "--paperclip-mode", help="Paperclip only: run or onboard"
+        "run", "--paperclip-mode", help="Paperclip only: run, onboard, or backup"
     ),
 ) -> None:
     """Read secrets in-process, then replace qd with the requested service."""
