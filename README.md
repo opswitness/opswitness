@@ -11,7 +11,7 @@ It adds the three things the platforms don't cover:
 | Module | What it does | Why it doesn't exist elsewhere |
 |---|---|---|
 | **`qd wrap`** | Zero-modification onboarding for launchd/cron jobs: runs land in a local append-only ledger (crash-safe JSONL + SQLite index) and are projected into Paperclip as issues/comments/work-products ([ADR-0001](docs/adr/0001-run-ledger-write-model.md)). Never breaks the wrapped job (offline spool, exit-code mirroring). | Paperclip's watchdog only verifies its *own* issue trees; external heartbeat runs are read-only by design — nothing monitors external scheduled scripts. |
-| **`qd gate`** | Fail-closed, *tool-call-level* human approval for Claude Code via the official PreToolUse hook: block → notify (Telegram/console) → approve/deny → unblock. Every decision lands in Paperclip's audit trail. | Paperclip approvals are issue-level sign-offs ([#3017](https://github.com/paperclipai/paperclip/issues/3017) is open); hobby hooks have no ledger behind them. |
+| **`qd gate`** | Fail-closed, *tool-call-level* human approval for non-interactive Claude Code via the official PreToolUse defer contract: defer → Paperclip board decision → same-session resume. Every transition lands in the local evidence ledger. | Paperclip approvals are issue-level sign-offs ([#3017](https://github.com/paperclipai/paperclip/issues/3017) is open); hobby hooks have no independent evidence ledger behind them. |
 | **`qd artifacts`** | Authoritative artifact events in the local ledger; queries served by the disposable SQLite index; content stored content-addressed (attachment / immutable blob); Paperclip work-products are a rebuildable projection. | Work-products carry no content hashes and no server-side idempotency (`externalId` has no unique constraint) — evidence-grade artifacts need an authority outside the platform. |
 
 ## Design rules
@@ -39,7 +39,9 @@ Alpha. Built against Paperclip v2026.707. Not affiliated with Paperclip.
 The local P2 code path and M1 install-readiness tooling are test-complete. Permanent
 Paperclip/Postgres/launchd installation was explicitly approved and completed. The sole
 register-trigger canary is under observation; feed-monitor and sox-monitor remain blocked
-until the elapsed-time gates in READINESS pass.
+until the elapsed-time gates in READINESS pass. M3 gate code and deterministic tests are
+complete, but live defer/resume remains NO-GO until local Claude login and board approval
+acceptance pass.
 
 Start with [ARCHITECTURE.md](docs/ARCHITECTURE.md) — layer position, design laws, and why
 this layer is deliberately designed to shrink. Release gates live in

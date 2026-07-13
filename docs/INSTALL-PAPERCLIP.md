@@ -4,9 +4,9 @@
 doctor、隔离恢复和活库四连已经完成；register-trigger 正处于 24–48 小时 canary，
 后续真实任务仍受 [READINESS.md](READINESS.md) 的 soak 闸门约束。
 
-## 当前只读基线
+## 批准前只读基线（历史记录）
 
-`qd doctor --json` 已确认：Node 24 可用；三个 launchd 模板合法且不含 secret；
+`qd doctor --json` 当时确认：Node 24 可用；三个 M2 launchd 模板合法且不含 secret；
 系统 `psql`、`pg_dump`、`age`、`~/.local/bin/qd` 和 5432 Postgres 尚不可用；
 3100 当前由一个临时 npx Paperclip Node 实例占用。执行前必须重新核验 PID 的完整
 命令行，不能按旧 PID 盲杀。

@@ -13,7 +13,7 @@ import stat
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -56,6 +56,14 @@ class BackupConfig(BaseModel):
     age_recipient: str = ""
 
 
+class GateConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    claude_bin: Path = Path.home() / ".local" / "bin" / "claude"
+    state_dir: Path = Path.home() / ".local" / "state" / "quarterdeck" / "gate"
+    approval_ttl_seconds: int = Field(default=3600, ge=30, le=604800)
+    poll_seconds: float = Field(default=2.0, ge=0.1, le=60)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="QD_", env_nested_delimiter="__", extra="forbid"
@@ -65,6 +73,7 @@ class Settings(BaseSettings):
     telegram: TelegramConfig = TelegramConfig()
     services: ServicesConfig = ServicesConfig()
     backup: BackupConfig = BackupConfig()
+    gate: GateConfig = GateConfig()
     database_url: str = ""  # secrets.yaml or QD_DATABASE_URL only
     ledger_dir: Path = Path.home() / ".local" / "state" / "quarterdeck" / "ledger"
     log_tail_bytes: int = 8192

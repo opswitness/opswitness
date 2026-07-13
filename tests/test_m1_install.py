@@ -74,6 +74,14 @@ def test_service_exec_keeps_database_secret_out_of_argv(tmp_path, monkeypatch):
     projector, projector_env = build_service_exec("projector", settings)
     assert projector == [str(settings.services.qd_bin.resolve()), "project"]
     assert "DATABASE_URL" not in projector_env
+    recovery, recovery_env = build_service_exec("gate-recovery", settings)
+    assert recovery == [
+        str(settings.services.qd_bin.resolve()),
+        "gate",
+        "recover",
+        "--once",
+    ]
+    assert "DATABASE_URL" not in recovery_env
 
 
 def test_service_render_is_dry_run_by_default(tmp_path, monkeypatch):

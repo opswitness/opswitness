@@ -7,9 +7,9 @@ blocked by the current open gates below.
 
 ## Current baseline
 
-- HEAD `0e4da81` contains M0+M1. M2 permanent install and live integration have
-  executed; the current worktree includes two fixes discovered by restore/live drills.
-- Full suite: 106 tests pass; ruff, mypy, and full-history gitleaks are clean.
+- M0-M2 are committed through `dede83f`; M2 permanent install and live integration
+  executed successfully. The current worktree is the M3 implementation.
+- Full suite: 122 tests pass; ruff, mypy, and full-history gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
   `(pid, create_time)`, verifies descendants, escalates after 750ms, and emits
@@ -19,7 +19,7 @@ blocked by the current open gates below.
   lifecycle events; a post-retirement run becomes `resurrected` and breaks health.
 - M1 install readiness is implemented without touching production: structured
   `qd doctor --json`; strict config/secrets permissions; secure `qd service exec`;
-  three packaged launchd templates; encrypted backup and isolated restore dry-runs.
+  three M2 launchd templates; encrypted backup and isolated restore dry-runs.
 - `uv build` succeeds; the wheel was installed into an isolated `/tmp` tool root,
   `qd version` ran, and a packaged watchdog plist rendered and passed `plutil -lint`.
 - Permanent Paperclip/Postgres/launchd are installed. `qd doctor` is fully green;
@@ -27,6 +27,10 @@ blocked by the current open gates below.
 - `com.tianyuzhou.register-trigger` is the sole canary; its pristine `.qd-bak` exists,
   first run succeeded, watchdog/digest are green, and projection backlog is zero.
   Evidence: [M2-VALIDATION.md](M2-VALIDATION.md).
+- M3 repository implementation now includes the append-only gate state machine,
+  `gated-claude`, Paperclip approval reconciliation, one-shot recovery, and a fourth
+  secret-free launchd template. Deterministic spike coverage passes; live Claude auth is
+  not available yet. Evidence: [M3-VALIDATION.md](M3-VALIDATION.md).
 
 ## Open gates (blocking, in order)
 
@@ -35,10 +39,13 @@ blocked by the current open gates below.
    be adopted; M2 remains incomplete until seven days pass.
 3. **Telegram digest** — not configured in Quarterdeck secrets yet; must be exercised
    during soak without exposing or copying tokens into repo/plists.
-4. **No git remote** — GitHub Actions CI has never actually run.
-5. **Brand gate** before any publish (org name collision, trademark, domain).
+4. **M3 live defer** — the machine's Claude Code 2.1.146 is not logged in. A harmless
+   real defer -> Paperclip board approval -> resume -> consume -> execute-once drill must
+   pass before installing gate recovery.
+5. **No git remote** — GitHub Actions CI has never actually run.
+6. **Brand gate** before any publish (org name collision, trademark, domain).
 
-## P3 defer contract (documented upstream; spike verifies implementation, not semantics)
+## P3 defer contract (implemented; live acceptance pending)
 
 - Non-interactive `claude -p` only; minimum version **v2.1.89** (machine: 2.1.146).
 - Hook returns `permissionDecision: "defer"` → run exits with
@@ -50,9 +57,9 @@ blocked by the current open gates below.
   defer therefore still denies.
 - No long-poll fallback: absence of defer support ⇒ deny. `bypassPermissions` is
   forbidden under the gate.
-- Spike matrix: single defer/resume · parallel two-tool · approval timeout ·
-  duplicate resume · one-shot consumption · MCP tool missing on resume · old Claude
-  version · bypassPermissions rejection.
+- Deterministic matrix passes: single defer/resume · parallel two-tool · approval timeout ·
+  duplicate resume · one-shot consumption · MCP/hook missing on resume · old Claude
+  version · bypassPermissions rejection. Real model execution is blocked by local login.
 
 ## Truth split for approvals (P3)
 
@@ -64,8 +71,9 @@ blocked by the current open gates below.
 
 ## Next task
 
-Keep register-trigger under observation for 24–48 hours. P3 defer spike may proceed
-in parallel; do not adopt feed-monitor/sox-monitor until the canary elapsed-time gate.
+Keep register-trigger under observation for 24–48 hours. After the user completes normal
+Claude login, run the harmless M3 live acceptance drill. Do not adopt feed-monitor/sox-monitor
+or bootstrap gate recovery before their respective gates pass.
 
 ---
 

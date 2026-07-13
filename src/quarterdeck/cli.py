@@ -21,6 +21,8 @@ service_app = typer.Typer(no_args_is_help=True)
 app.add_typer(service_app, name="service", help="Render or execute secure launchd services")
 backup_app = typer.Typer(no_args_is_help=True)
 app.add_typer(backup_app, name="backup", help="Encrypted backup and isolated restore")
+gate_app = typer.Typer(no_args_is_help=True)
+app.add_typer(gate_app, name="gate", help="Fail-closed Claude Code tool approvals")
 
 
 def _load_settings_cli() -> "Settings":
@@ -150,6 +152,114 @@ def doctor(json_output: bool = typer.Option(False, "--json")) -> None:
             typer.echo(f"{mark:<4} {check['name']:<28} {check['detail']}")
         typer.echo("\nREADY" if result["healthy"] else "\nNO-GO")
     raise typer.Exit(code=0 if result["healthy"] else 1)
+
+
+@gate_app.command("install")
+def gate_install() -> None:
+    """Write Quarterdeck-owned isolated Claude settings (never ~/.claude settings)."""
+    from quarterdeck.gated_claude import install_gate_settings
+
+    try:
+        target = install_gate_settings(_load_settings_cli())
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+    typer.echo(f"installed isolated gate settings: {target}")
+
+
+@gate_app.command("hook", hidden=True)
+def gate_hook(post: str = typer.Option("", "--post")) -> None:
+    """Internal Claude hook entrypoint; JSON event arrives on stdin."""
+    import json
+    import sys
+
+    from quarterdeck.gate import handle_post_tool_use, handle_pre_tool_use
+    from quarterdeck.ledger import Ledger
+
+    try:
+        event = json.load(sys.stdin)
+        if not isinstance(event, dict):
+            raise ValueError("hook input must be an object")
+        settings = _load_settings_cli()
+        ledger = Ledger(settings.ledger_dir)
+        if post:
+            if post not in {"success", "failure"}:
+                raise ValueError("--post must be success or failure")
+            handle_post_tool_use(ledger, event, succeeded=post == "success")
+            return
+        response = handle_pre_tool_use(
+            ledger,
+            event,
+            ttl_seconds=settings.gate.approval_ttl_seconds,
+        )
+    except Exception as exc:  # hook boundary must always fail closed
+        if post:
+            typer.echo(f"Quarterdeck post-hook evidence failure: {exc}", err=True)
+            raise typer.Exit(code=1) from None
+        response = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": f"Quarterdeck gate failed closed: {exc}",
+            }
+        }
+    typer.echo(json.dumps(response, separators=(",", ":")))
+
+
+@gate_app.command("recover")
+def gate_recover(once: bool = typer.Option(True, "--once/--loop")) -> None:
+    """Reconcile and resume orphaned approved requests once."""
+    import json
+
+    from quarterdeck.gated_claude import recover_once
+
+    if not once:
+        typer.echo("gate recovery loop is delegated to launchd; use --once", err=True)
+        raise typer.Exit(code=2)
+    try:
+        stats = recover_once(_load_settings_cli())
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+    typer.echo(json.dumps(stats, separators=(",", ":")))
+    raise typer.Exit(code=1 if stats["errors"] else 0)
+
+
+@app.command(
+    "gated-claude",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def gated_claude_command(
+    ctx: typer.Context,
+    wait: bool = typer.Option(True, "--wait/--no-wait"),
+) -> None:
+    """Run one non-interactive Claude session under the durable approval gate."""
+    import json
+    from pathlib import Path
+
+    from quarterdeck.gated_claude import run_gated_claude
+
+    argv = list(ctx.args)
+    if argv and argv[0] == "--":
+        argv = argv[1:]
+    try:
+        result, code = run_gated_claude(
+            _load_settings_cli(),
+            argv,
+            cwd=Path.cwd(),
+            wait=wait,
+            notify=lambda notice: typer.echo(
+                "approval pending: "
+                f"request={notice['request_id']} approval={notice['approval_id']} "
+                f"open Paperclip at {notice['paperclip']}",
+                err=True,
+            ),
+        )
+    except Exception as exc:
+        typer.echo(f"gated-claude failed closed: {exc}", err=True)
+        raise typer.Exit(code=2) from None
+    typer.echo(json.dumps(result, ensure_ascii=False))
+    raise typer.Exit(code=code)
 
 
 @app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})

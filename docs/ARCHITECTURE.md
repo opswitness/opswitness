@@ -146,7 +146,7 @@ users still never see Quarterdeck itself — they see the workbench it makes tru
 | adopt (dry-run plist wrapping) | `src/quarterdeck/adopt.py` | ✅ P2 (`--apply` gated on install) |
 | MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ P2 |
 | install doctor / secure services / disaster recovery | `src/quarterdeck/doctor.py`, `service.py`, `backup.py` | ✅ M1 + M2 live validation; soak pending |
-| gate (PreToolUse `defer` → Paperclip approval → resume) | — | P3 |
+| gate (PreToolUse `defer` → Paperclip approval → resume) | `gate.py`, `gated_claude.py` | M3 code complete; live auth/acceptance pending |
 | artifacts (ledger events + content-addressed projection) | — | P4 |
 | vertical case packs | separate private repo | P5 |
 

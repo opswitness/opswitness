@@ -11,7 +11,7 @@ from typing import Any
 from quarterdeck.config import Settings, config_dir
 from quarterdeck.fsutil import atomic_write
 
-SERVICE_NAMES = ("paperclip", "projector", "watchdog")
+SERVICE_NAMES = ("paperclip", "projector", "watchdog", "gate-recovery")
 
 
 def _template_bytes(name: str) -> bytes:
@@ -98,10 +98,12 @@ def build_service_exec(
     qd_bin = settings.services.qd_bin.expanduser().resolve()
     if not qd_bin.is_file() or not os.access(qd_bin, os.X_OK):
         raise ValueError(f"services.qd_bin is not executable: {qd_bin}")
-    command = "project" if name == "projector" else "watchdog"
-    argv = [str(qd_bin), command]
-    if name == "watchdog":
-        argv.append("--once")
+    if name == "projector":
+        argv = [str(qd_bin), "project"]
+    elif name == "watchdog":
+        argv = [str(qd_bin), "watchdog", "--once"]
+    else:
+        argv = [str(qd_bin), "gate", "recover", "--once"]
     return argv, env
 
 

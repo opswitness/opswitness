@@ -79,3 +79,26 @@ class PaperclipClient:
             f"/api/issues/{issue_id}/comments",
             json=payload,
         )
+
+    def list_approvals(self, status: str | None = None) -> list[dict[str, Any]]:
+        suffix = f"?status={status}" if status else ""
+        data = self._req(
+            "GET", f"/api/companies/{self.company_id}/approvals{suffix}"
+        )
+        return _items(data, "approvals", "items", "data")
+
+    def get_approval(self, approval_id: str) -> dict[str, Any]:
+        data = self._req("GET", f"/api/approvals/{approval_id}")
+        if not isinstance(data, dict):
+            raise PaperclipError(f"approval {approval_id}: expected an object")
+        return data
+
+    def create_board_approval(self, payload: dict[str, Any]) -> dict[str, Any]:
+        data = self._req(
+            "POST",
+            f"/api/companies/{self.company_id}/approvals",
+            json={"type": "request_board_approval", "payload": payload},
+        )
+        if not isinstance(data, dict):
+            raise PaperclipError("create approval: expected an object")
+        return data
