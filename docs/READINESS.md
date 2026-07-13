@@ -43,6 +43,9 @@ blocked by the current open gates below.
   end-to-end synthetic showcase, and an eight-tool MCP console. The first-run local core
   clears the ten-minute target. Public release remains blocked by the brand and remote
   gates. Evidence: [M5-VALIDATION.md](M5-VALIDATION.md).
+- M6 is recruitment-ready but intentionally has no product code. The paid-design-partner
+  gate, data boundary, implementation order, and success evidence are fixed in
+  [M6-PILOT-GATE.md](M6-PILOT-GATE.md).
 
 ## Open gates (blocking, in order)
 
