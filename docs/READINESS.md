@@ -59,7 +59,8 @@ blocked by the current open gates below.
    real defer -> Paperclip board approval -> resume -> consume -> execute-once drill must
    pass before installing gate recovery.
 5. **Brand gate** — `QUARTERDECK` has an active US class-42 software registration and
-   substantial software-name usage. Select and clear a replacement before any publish.
+   substantial software-name usage. `OpsWitness` is the preliminary recommended replacement,
+   but no rename or reservation has been approved. Evidence: [BRAND-CLEARANCE.md](BRAND-CLEARANCE.md).
 6. **No git remote** — GitHub Actions, attestations, private vulnerability reporting,
    and the release workflow have never actually run.
 7. **AionUi handshake** — local secret-free MCP config is present and the MCP extra is
@@ -93,8 +94,8 @@ blocked by the current open gates below.
 
 ## Next task
 
-Keep register-trigger under observation for 24–48 hours. Choose a replacement product name
-and complete clearance before creating a remote. After the user completes normal Claude
+Keep register-trigger under observation for 24–48 hours. Approve or reject the `OpsWitness`
+candidate before starting the atomic rename. After the user completes normal Claude
 login, run the harmless M3 live acceptance drill. Do not adopt feed-monitor/sox-monitor,
 bootstrap gate recovery, publish a release, or build the practitioner UI before their
 respective gates pass.
