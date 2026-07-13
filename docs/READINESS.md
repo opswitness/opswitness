@@ -29,8 +29,14 @@ blocked by the current open gates below.
   modes; encrypted backup + isolated restore and the projector four-test matrix pass.
 - `com.tianyuzhou.register-trigger` is the sole canary; its pristine `.qd-bak` exists,
   two runs succeeded, watchdog/digest are green, and projection backlog is zero. The
-  observation window is only about 6.5 hours, so the 24–48 hour gate remains open.
+  last observation at 2026-07-13 00:56 PDT was only about 7.4 hours after the first
+  wrapped run, so the 24–48 hour gate remains open.
   Evidence: [M2-VALIDATION.md](M2-VALIDATION.md).
+- Feed-monitor and sox-monitor are not adopted. Their production source hashes, dry-run
+  diffs, executable paths, schedule semantics, and isolated
+  `apply -> lint -> rollback -> identical hash` drills are recorded in
+  [M2-VALIDATION.md](M2-VALIDATION.md). Both labels had last exit status 0; adoption must
+  wait for the canary gate and for each target to have no active PID.
 - M3 repository implementation now includes the append-only gate state machine,
   `gated-claude`, Paperclip approval reconciliation, one-shot recovery, and a fourth
   secret-free launchd template. Deterministic spike coverage passes; live Claude auth is
@@ -68,6 +74,52 @@ blocked by the current open gates below.
    installed, but the post-fix in-app availability result must be recorded after unlock.
 8. **M6 commercial gate** — no practitioner UI or private product repository until a
    design partner gives a written paid commitment or deposit.
+
+## Blocked handoff (2026-07-13 00:56 PDT)
+
+The project goal is deliberately blocked rather than narrowed or declared complete. Three
+consecutive continuation audits found the same external conditions, while all locally safe
+work available before those gates was completed:
+
+- Production remained healthy: six ledger runs, zero projection backlog, two successful
+  canary runs, full watchdog coverage, and a fully green `qd doctor`.
+- Repository HEAD was `d7504c5` with a clean worktree. The latest commit records the
+  production soak adoption preflight; it does not modify HOME, launchd, or schedules.
+- The earliest 24-hour canary checkpoint is approximately 2026-07-13 17:32 PDT. Elapsed
+  time is evidence and cannot be replaced by tests or a manually triggered run.
+- Claude Code reported `loggedIn: false`; normal operator login is required. No API key,
+  browser token, or credential may be copied into this repository or the handoff record.
+- AionUi could not be inspected because macOS was locked. The operator must unlock the Mac;
+  automatic unlock or lock-screen bypass is prohibited.
+- `OpsWitness` remains only a preliminary replacement candidate. No package rename, GitHub
+  remote, identifier reservation, or public release is authorized until the operator makes
+  an explicit brand decision.
+- Telegram delivery remains unconfigured. Any token/chat identifier must be entered locally
+  through the permission-checked secrets boundary, never pasted into documentation, git, a
+  plist, or chat.
+- M6 remains behind its paid-design-partner gate; no practitioner UI should be built merely
+  to create the appearance of Pilot progress.
+
+Resume in this order:
+
+1. At or after the 24-hour checkpoint, rerun production doctor, status, digest, watchdog,
+   projector, backup, and canary evidence checks. Continue observation up to 48 hours if any
+   result is ambiguous.
+2. Only after that gate passes, follow the hash-locked, idle-PID adoption procedure in
+   `M2-VALIDATION.md` for feed-monitor and sox-monitor. Start the seven-day soak only when
+   both jobs are wrapped, enrolled by exact label, and healthy.
+3. After normal Claude login, execute one harmless real
+   `defer -> Paperclip approval -> resume -> consume -> execute once` acceptance drill before
+   installing gate recovery.
+4. After macOS unlock, record AionUi's in-app MCP availability rather than relying only on
+   the already-passing direct MCP handshake.
+5. Obtain an explicit brand decision before creating a remote or changing public
+   identifiers. Run real GitHub Actions and provenance only after that decision.
+6. Build the private practitioner product only after written paid commitment or deposit.
+
+M2 is complete only after the seven-day soak passes with zero unexplained loss, duplicate,
+false-green state, process-tree survivor, or unrecovered backlog. M3, M5, and M6 retain their
+own independent acceptance gates.
 
 ## P3 defer contract (implemented; live acceptance pending)
 
