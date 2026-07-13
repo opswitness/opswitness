@@ -7,8 +7,8 @@ open gate below is closed.
 
 ## Current baseline
 
-- Worktree atop HEAD `de0bc6e`: M0 implementation complete; 91 tests pass in three
-  consecutive full-suite runs; ruff, mypy, and full-history gitleaks are clean.
+- HEAD `7ace392` contains M0. The current M1 worktree has 104 tests passing; ruff,
+  mypy, and full-history gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
   `(pid, create_time)`, verifies descendants, escalates after 750ms, and emits
@@ -16,18 +16,26 @@ open gate below is closed.
 - Watchdog, digest, and bootstrap share one `classify_schedule()` definition.
 - Mutable `retired:` config has been removed. `qd retire/unretire --reason` records
   lifecycle events; a post-retirement run becomes `resurrected` and breaks health.
+- M1 install readiness is implemented without touching production: structured
+  `qd doctor --json`; strict config/secrets permissions; secure `qd service exec`;
+  three packaged launchd templates; encrypted backup and isolated restore dry-runs.
+- `uv build` succeeds; the wheel was installed into an isolated `/tmp` tool root,
+  `qd version` ran, and a packaged watchdog plist rendered and passed `plutil -lint`.
 - Real launchd plists untouched (zero `.qd-bak` on the machine); Paperclip permanent
   install not executed; real HOME clean.
 
 ## Open gates (blocking, in order)
 
-1. **INSTALL NO-GO** — launchd service templates, stable absolute Node/qd paths,
-   npm-prefix handling, secrets handling, isolated restore drill. Docs/templates first;
-   still no execution.
-2. **No git remote** — GitHub Actions CI has never actually run.
+1. **M2 operator approval** — the v3 runbook would install Postgres/age/user-level
+   Paperclip/qd, write config and launchd files, and stop the temporary npx instance.
+   No part has been executed.
+2. **Real doctor + isolated restore** — current read-only doctor correctly reports
+   missing psql/pg_dump/age/stable qd/config/5432; the restore path has only been
+   dry-run and unit tested.
 3. **Live-Paperclip integration tests** (projector against a real server: create,
    replay, lost-ack reconcile) — pending install.
-4. **Brand gate** before any publish (org name collision, trademark, domain).
+4. **No git remote** — GitHub Actions CI has never actually run.
+5. **Brand gate** before any publish (org name collision, trademark, domain).
 
 ## P3 defer contract (documented upstream; spike verifies implementation, not semantics)
 
@@ -55,10 +63,9 @@ open gate below is closed.
 
 ## Next task
 
-Implement M1 doctor, secure service launchers/templates, and backup/restore dry-run
-(no execution), then request explicit approval for install → live
-integration tests → 24-48h pilot job → 7-day soak. The P3 defer spike may run in
-parallel after install.
+Request explicit approval for [INSTALL-PAPERCLIP v3](INSTALL-PAPERCLIP.md), then run
+M2 install → real doctor/restore → live integration tests → 24-48h canary → 7-day
+soak. The P3 defer spike may run in parallel only after M2 services are stable.
 
 ---
 

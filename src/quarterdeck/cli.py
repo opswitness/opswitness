@@ -17,12 +17,139 @@ if TYPE_CHECKING:
     from quarterdeck.config import Settings
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
+service_app = typer.Typer(no_args_is_help=True)
+app.add_typer(service_app, name="service", help="Render or execute secure launchd services")
+backup_app = typer.Typer(no_args_is_help=True)
+app.add_typer(backup_app, name="backup", help="Encrypted backup and isolated restore")
+
+
+def _load_settings_cli() -> "Settings":
+    from quarterdeck.config import Settings
+
+    try:
+        return Settings()
+    except (ValueError, OSError) as exc:
+        typer.echo(f"configuration error: {exc}", err=True)
+        raise typer.Exit(code=2) from None
+
+
+@service_app.command("exec")
+def service_exec(
+    name: str,
+    paperclip_mode: str = typer.Option(
+        "run", "--paperclip-mode", help="Paperclip only: run or onboard"
+    ),
+) -> None:
+    """Read secrets in-process, then replace qd with the requested service."""
+    from quarterdeck.service import exec_service
+
+    try:
+        exec_service(name, _load_settings_cli(), paperclip_mode=paperclip_mode)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+
+
+@service_app.command("render")
+def service_render(
+    name: str,
+    output: str = typer.Option("", "--output", help="Write target (stdout by default)"),
+    write: bool = typer.Option(False, "--write", help="Actually write --output"),
+    force: bool = typer.Option(False, "--force", help="Replace an existing output"),
+) -> None:
+    """Render a launchd plist; writing requires both --output and --write."""
+    from pathlib import Path
+
+    from quarterdeck.service import render_launchd, write_launchd
+
+    try:
+        settings = _load_settings_cli()
+        if write:
+            if not output:
+                raise ValueError("--write requires --output")
+            path = write_launchd(name, Path(output), settings, force=force)
+            typer.echo(str(path))
+        else:
+            typer.echo(render_launchd(name, settings).decode())
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+
+
+@backup_app.command("create")
+def backup_create(
+    output: str = typer.Option("", "--output"),
+    execute: bool = typer.Option(False, "--execute", help="Perform writes; default is dry-run"),
+) -> None:
+    """Create an age-encrypted full-instance backup; dry-run by default."""
+    import json
+    import subprocess
+    from pathlib import Path
+
+    from quarterdeck.backup import create_backup
+
+    try:
+        result = create_backup(_load_settings_cli(), Path(output) if output else None, execute=execute)
+    except (ValueError, OSError, subprocess.SubprocessError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@backup_app.command("restore")
+def backup_restore(
+    archive: str,
+    identity: str = typer.Option(..., "--identity"),
+    target_root: str = typer.Option(..., "--target-root"),
+    database_name: str = typer.Option(..., "--database-name"),
+    paperclip_port: int = typer.Option(..., "--paperclip-port"),
+    execute: bool = typer.Option(False, "--execute", help="Perform writes; default is dry-run"),
+) -> None:
+    """Restore only into an isolated root, database, and Paperclip port."""
+    import json
+    import subprocess
+    from pathlib import Path
+
+    from quarterdeck.backup import restore_backup
+
+    try:
+        result = restore_backup(
+            _load_settings_cli(),
+            Path(archive),
+            Path(identity),
+            Path(target_root),
+            database_name,
+            paperclip_port,
+            execute=execute,
+        )
+    except (ValueError, OSError, subprocess.SubprocessError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 @app.command()
 def version() -> None:
     """Print the Quarterdeck version."""
     typer.echo(__version__)
+
+
+@app.command()
+def doctor(json_output: bool = typer.Option(False, "--json")) -> None:
+    """Read-only install diagnostics; any failed prerequisite exits non-zero."""
+    import json
+
+    from quarterdeck.doctor import run_doctor
+
+    result = run_doctor()
+    if json_output:
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        for check in result["checks"]:
+            mark = "PASS" if check["status"] == "pass" else "FAIL"
+            typer.echo(f"{mark:<4} {check['name']:<28} {check['detail']}")
+        typer.echo("\nREADY" if result["healthy"] else "\nNO-GO")
+    raise typer.Exit(code=0 if result["healthy"] else 1)
 
 
 @app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
@@ -62,7 +189,6 @@ def _index_db(settings: "Settings"):
 
 
 def _job_lifecycle(kind: str, job: str, reason: str) -> None:
-    from quarterdeck.config import Settings
     from quarterdeck.ids import new_ulid
     from quarterdeck.ledger import Ledger
     from quarterdeck.lifecycle import fold_job_lifecycle
@@ -72,7 +198,7 @@ def _job_lifecycle(kind: str, job: str, reason: str) -> None:
     if not job or not reason:
         typer.echo("job and --reason must be non-empty", err=True)
         raise typer.Exit(code=2)
-    ledger = Ledger(Settings().ledger_dir)
+    ledger = Ledger(_load_settings_cli().ledger_dir)
     states = fold_job_lifecycle(ledger.read_all())
     state = states.get(job)
     if kind == "job_retired" and state and state.retired and not state.resurrected:
@@ -111,11 +237,10 @@ def runs(
     limit: int = typer.Option(20, "--limit"),
 ) -> None:
     """Recent runs from the ledger (rebuilds the disposable SQLite index)."""
-    from quarterdeck.config import Settings
     from quarterdeck.index import query_runs, rebuild
     from quarterdeck.ledger import Ledger
 
-    settings = Settings()
+    settings = _load_settings_cli()
     db = _index_db(settings)
     rebuild(db, Ledger(settings.ledger_dir))
     for r in query_runs(db, job=job, limit=limit):
@@ -130,11 +255,10 @@ def runs(
 @app.command()
 def status() -> None:
     """Fleet at a glance: per-job last state + projection backlog."""
-    from quarterdeck.config import Settings
     from quarterdeck.index import job_summary, rebuild
     from quarterdeck.ledger import Ledger
 
-    settings = Settings()
+    settings = _load_settings_cli()
     db = _index_db(settings)
     info = rebuild(db, Ledger(settings.ledger_dir))
     for j in job_summary(db):
@@ -149,14 +273,13 @@ def status() -> None:
 @app.command()
 def project() -> None:
     """Drain unacked ledger events into Paperclip (single-instance, at-least-once)."""
-    from quarterdeck.config import Settings
     from quarterdeck.ledger import Ledger
     from quarterdeck.paperclip import PaperclipClient
     from quarterdeck.projector import Projector
 
     from quarterdeck.config import resolve_api_key
 
-    settings = Settings()
+    settings = _load_settings_cli()
     api_key = resolve_api_key(settings)
     if not api_key or not settings.paperclip.company_id:
         typer.echo(
@@ -275,7 +398,7 @@ def watchdog(
     from pathlib import Path
 
 
-    from quarterdeck.config import Settings, config_dir
+    from quarterdeck.config import config_dir
     from quarterdeck.ledger import Ledger
     from quarterdeck.notify import alert
     from quarterdeck.watchdog import check
@@ -328,7 +451,7 @@ def watchdog(
             err=True,
         )
         raise typer.Exit(code=2)
-    settings = Settings()
+    settings = _load_settings_cli()
     missed = check(schedules, Ledger(settings.ledger_dir).read_all(), datetime.now(UTC))
     for m in missed:
         detail = f" overdue={m['overdue_seconds']}s" if "overdue_seconds" in m else ""
@@ -396,11 +519,11 @@ def digest(
     from datetime import UTC, datetime
     from pathlib import Path
 
-    from quarterdeck.config import Settings, config_dir
+    from quarterdeck.config import config_dir
     from quarterdeck.digest import build_digest, render_markdown
     from quarterdeck.ledger import Ledger
 
-    settings = Settings()
+    settings = _load_settings_cli()
     events = Ledger(settings.ledger_dir).read_all()
     missed: list = []
     schedules: list = []

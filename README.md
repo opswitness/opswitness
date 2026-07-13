@@ -36,8 +36,9 @@ The same contract, three verticals:
 
 Alpha. Built against Paperclip v2026.707. Not affiliated with Paperclip.
 
-The local P2 code path is test-complete. Permanent Paperclip/launchd installation remains
-NO-GO until the M1 install-readiness gates in READINESS pass.
+The local P2 code path and M1 install-readiness tooling are test-complete. Permanent
+Paperclip/Postgres/launchd installation remains NO-GO until the operator explicitly
+approves the M2 runbook in READINESS.
 
 Start with [ARCHITECTURE.md](docs/ARCHITECTURE.md) — layer position, design laws, and why
 this layer is deliberately designed to shrink. Release gates live in

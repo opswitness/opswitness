@@ -218,6 +218,7 @@ def test_digest_cli_exit_codes(tmp_path, monkeypatch):
 
     conf = tmp_path / "conf"
     conf.mkdir(parents=True, exist_ok=True)
+    conf.chmod(0o700)
     (conf / "schedules.generated.yaml").write_text(
         yaml.safe_dump(
             {"version": 2, "entries": [
@@ -327,7 +328,10 @@ def test_telegram_send_uses_parse_mode(monkeypatch, tmp_path):
     from quarterdeck.notify.telegram import send_telegram
 
     monkeypatch.setenv("QD_CONFIG_DIR", str(tmp_path))
-    (tmp_path / "secrets.yaml").write_text("telegram:\n  bot_token: T\n  chat_id: '42'\n")
+    tmp_path.chmod(0o700)
+    secrets = tmp_path / "secrets.yaml"
+    secrets.write_text("telegram:\n  bot_token: T\n  chat_id: '42'\n")
+    secrets.chmod(0o600)
     route = respx.post("https://api.telegram.org/botT/sendMessage").mock(
         return_value=Response(200, json={"ok": True})
     )
