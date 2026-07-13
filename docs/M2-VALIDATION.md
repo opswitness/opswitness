@@ -101,3 +101,38 @@ doctor run remained fully green and counted seven secure backup files.
 
 Current verification after permission hardening: 135 tests pass; ruff, mypy, and
 full-history gitleaks pass. No secret values were printed or committed.
+
+### Feed/SOX adoption preflight: 2026-07-13 00:52 PDT
+
+The next two soak jobs were prepared without changing either production plist or the
+user-owned schedule configuration:
+
+- `com.tianyuzhou.feed-monitor` remains an elapsed-time `StartInterval=1500` job. Its
+  source plist SHA-256 is
+  `5ae4e5b4a342a25525ec1b3f85e5446f3785bea15108368aff554034b4e77a69`; the dry-run
+  changes only the execution entry from `Program=feed_monitor_run.sh` to the stable
+  `~/.local/bin/qd wrap --job com.tianyuzhou.feed-monitor -- feed_monitor_run.sh`.
+- `com.tianyuzhou.sox-monitor` remains an elapsed-time `StartInterval=21600` job. Its
+  source plist SHA-256 is
+  `9e41a23df92f141eb5303ec1f507e22d3819d431cf31235cc06f59aaa32c1be6`; the dry-run
+  prepends the same stable wrapper to its existing Python `ProgramArguments`.
+- Both production plists pass `plutil -lint`; every referenced executable exists, and
+  neither job currently has a `.qd-bak`, as expected before first adoption.
+- A read-only query of the real GUI launchd domain found both labels loaded with last exit
+  status 0. SOX was idle; feed was in a normal scheduled invocation started at 00:52:37 PDT.
+  This proves adoption must never boot out or rewrite a target while its PID is active.
+- Copies under an isolated `/tmp` directory completed the full
+  `--apply -> plutil -lint -> --rollback` sequence. Each rollback reproduced the original
+  SHA-256 exactly. No production plist, launchd job, ledger, or schedule file was changed.
+
+After the 24-48 hour canary gate passes, adoption must remain fail-closed and ordered:
+
+1. Confirm each target has no active PID, waiting for a scheduled invocation to finish
+   naturally. Then recompute both source hashes, stop on drift, and rerun the dry-run diffs.
+2. Apply one plist at a time, lint it, and verify that its pristine `.qd-bak` matches the
+   pre-apply hash before reloading the corresponding launchd job.
+3. Add only the two exact full labels to the user-owned `schedules.yaml`; do not enroll a
+   namespace glob. Run watchdog, status, digest, and projector checks after each job.
+4. Any wrapper, coverage, projection, or process-tree anomaly triggers immediate
+   `qd adopt launchd LABEL --rollback`, launchd reload, and removal of that label from the
+   enrollment list. The seven-day soak clock starts only after both jobs are healthy.
