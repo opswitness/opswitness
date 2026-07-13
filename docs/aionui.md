@@ -50,24 +50,51 @@ qd workflow register quarterdeck-showcase \
 登记文件是 `~/.config/quarterdeck/workflows.yaml`（`0600`）。命令必须是绝对 argv，
 不能是 shell/env，不能带疑似 credential，AionUi 不能修改它，也不能附加运行时参数。
 
+### AionUi 2.1.33 权限边界
+
+AionUi 2.1.33 会把内置 Claude Code 的 Scheduled Task 自动模式规范化成
+`bypassPermissions`，即使创建请求写的是 `default`。因此不能直接用内置 Claude
+创建这个任务，也不能把任务详情页显示为 `default` 之前的配置当作已验收。
+
+本机验收使用一个专用 Custom Agent：复用 AionUi 已安装并通过连接测试的
+`claude-agent-acp`，但把 agent 的 `yolo_id` 固定为 `default`；其 Custom Assistant
+固定 `Permission = default`，且 MCP 只绑定 `quarterdeck`。AionUi 更新可能改变 Node
+或 ACP adapter 的版本化路径，更新后必须重新执行 agent 连接测试和 MCP availability
+检查，失败时不得运行任务。
+
 然后在 AionUi：
 
-1. 建一个专用对话，确认 `quarterdeck` MCP 已启用。
+1. 建一个使用上述 guarded agent 的专用对话，确认 `Permission · Default`，并确认
+   只启用了 `quarterdeck` MCP。
 2. 在 **Scheduled Tasks** 新建任务，Frequency 选 **Manual**，Execution mode 选
    **Existing conversation**，目标选上面的专用对话。
-3. 固定 Prompt：
+3. 固定 Prompt；`each invocation` 是必要语义，防止持续对话把后续点击误判为重复调用：
 
    ```text
-   Call qd_workflow_start exactly once with workflow_id "quarterdeck-showcase".
-   Do not call any other mutating tool. Return the run_id, then call
-   qd_workflow_status for that run_id.
+   For this scheduled-task invocation, call qd_workflow_start exactly once with
+   workflow_id "quarterdeck-showcase", even if earlier turns launched the same workflow.
+   Each Run now invocation must create and return a new run_id. Do not call any other
+   mutating tool. Then call qd_workflow_status for the new run_id and report its status.
    ```
 
-4. 第一次工具确认只选择“始终允许 `quarterdeck` server 的 `qd_workflow_start` 工具”；
-   **不要**允许整个 server，也不要开启 YOLO。该授权是 AionUi 会话级的；会话重建后
-   第一次运行会重新确认。
+4. 第一次工具确认分别只选择“始终允许 `qd_workflow_start`”和“始终允许
+   `qd_workflow_status`”；**不要**允许整个 server，也不要使用 AionUi 内置 Claude
+   cron 的 `bypassPermissions`。授权是 AionUi 会话级的；会话重建后第一次运行会
+   重新确认。
 5. 此后进入该 Manual Task，点击 **Run now** 即启动。调用立即返回 run id，后台
    supervisor 脱离 AionUi 会话继续运行。
+
+### 真实 one-click 验收（2026-07-13）
+
+- AionUi：`2.1.33`；任务 `cron_019f5d76-51f8-7c63-8e7e-ce4d147279a0`；
+  对话 `77ef6fbd`；任务实际 `agent_config.mode = default`。
+- 首次授权只覆盖 `qd_workflow_start` 与只读的 `qd_workflow_status`，未授权整个 MCP
+  server；内置 Claude 自动生成的 `bypassPermissions` 任务未执行并已删除。
+- 随后的单次 **Run now** 无二次授权，生成新 run
+  `01KXEQM5PVHH43HDA6VYQCZHKP`。账本按顺序记录
+  `workflow_launch_requested -> workflow_launch_dispatched -> run_started -> run_finished`，
+  exit 0、`degraded=false`，随后两个 Paperclip comment projection ack 均已落盘。
+- 这次验收没有替换生产 `~/.local/bin/qd`，也没有修改任何 launchd service。
 
 这是启动意图，不是 M3 审批。工具调用中的高风险副作用仍由 Quarterdeck gate →
 Paperclip Web UI 审批；流程退出码也只证明 execution，业务完成必须看 artifact

@@ -41,9 +41,22 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   handshake against the isolated repository environment listed exactly eleven tools. An
   isolated fixed-command launch completed `requested -> dispatched -> run_started ->
   run_finished` with exit 0, while a dispatch-fsync fault test proved the worker never executes.
-  The real `0600` manifest now contains only `quarterdeck-showcase`. Rebinding AionUi to the
-  isolated MCP and exercising its Manual Task **Run now** button remain pending macOS unlock;
-  the production `~/.local/bin/qd` will not be replaced before the canary time gate.
+  The real `0600` manifest now contains only `quarterdeck-showcase`.
+- The live AionUi 2.1.33 Manual Task acceptance passed on 2026-07-13. A first attempt using
+  built-in Claude was rejected before execution because AionUi normalized the cron agent mode
+  to `bypassPermissions`; that task was deleted. The accepted task uses a connection-tested
+  custom Claude ACP agent whose `yolo_id` and persisted task mode are both `default`, with a
+  dedicated assistant bound only to the Quarterdeck MCP.
+- Initial confirmation granted session-level access only to `qd_workflow_start` and the read-only
+  `qd_workflow_status`, never to the whole server. A later single **Run now** click required no
+  confirmation and created run `01KXEQM5PVHH43HDA6VYQCZHKP`. AionUi reported `succeeded`; the
+  authoritative ledger recorded `requested -> dispatched -> run_started -> run_finished`, exit
+  0, `degraded=false`, followed by both Paperclip comment projection acknowledgements. The task
+  remained `Permission = default` and AionUi recorded `last_status=ok`.
+- The acceptance used the repository virtual environment only. Production `~/.local/bin/qd` and
+  every launchd service remained unchanged while the canary time gate continues to accumulate.
+  The guarded agent references AionUi's versioned Node/ACP runtime, so every AionUi upgrade must
+  repeat its connection test and MCP availability check before **Run now** is trusted again.
 - The separate `@paperclipai/mcp-server@2026.707.0` package was audited but deliberately
   not mounted. It exposes approval decisions, other mutations, and a general `/api` escape
   hatch, requires a bearer token in its environment, and offers no documented read-only
