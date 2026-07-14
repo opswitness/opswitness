@@ -108,7 +108,9 @@ blocked by the current open gates below.
   tests prove that private paths and plan-like text do not cross into the API or ledger.
 - The console now holds one exclusive `console.lease` before startup recovery. Duplicate processes
   are rejected across ports, failed startup releases app-owned leases, and graceful shutdown waits
-  for background work before handing plan-state ownership to a successor.
+  for background work before handing plan-state ownership to a successor. A live second-port start
+  exited 2 before recovery while the primary health endpoint and existing `ready` plan remained
+  unchanged; real directory/lease permissions are `0700`/`0600`.
 - A fifth secret-free launchd template now makes that console an optional loopback KeepAlive
   service. `qd service exec console` reads the private configuration then `execve`s the fixed
   `qd console serve --port <configured>` argv. Doctor treats it like Paperclip: installed plist,

@@ -94,6 +94,10 @@ Status: name-independent release engineering is ready; public release is **NO-GO
 - `qd console serve` acquires an exclusive state-directory lease before browser launch, recovery,
   or remote work. A second service is rejected even on a different port; recovery failure releases
   a lease acquired by the app, while graceful shutdown drains background work before release.
+  Live source-tree acceptance held the primary service on `127.0.0.1:8765`; a second start on
+  `8766` exited 2 with the fixed `another console instance is already active` message. The primary
+  health endpoint stayed green, the existing `ready` plan record was byte-state unchanged, and the
+  state directory/lease modes were `0700`/`0600`.
 - Initial confirmation granted session-level access only to `qd_workflow_start` and the read-only
   `qd_workflow_status`, never to the whole server. A later single **Run now** click required no
   confirmation. Later UI verification inadvertently activated the synthetic task twice through
