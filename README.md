@@ -9,6 +9,25 @@ Quarterdeck is a local-first bridge that puts your *existing* scheduled scripts 
 coding agents (Claude Code, Codex) under a real control plane —
 [Paperclip](https://github.com/paperclipai/paperclip) — without rewriting any of them.
 
+## Product positioning
+
+> **本地优先的 AI Workforce 总工作台：把已有的 Claude、Codex、AionUi、Paperclip 和自动化任务，变成一个可规划、可确认、可看见、可审计的团队。**
+
+Quarterdeck is the ordinary operator door, not another agent runtime or control plane. An
+operator describes an outcome in the local console; Quarterdeck drafts a bounded team and
+execution plan, makes its cadence, risks, artifacts, and approval checkpoints reviewable, and
+starts nothing until the exact plan is confirmed. It then delegates execution to replaceable
+adapters such as AionUi, Claude Code, Codex, Paperclip, and existing automation, while the local
+ledger remains the evidence authority for what actually ran.
+
+The product promise is deliberately narrower than "autonomous company": one simple local surface
+for planning, confirmation, live work visibility, approvals, evidence, and daily operational
+summaries -- without asking an operator to understand or routinely open the specialist systems
+behind it.
+
+Commercial packaging and its open-core boundary are recorded in
+[COMMERCIALIZATION.md](docs/COMMERCIALIZATION.md).
+
 It adds the three things the platforms don't cover:
 
 | Module | What it does | Why it doesn't exist elsewhere |
@@ -16,10 +35,17 @@ It adds the three things the platforms don't cover:
 | **`qd wrap`** | Zero-modification onboarding for launchd/cron jobs: runs land in a local append-only ledger (crash-safe JSONL + SQLite index) and are projected into Paperclip as issues/comments/work-products ([ADR-0001](docs/adr/0001-run-ledger-write-model.md)). Never breaks the wrapped job (offline spool, exit-code mirroring). | Paperclip's watchdog only verifies its *own* issue trees; external heartbeat runs are read-only by design — nothing monitors external scheduled scripts. |
 | **`qd gate`** | Fail-closed, *tool-call-level* human approval for non-interactive Claude Code via the official PreToolUse defer contract: defer → Paperclip board decision → same-session resume. Every transition lands in the local evidence ledger. | Paperclip approvals are issue-level sign-offs ([#3017](https://github.com/paperclipai/paperclip/issues/3017) is open); hobby hooks have no independent evidence ledger behind them. |
 | **`qd artifacts`** | Authoritative artifact events in the local ledger; queries served by the disposable SQLite index; content stored content-addressed (attachment / immutable blob); Paperclip work-products are a rebuildable projection. | Work-products carry no content hashes and no server-side idempotency (`externalId` has no unique constraint) — evidence-grade artifacts need an authority outside the platform. |
-| **`qd console`** | Serves a minimal local operator UI whose default **Workspace** is a chat-first task entry: describe even a terse outcome once, let AionUi expand it into a six-section execution brief plus agent architecture/cadence/checkpoints, review the live planning stages and conservative time range, graphically assign direct managers in the Team view, confirm the exact hash, then dispatch to Paperclip plus an AionUi team or an allowlisted workflow. Separate views keep fleet health, tasks, teams, evidence, consent-gated Gmail, and secret-safe Telegram setup close at hand. | AionUi and Paperclip each expose a useful specialist UI, but neither provides one evidence-aware entry for daily fleet health, notifications, mail digest, plan review, organization review, and confirmed execution. The console delegates to both; it is not a second control plane or agent runtime. |
+| **`qd console`** | Serves a minimal local operator UI whose default **Workspace** is a chat-first task entry: describe even a terse outcome once, let AionUi expand it into a six-section execution brief plus agent architecture/cadence/checkpoints, review the live planning stages and conservative time range, graphically assign direct managers and bounded collaboration loops in the Team view, confirm the exact hash, then dispatch to Paperclip plus an AionUi team or an allowlisted workflow. Separate views keep fleet health, tasks, teams, approvals, history, consent-gated Gmail, and secret-safe Telegram setup close at hand. | AionUi and Paperclip each expose a useful specialist UI, but neither provides one evidence-aware entry for daily fleet health, notifications, mail digest, plan review, organization review, and confirmed execution. The console delegates to both; it is not a second control plane or agent runtime. |
 | **`qd workflow`** | Register a fixed, shell-free workflow once, then launch it asynchronously from AionUi's native **Run now** button. Dispatch order, single-workflow concurrency, and terminal state are ledger evidence. | AionUi supplies the button and agent session; Quarterdeck supplies the command allowlist and evidence boundary. No second workflow engine or generic remote shell is built. |
 | **`qd mail`** | Run one administrator-fixed Gmail query through pinned `gws`, returning only sender, subject, date, and message id. First-time setup privately imports a Google Desktop OAuth client, then binds Gmail readonly OAuth and model-metadata transmission to two explicit acknowledgements. Evidence contains counts and hashes, never mail fields, client secrets, or OAuth output. | AionUi supplies the model runtime and optional daily scheduler. Quarterdeck revalidates the private Desktop client boundary, encrypted OAuth, live token, readonly scope, and explicit model-metadata consent; its isolated mail MCP exposes no fleet mutation, body, draft, send, delete, or runtime-query tool. |
 | **`qd soak`** | Freeze a canary/soak cadence contract, then derive a nonzero-until-proven verdict from elapsed time, every trigger gap, terminal/degraded evidence, schedule drift, torn lines, and projection backlog ([ADR-0006](docs/adr/0006-append-only-soak-gates.md)). | A Markdown timestamp or one manual success cannot enforce a rollout gate. Start/reset/checkpoint are append-only; status is always recomputed from raw evidence. |
+
+The reporting hierarchy stays a single-root acyclic tree. Iterative review is modeled separately as
+at most five collaboration loops; each loop may return to an earlier employee or to the same
+employee, carries an explicit return/stop condition, and is limited to 1-10 iterations. The console
+edits these rules graphically and binds them into the immutable plan hash. The current AionUi Team
+API has no verifiable round-limit control, so this is labeled a plan-level execution contract rather
+than a deterministic runtime cutoff.
 
 ## Design rules
 
@@ -40,6 +66,9 @@ It adds the three things the platforms don't cover:
   metadata-only OAuth access. Automatic sending and drafting are outside this surface.
 - **Plan before execution.** Drafting runs without tools. No Paperclip issue, AionUi execution
   team, or allowlisted workflow starts until the operator confirms the exact plan hash.
+- **Management is not iteration.** Direct reporting remains one acyclic tree. Review loops are
+  separate, bounded, hash-bound contracts and must never be presented as stronger enforcement than
+  the active execution adapter can prove.
 
 ## Local operator console
 
@@ -52,9 +81,12 @@ chat-first surface: one plain-language task description becomes an inline plan w
 execution-level task brief, Agent team, stages, cadence, checkpoints, artifacts, and risks. While
 planning, the page shows persisted external stages, elapsed time, and a conservative duration range;
 it never exposes or fabricates model chain-of-thought. The operator must accept the exact plan before
-anything runs. The **Team** view renders each current task team as a reporting hierarchy. Changing a
-direct manager creates a new hash-bound child plan; confirmed or active organizations remain read-only.
-Separate views expose fleet health, tasks, integrations, and consent-gated mail and Telegram setup.
+anything runs. The **Team** view renders each current task team as an acyclic reporting hierarchy
+plus separately bounded collaboration loops. A ready plan can graphically change a direct manager,
+add/remove a loop, select its source and target (including self-review), set a return/stop condition,
+and choose a 1-10 iteration cap. Saving creates a new hash-bound child plan; confirmed or active
+organizations remain read-only. Separate views expose fleet health, tasks, approvals, integrations,
+and consent-gated mail and Telegram setup.
 The **History** view folds every confirmed Agent execution from append-only ledger commit order,
 keeps tombstoned-task history visible, and separates those runs from wrapped system automation.
 Confirmation launches one

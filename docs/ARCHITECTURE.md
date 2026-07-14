@@ -9,6 +9,31 @@ ships a thin local operator console, but that console delegates rather than beco
 second control plane. The bridge remains the one layer nothing else can replace: the place
 where ungoverned reality gets connected to governance, with the evidence held locally.
 
+## Product position
+
+> **本地优先的 AI Workforce 总工作台：把已有的 Claude、Codex、AionUi、Paperclip 和自动化任务，变成一个可规划、可确认、可看见、可审计的团队。**
+
+This is a product-door statement, not a claim that Quarterdeck replaces every layer underneath it.
+The loopback console is the one ordinary place where an operator can describe an outcome, review
+the proposed task plan and reporting hierarchy, confirm the immutable plan hash, watch active
+work, graphically set bounded collaboration loops, make approval decisions, and read evidence-backed
+daily summaries. It delegates planning and execution to AionUi and other replaceable adapters,
+governance state to Paperclip, and retains
+only the evidence boundary locally. Users should not need to routinely operate Paperclip or AionUi
+to use Quarterdeck; advanced diagnostics may reveal those adapters when troubleshooting requires it.
+
+The distinction is essential: Paperclip remains the bought control plane, AionUi and vendor CLIs
+remain execution adapters, and Quarterdeck remains the local trust/evidence bridge plus the simple
+operator experience. It does not become a second scheduler, generic workflow engine, agent runtime,
+or mutable employee directory.
+
+Reporting lines and iterative collaboration are intentionally different graphs. Direct management
+remains one acyclic rooted tree. A collaboration loop may return to a prior agent or the same agent,
+but it must carry an explicit stop condition and a 1-10 iteration cap; at most five loops may be
+confirmed per plan. Both graphs are hash-bound. Until the execution adapter exposes a verifiable
+round counter, the loop cap is a plan-level contract and must not be presented as hard runtime
+enforcement.
+
 ## The stack
 
 ```mermaid
@@ -35,7 +60,7 @@ flowchart BT
         A2["OpenAI / Anthropic vendor login CLIs"]
     end
     subgraph C["Operator surface"]
-        C0["Quarterdeck console<br/>(workspace · tasks · approvals · history · connections)"]
+        C0["Quarterdeck console<br/>(workspace · tasks · teams · approvals · history · connections)"]
         C1["qd CLI + Telegram fallback"]
     end
     subgraph V["Vertical case layer (P5, paid)"]
@@ -113,9 +138,12 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
     confirmation; it never edits the reviewed parent in place. User-facing deletion is likewise
     append-only: one `task_plan_deleted` tombstone hides an inert plan while its private record and
     evidence remain intact. Active work cannot be deleted, and version parents require child-first
-    deletion. The graphical Team view folds each plan into one acyclic reporting tree. Organization
-    edits create hash-bound child versions and pass the effective hierarchy to Paperclip governance
-    and AionUi execution; Quarterdeck stores no second employee directory. Completion remains
+    deletion. The graphical Team view folds each plan into one acyclic reporting tree and a separate
+    set of bounded collaboration loops. Organization edits create hash-bound child versions and pass
+    the effective hierarchy plus loop contracts to Paperclip governance and AionUi execution;
+    Quarterdeck stores no second employee directory. The current AionUi adapter has no verifiable
+    round-limit primitive, so these loops are plan-level constraints rather than runtime proof.
+    Completion remains
     `completed_unverified` until outcome evidence exists. See
     [ADR-0007](adr/0007-local-operator-console.md).
 11. **Notification setup is narrow, local, and evidence-first.** The console is not a generic
@@ -215,7 +243,7 @@ paid users ultimately see the vertical workbench, not the generic operations sur
 | MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ 11-tool ops + isolated 2-tool mail profile |
 | allowlisted workflow launcher | `src/quarterdeck/workflows.py`, `workflow_worker.py` | ✅ code + tests + live AionUi one-click acceptance |
 | metadata-only mail monitor | `src/quarterdeck/mail.py`, `console/`, `console-ui/` | ✅ adapter + setup/revoke UI; live OAuth and AionUi schedule pending |
-| local operator console | `src/quarterdeck/console/`, `console-ui/` | ✅ sole operator surface + provider login/status + plan/confirm/dispatch + graphical team hierarchy + ledger-folded run history + approval facade + Gmail/Telegram + responsive UI; production install pending canary |
+| local operator console | `src/quarterdeck/console/`, `console-ui/` | ✅ sole operator surface + provider login/status + chat-first planning/progress + versioned revisions/deletion + graphical hierarchy/bounded loops + ledger-folded run history + approval facade + Gmail/Telegram + responsive UI; production install pending canary |
 | install doctor / secure services / disaster recovery | `src/quarterdeck/doctor.py`, `service.py`, `backup.py` | ✅ five secret-free templates + installed-command drift check; soak pending |
 | gate (PreToolUse `defer` → Paperclip approval → resume) | `gate.py`, `gated_claude.py` | ✅ M3 code + two live approval/resume drills |
 | artifacts (ledger events + content-addressed projection) | `artifacts.py`, `index.py` | ✅ M4 code + live projection |
@@ -226,4 +254,5 @@ current release-gate snapshot; ADRs remain the design authority.
 
 Related: [P0 validation](P0-VALIDATION.md) · [readiness gates](READINESS.md) ·
 [approved install runbook](INSTALL-PAPERCLIP.md) ·
-[AionUi console setup](aionui.md)
+[AionUi console setup](aionui.md) ·
+[commercialization strategy](COMMERCIALIZATION.md)

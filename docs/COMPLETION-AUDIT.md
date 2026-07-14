@@ -1,7 +1,7 @@
 # Quarterdeck Completion Audit
 
-Operational snapshot: 2026-07-13 21:24 PDT. The source-only Workspace updates below were recorded
-through 2026-07-14 08:21 PDT without changing production state. This document maps the approved M0-M6
+Operational snapshot: 2026-07-13 21:24 PDT. The source-only console updates below were recorded
+through 2026-07-14 11:08 PDT without changing production state. This document maps the approved M0-M6
 plan to evidence and remaining gates. [READINESS.md](READINESS.md) remains the single operational
 snapshot.
 
@@ -16,7 +16,24 @@ snapshot.
 | M4 artifact/eval/signoff | Atomic CAS, ledger authority, live projection/reconciliation and restore evidence | Complete |
 | M5 open-source v0.1 | CI/release/SBOM/provenance code, tracked-only distribution verification, showcase, wheel and first-run evidence exist | Blocked by brand decision and real Git remote/Actions |
 | M6 paid practitioner Pilot | Offer, privacy contract, technical boundary and success criteria exist | Blocked by written paid commitment/deposit; product code intentionally absent |
-| Local total console | Default chat-first Workspace, AI-expanded execution brief, persisted planning stages and time range, inline Plan Mode architecture review, hash-bound confirmation, dashboard/tasks/evidence/integrations, atomic dispatch/recovery, fixed-error privacy boundary, single-instance lease, per-request private AionUi workspaces, responsive UI and packaged assets | Complete in source; stable install/KeepAlive service waits for canary maintenance window |
+| Local total console | Default chat-first Workspace, AI-expanded execution brief, persisted planning stages and time range, provider connection facade, versioned plan revision, evidence-preserving deletion, graphical hierarchy and bounded collaboration loops, approvals, ledger-folded run history, hash-bound confirmation, atomic dispatch/recovery, fixed-error privacy boundary, single-instance lease, per-request private AionUi workspaces, responsive UI and packaged assets | Complete in source; stable install/KeepAlive service waits for canary maintenance window |
+
+## Source console change record
+
+These commits are the complete source-only operator-console sequence after the initial total-console
+baseline. They changed no production plist, schedule, mailbox permission, or confirmed task execution.
+
+| Commit | Recorded update | Evidence boundary |
+|---|---|---|
+| `5c1007b` | Gmail readonly setup gained a validated local Desktop OAuth-client precondition | Missing/invalid client state cannot launch login; client fields never enter API or evidence |
+| `cd50fe4` | Chat-first Workspace became the default task entry | Quick prompts only populate local input; planning still requires explicit submit |
+| `5fa2d17` | Persisted planning phases, progress bar, elapsed time, and conservative duration range | Shows external phase names only; never exposes or fabricates chain-of-thought |
+| `68a976c` | Quarterdeck became the sole ordinary UI for provider status/login, planning, approvals, and evidence | AionUi/Paperclip remain hidden replaceable adapters; credentials stay in vendor login flows |
+| `3ebbaab` | Ready plans gained append-only, hash-bound revision children | Parent plan/hash remain immutable; revised child requires fresh confirmation |
+| `529b1ba` | Task deletion became an evidence-preserving visibility tombstone | Private plan and ledger evidence remain intact; active work cannot be deleted |
+| `e668bc8` | Team view gained graphical direct-manager editing | One lead root, complete membership, and acyclic reporting remain fail-closed |
+| `f42e10d` | History unified Agent executions and wrapped automation | Ledger commit order is authoritative; process completion remains distinct from outcome proof |
+| `0f1cc8f` | Team view gained graphically editable bounded collaboration loops | Self-review/cycles allowed separately from management; 1-10 iteration cap is plan-level, not a verified runtime cutoff |
 
 ## Live evidence at this snapshot
 
@@ -49,6 +66,13 @@ snapshot.
   privacy, three-Agent, signoff, and artifact defaults. Confirmation remained unchecked and no
   execution was dispatched. The timing budget now covers two bounded planner calls plus cleanup;
   progress reporting cannot interrupt ephemeral-session cleanup.
+- Final bounded-loop acceptance used the existing ready synthetic Bazi team. The UI added one
+  collaboration loop, changed it to `引用核验 Agent -> 引用核验 Agent`, set the cap to four, and
+  edited the stop condition. Desktop width 1964 and mobile 390x844 had zero document overflow;
+  save remained available and browser warnings/errors were empty. The edit was cancelled, leaving
+  the real plan at revision 1 with zero loops and no new ledger event. The complete suite passed
+  303 tests in three consecutive runs; ruff, mypy, TypeScript, Vite build, targeted worktree scans,
+  and post-commit full-history gitleaks passed.
 - Total-console health now uses the same fail-closed coverage/watchdog/outcome rules as the digest
   over one ledger snapshot. The live metric is `1/1 完整覆盖`; successful historical or on-demand
   runs no longer inflate the number of actively monitored jobs.
@@ -57,7 +81,7 @@ snapshot.
   approvals.”
 - Plan startup recovery resumes only safe `confirmed` work through one atomic dispatch claim,
   refreshes active work without replay, and fails ambiguous `planning`/`dispatching` states closed.
-  Concurrent confirmation/dispatch and corrupt-record tests pass within the 252-test suite.
+  Concurrent confirmation/dispatch and corrupt-record tests pass within the current 303-test suite.
 - Commit `93c8bbb` gives every AionUi planning or mail request a unique `0700` workspace and makes
   confirmed Team plus workspace cleanup part of successful return. The source console restarted
   cleanly on port 8765; its only plan remained `ready` with the same timestamp, the confirmation

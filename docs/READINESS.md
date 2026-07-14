@@ -10,8 +10,8 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 299 tests pass in three consecutive runs; ruff and mypy pass. DCO, worktree
-  gitleaks, and full-history gitleaks are clean.
+- Full suite: 303 tests pass in three consecutive runs; ruff, mypy, TypeScript, and the packaged
+  Vite build pass. DCO, targeted worktree gitleaks, and full-history gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
   `(pid, create_time)`, verifies descendants, escalates after 750ms, and emits
@@ -162,9 +162,11 @@ blocked by the current open gates below.
   database or runtime is introduced. Source-console acceptance used the existing synthetic Bazi
   team: two reporting levels rendered correctly, changing the report editor's manager produced a
   three-level preview, the cycle-causing reverse choice disappeared, and the edit survived a full
-  background refresh. The change was cancelled, so no real plan was revised. At 390x844 the seven-item
-  navigation, organization cards, manager controls, and save action remained usable with zero page
-  overflow and no browser warnings.
+  background refresh. A later acceptance added one loop, changed it to self-review, set its cap to
+  four, edited the stop condition, and kept save enabled at desktop and 390x844 mobile widths. Both
+  changes were cancelled, so the real plan remains revision 1 with zero loops and no new ledger
+  event. At 390x844 the seven-item navigation, organization cards, manager/loop controls, and save
+  action remained usable with zero page overflow and no browser warnings.
 - The former Evidence navigation is now the unified History view. Confirmed Agent executions are
   folded deterministically from `task_plan_confirmed`, requested, dispatched, and terminal ledger
   events; private plan records only supply validated display metadata. Each row expands to the exact
