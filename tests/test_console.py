@@ -380,6 +380,46 @@ def test_aionui_mail_summary_fails_when_ephemeral_team_cleanup_is_unconfirmed(
     assert "private subject" not in str(exc.value)
 
 
+def test_aionui_planning_fails_when_ephemeral_team_cleanup_is_unconfirmed(
+    monkeypatch, console_env
+):
+    settings, _, _, _ = console_env
+    client = AionUiClient(settings.console)
+    team = {
+        "id": "team-plan",
+        "assistants": [
+            {"role": "lead", "conversation_id": "conversation-plan"}
+        ],
+    }
+    monkeypatch.setattr(
+        client,
+        "list_assistants",
+        lambda: [
+            {
+                "id": settings.console.planner_assistant_id,
+                "enabled": True,
+                "team_selectable": True,
+            }
+        ],
+    )
+    monkeypatch.setattr(client, "create_team", lambda **kwargs: team)
+    monkeypatch.setattr(client, "ensure_team", lambda team_id: None)
+    monkeypatch.setattr(client, "set_team_mode", lambda team_id, mode: None)
+    monkeypatch.setattr(
+        client,
+        "_run_and_wait",
+        lambda *args, **kwargs: _plan().model_dump_json(),
+    )
+
+    def planning_cleanup_failed(team_id):
+        del team_id
+        raise AionUiError("delete failed")
+
+    monkeypatch.setattr(client, "delete_team", planning_cleanup_failed)
+    with pytest.raises(AionUiError, match="planning team cleanup could not be confirmed"):
+        client.generate_plan("PLAN1", PlanRequest(objective="生成摘要"), [])
+
+
 def _successful_run(job: str, run_id: str, started: datetime) -> list[dict]:
     return [
         {

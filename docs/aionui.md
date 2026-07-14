@@ -26,7 +26,8 @@ qd console serve --open
 - 对已登记流程调用本地白名单 workflow；或
 - 在 Paperclip 创建治理 issue，并按已确认架构创建 AionUi execution Team。
 
-Plan Mode 临时 Team 在成功或失败后删除。AionUi 执行结束只记为
+Plan Mode 临时 Team 在成功或失败后删除；若删除无法确认，规划整体失败且不会进入待确认
+状态。AionUi 执行结束只记为
 `completed_unverified`；业务完成必须继续看 artifact/eval/审签。详见
 [ADR-0007](adr/0007-local-operator-console.md)。
 

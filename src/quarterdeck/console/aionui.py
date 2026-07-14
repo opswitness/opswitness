@@ -103,6 +103,14 @@ class AionUiClient:
     def delete_team(self, team_id: str) -> None:
         self._request("DELETE", f"/api/teams/{team_id}", timeout=5.0)
 
+    def _delete_ephemeral_team(self, team_id: str, purpose: str) -> None:
+        try:
+            self.delete_team(team_id)
+        except (AionUiError, ValueError) as exc:
+            raise AionUiError(
+                f"AionUi {purpose} team cleanup could not be confirmed"
+            ) from exc
+
     def ensure_team(self, team_id: str) -> None:
         self._request("POST", f"/api/teams/{team_id}/session", timeout=45.0, json={})
 
@@ -248,10 +256,7 @@ class AionUiClient:
                 _validate_workflow_choice(plan, workflow_catalog)
                 return plan
         finally:
-            try:
-                self.delete_team(str(team["id"]))
-            except (AionUiError, ValueError):
-                pass
+            self._delete_ephemeral_team(str(team["id"]), "planning")
 
     def summarize_mail(self, job_id: str, messages: list[dict[str, str]]) -> str:
         team = self.create_team(
@@ -266,8 +271,6 @@ class AionUiClient:
                 }
             ],
         )
-        summary = ""
-        cleanup_error: Exception | None = None
         try:
             self.ensure_team(str(team["id"]))
             self.set_team_mode(str(team["id"]), "plan")
@@ -283,14 +286,9 @@ class AionUiClient:
             )
             if len(summary) > 12000:
                 raise AionUiError("AionUi mail summary exceeded the response limit")
+            return summary
         finally:
-            try:
-                self.delete_team(str(team["id"]))
-            except (AionUiError, ValueError) as exc:
-                cleanup_error = exc
-        if cleanup_error is not None:
-            raise AionUiError("AionUi mail team cleanup could not be confirmed") from cleanup_error
-        return summary
+            self._delete_ephemeral_team(str(team["id"]), "mail")
 
     def dispatch_plan(
         self,
