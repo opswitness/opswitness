@@ -49,6 +49,13 @@ export function getPlan(planId: string): Promise<PlanRecord> {
   return api(`/api/v1/plans/${encodeURIComponent(planId)}`);
 }
 
+export function revisePlan(planId: string, instruction: string): Promise<PlanRecord> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/revise`, {
+    method: 'POST',
+    body: JSON.stringify({ instruction }),
+  });
+}
+
 export function confirmPlan(planId: string, planSha256: string): Promise<PlanRecord> {
   return api(`/api/v1/plans/${encodeURIComponent(planId)}/confirm`, {
     method: 'POST',

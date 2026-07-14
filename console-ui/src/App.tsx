@@ -16,6 +16,7 @@ import {
   FileUp,
   FileCheck2,
   FolderOpen,
+  GitCompareArrows,
   Inbox,
   LayoutDashboard,
   ListTodo,
@@ -24,7 +25,9 @@ import {
   MessageSquare,
   Play,
   Plus,
+  PencilLine,
   RefreshCw,
+  RotateCcw,
   Send,
   Server,
   Settings,
@@ -52,6 +55,7 @@ import {
   requestMailAuthorization,
   requestMailSummary,
   requestPlan,
+  revisePlan,
   testTelegram,
 } from './api';
 import type {
@@ -191,6 +195,11 @@ function App() {
     });
   }, []);
 
+  const activeParentPlan = useMemo(() => {
+    if (!activePlan?.parent_plan_id || !bootstrap) return null;
+    return bootstrap.plans.find((row) => row.plan_id === activePlan.parent_plan_id)?.plan || null;
+  }, [activePlan?.parent_plan_id, bootstrap]);
+
   useEffect(() => {
     if (!activePlan) return;
     if (!['planning', 'confirmed', 'dispatching', 'running', 'awaiting_approval'].includes(activePlan.status)) {
@@ -310,8 +319,12 @@ function App() {
                 <WorkspaceView
                   key={workspaceRevision}
                   record={activePlan}
+                  previousPlan={activeParentPlan}
                   onPlan={async (body) => {
                     mergePlan(await requestPlan(body));
+                  }}
+                  onRevise={async (record, instruction) => {
+                    mergePlan(await revisePlan(record.plan_id, instruction));
                   }}
                   onConfirm={async (record) => {
                     if (!record.plan_sha256) throw new Error('方案哈希缺失');
@@ -354,10 +367,14 @@ function App() {
       <TaskDrawer
         open={drawerOpen}
         record={activePlan}
+        previousPlan={activeParentPlan}
         onClose={() => setDrawerOpen(false)}
         onPlan={async (body) => {
           const record = await requestPlan(body);
           mergePlan(record);
+        }}
+        onRevise={async (record, instruction) => {
+          mergePlan(await revisePlan(record.plan_id, instruction));
         }}
         onConfirm={async (record) => {
           if (!record.plan_sha256) throw new Error('方案哈希缺失');
@@ -433,23 +450,28 @@ function IntegrationRow({ integrations }: { integrations?: Record<string, Integr
 
 function WorkspaceView({
   record,
+  previousPlan,
   onPlan,
+  onRevise,
   onConfirm,
   onRestart,
 }: {
   record: PlanRecord | null;
+  previousPlan: TaskPlan | null;
   onPlan: (body: {
     objective: string;
     constraints: string;
     workspace: string;
     preferred_cadence: string;
   }) => Promise<void>;
+  onRevise: (record: PlanRecord, instruction: string) => Promise<void>;
   onConfirm: (record: PlanRecord) => Promise<void>;
   onRestart: () => void;
 }) {
   const [draft, setDraft] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const [revisionOpen, setRevisionOpen] = useState(false);
   const [error, setError] = useState('');
   const quickStarts = [
     '每天早上汇总重要邮件，并列出需要回复的事项',
@@ -459,6 +481,7 @@ function WorkspaceView({
 
   useEffect(() => {
     setConfirmed(false);
+    setRevisionOpen(false);
     setError('');
   }, [record?.plan_id, record?.status]);
 
@@ -499,8 +522,21 @@ function WorkspaceView({
     }
   };
 
+  const revise = async (instruction: string) => {
+    if (!record || submitting) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      await onRevise(record, instruction);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '方案修改失败');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const restart = () => {
-    if (record) setDraft(record.objective);
+    setDraft('');
     onRestart();
   };
 
@@ -524,7 +560,12 @@ function WorkspaceView({
         ) : (
           <>
             <div className="chat-message user-message">
-              <div className="chat-user-bubble">{record.objective}</div>
+              <div className="chat-user-bubble">
+                {record.objective}
+                {record.parent_plan_id && record.revision_instruction && (
+                  <small>修改要求：{record.revision_instruction}</small>
+                )}
+              </div>
               <div className="chat-avatar user-avatar">你</div>
             </div>
             <div className="chat-message assistant-message">
@@ -542,6 +583,8 @@ function WorkspaceView({
                     plan={record.plan}
                     hash={record.plan_sha256 || ''}
                     showStatus={false}
+                    previousPlan={previousPlan}
+                    revisionNumber={record.revision_number}
                   />
                 )}
                 {['confirmed', 'dispatching', 'running', 'awaiting_approval', 'completed_unverified', 'failed'].includes(record.status) && (
@@ -549,28 +592,41 @@ function WorkspaceView({
                 )}
                 {record.status === 'ready' && (
                   <div className="chat-confirm-panel">
-                    <label className="confirm-check">
-                      <input
-                        type="checkbox"
-                        checked={confirmed}
-                        onChange={(event) => setConfirmed(event.target.checked)}
+                    {revisionOpen ? (
+                      <RevisionComposer
+                        submitting={submitting}
+                        onCancel={() => setRevisionOpen(false)}
+                        onSubmit={revise}
                       />
-                      <span><Check size={15} />确认此方案并启动受管执行</span>
-                    </label>
-                    <div className="confirm-actions">
-                      <button className="secondary-button" type="button" onClick={restart}>
-                        重新规划
-                      </button>
-                      <button
-                        className="primary-button"
-                        type="button"
-                        disabled={!confirmed || submitting}
-                        onClick={() => void confirm()}
-                      >
-                        {submitting ? <LoaderCircle size={17} className="spin" /> : <Play size={17} />}
-                        确认并运行
-                      </button>
-                    </div>
+                    ) : (
+                      <>
+                        <label className="confirm-check">
+                          <input
+                            type="checkbox"
+                            checked={confirmed}
+                            onChange={(event) => setConfirmed(event.target.checked)}
+                          />
+                          <span><Check size={15} />确认此方案并启动受管执行</span>
+                        </label>
+                        <div className="confirm-actions revision-actions">
+                          <button className="secondary-button" type="button" onClick={() => setRevisionOpen(true)}>
+                            <PencilLine size={16} />修改方案
+                          </button>
+                          <button className="text-button" type="button" onClick={restart}>
+                            <RotateCcw size={15} />重新开始
+                          </button>
+                          <button
+                            className="primary-button"
+                            type="button"
+                            disabled={!confirmed || submitting}
+                            onClick={() => void confirm()}
+                          >
+                            {submitting ? <LoaderCircle size={17} className="spin" /> : <Play size={17} />}
+                            确认并运行
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
                 {error && <InlineError text={error} />}
@@ -1692,15 +1748,19 @@ function TelegramSetupDialog({
 function TaskDrawer({
   open,
   record,
+  previousPlan,
   onClose,
   onPlan,
+  onRevise,
   onConfirm,
   onRestart,
 }: {
   open: boolean;
   record: PlanRecord | null;
+  previousPlan: TaskPlan | null;
   onClose: () => void;
   onPlan: (body: { objective: string; constraints: string; workspace: string; preferred_cadence: string }) => Promise<void>;
+  onRevise: (record: PlanRecord, instruction: string) => Promise<void>;
   onConfirm: (record: PlanRecord) => Promise<void>;
   onRestart: () => void;
 }) {
@@ -1710,11 +1770,13 @@ function TaskDrawer({
   const [cadence, setCadence] = useState('once');
   const [submitting, setSubmitting] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const [revisionOpen, setRevisionOpen] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (!open) return;
     setConfirmed(false);
+    setRevisionOpen(false);
     setError('');
     if (!record) {
       setObjective('');
@@ -1745,6 +1807,18 @@ function TaskDrawer({
       await onConfirm(record);
     } catch (err) {
       setError(err instanceof Error ? err.message : '确认失败');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const revise = async (instruction: string) => {
+    if (!record) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      await onRevise(record, instruction);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '方案修改失败');
     } finally {
       setSubmitting(false);
     }
@@ -1797,7 +1871,12 @@ function TaskDrawer({
           )}
 
           {record?.status === 'ready' && record.plan && (
-            <PlanReview plan={record.plan} hash={record.plan_sha256 || ''} />
+            <PlanReview
+              plan={record.plan}
+              hash={record.plan_sha256 || ''}
+              previousPlan={previousPlan}
+              revisionNumber={record.revision_number}
+            />
           )}
 
           {record && ['confirmed', 'dispatching', 'running', 'awaiting_approval', 'completed_unverified', 'failed'].includes(record.status) && (
@@ -1808,20 +1887,77 @@ function TaskDrawer({
         {record?.status === 'ready' && (
           <div className="confirm-footer">
             {error && <InlineError text={error} />}
-            <label className="confirm-check">
-              <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
-              <span><Check size={15} />确认此方案并启动受管执行</span>
-            </label>
-            <div className="confirm-actions">
-              <button className="secondary-button" type="button" onClick={onRestart}>重新规划</button>
-              <button className="primary-button" type="button" disabled={!confirmed || submitting} onClick={() => void confirm()}>
-                {submitting ? <LoaderCircle size={17} className="spin" /> : <Play size={17} />}
-                确认并运行
-              </button>
-            </div>
+            {revisionOpen ? (
+              <RevisionComposer
+                submitting={submitting}
+                onCancel={() => setRevisionOpen(false)}
+                onSubmit={revise}
+              />
+            ) : (
+              <>
+                <label className="confirm-check">
+                  <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
+                  <span><Check size={15} />确认此方案并启动受管执行</span>
+                </label>
+                <div className="confirm-actions revision-actions">
+                  <button className="secondary-button" type="button" onClick={() => setRevisionOpen(true)}>
+                    <PencilLine size={16} />修改方案
+                  </button>
+                  <button className="text-button" type="button" onClick={onRestart}>
+                    <RotateCcw size={15} />重新开始
+                  </button>
+                  <button className="primary-button" type="button" disabled={!confirmed || submitting} onClick={() => void confirm()}>
+                    {submitting ? <LoaderCircle size={17} className="spin" /> : <Play size={17} />}
+                    确认并运行
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
       </aside>
+    </div>
+  );
+}
+
+function RevisionComposer({
+  submitting,
+  onCancel,
+  onSubmit,
+}: {
+  submitting: boolean;
+  onCancel: () => void;
+  onSubmit: (instruction: string) => Promise<void>;
+}) {
+  const [instruction, setInstruction] = useState('');
+  const ready = instruction.trim().length >= 3 && !submitting;
+  return (
+    <div className="revision-composer">
+      <div className="revision-composer-heading">
+        <PencilLine size={17} />
+        <div>
+          <strong>基于当前方案修改</strong>
+          <span>只写希望改变的部分；未提及内容会尽量保留。</span>
+        </div>
+      </div>
+      <textarea
+        aria-label="方案修改要求"
+        value={instruction}
+        onChange={(event) => setInstruction(event.target.value)}
+        maxLength={2000}
+        rows={3}
+        placeholder="例如：改成每周五更新，只保留两个 Agent，并增加引用核验检查点"
+      />
+      <div className="revision-composer-footer">
+        <span>{instruction.length}/2000</span>
+        <div>
+          <button className="text-button" type="button" disabled={submitting} onClick={onCancel}>取消</button>
+          <button className="primary-button" type="button" disabled={!ready} onClick={() => void onSubmit(instruction.trim())}>
+            {submitting ? <LoaderCircle size={16} className="spin" /> : <Sparkles size={16} />}
+            生成修改版
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1932,13 +2068,34 @@ function PlanReview({
   plan,
   hash,
   showStatus = true,
+  previousPlan = null,
+  revisionNumber = 1,
 }: {
   plan: TaskPlan;
   hash: string;
   showStatus?: boolean;
+  previousPlan?: TaskPlan | null;
+  revisionNumber?: number;
 }) {
+  const changedSections = useMemo(
+    () => changedPlanSections(previousPlan, plan),
+    [previousPlan, plan],
+  );
   return (
     <div className="plan-review">
+      {previousPlan && (
+        <div className="revision-summary" role="status">
+          <GitCompareArrows size={18} />
+          <div>
+            <strong>第 {revisionNumber} 版 · 基于上一版修改</strong>
+            <span>
+              {changedSections.length
+                ? `已变更：${changedSections.join('、')}`
+                : '未检测到结构变化，请重点检查摘要内容。'}
+            </span>
+          </div>
+        </div>
+      )}
       <div className="plan-summary">
         <div className="plan-summary-heading">
           <span><Sparkles size={15} />AI 生成的任务摘要</span>
@@ -1997,6 +2154,23 @@ function PlanReview({
       <div className="hash-line"><ShieldCheck size={14} /><code>{hash}</code></div>
     </div>
   );
+}
+
+function changedPlanSections(previous: TaskPlan | null, current: TaskPlan): string[] {
+  if (!previous) return [];
+  const sections: Array<[string, unknown, unknown]> = [
+    ['任务摘要', [previous.title, previous.summary, previous.estimated_duration_minutes], [current.title, current.summary, current.estimated_duration_minutes]],
+    ['Agent 架构', previous.agents, current.agents],
+    ['执行阶段', previous.stages, current.stages],
+    ['更新节奏', [previous.cadence, previous.update_policy], [current.cadence, current.update_policy]],
+    ['工具', previous.tools, current.tools],
+    ['审批', previous.approvals, current.approvals],
+    ['交付证据', previous.artifacts, current.artifacts],
+    ['风险', previous.risks, current.risks],
+  ];
+  return sections
+    .filter(([, before, after]) => JSON.stringify(before) !== JSON.stringify(after))
+    .map(([label]) => label);
 }
 
 function DetailList({ title, items, empty }: { title: string; items: string[]; empty: string }) {

@@ -108,8 +108,11 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
     by an ephemeral AionUi team in Plan Mode, without tools. Quarterdeck validates the strict
     plan schema and records only request/plan hashes in the ledger. A Paperclip issue and an
     AionUi execution team or allowlisted workflow can be created only after a human confirms
-    the exact plan hash. Completion remains `completed_unverified` until outcome evidence
-    exists. See [ADR-0007](adr/0007-local-operator-console.md).
+    the exact plan hash. Plan modification is append-only: a child version binds the immutable
+    parent hash and a hashed change instruction, shows a structural diff, and requires a fresh
+    confirmation; it never edits the reviewed parent in place. Completion remains
+    `completed_unverified` until outcome evidence exists. See
+    [ADR-0007](adr/0007-local-operator-console.md).
 11. **Notification setup is narrow, local, and evidence-first.** The console is not a generic
     secret editor. It accepts only Telegram token/chat ID into password fields, writes through the
     existing `0600` secret boundary, serializes configuration changes, and exposes only a fixed

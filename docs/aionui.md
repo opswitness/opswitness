@@ -32,6 +32,11 @@ Plan Mode 临时 Team 在成功或失败后删除；若删除无法确认，规�
 `completed_unverified`；业务完成必须继续看 artifact/eval/审签。详见
 [ADR-0007](adr/0007-local-operator-console.md)。
 
+待确认方案提供两个不同动作：“修改方案”让用户只写变更要求，Quarterdeck 将完整上一版
+和变更要求交给无工具 planner，生成带新 `plan_id`/新哈希的子版本，并显示 Agent、阶段、
+节奏、审批、artifact 与风险的结构变化；上一版不可改写，有有效子版本时也不可再确认。
+“重新开始”才清空当前界面并创建无父版本的新任务。任何修改版都必须重新勾选确认。
+
 源码验收可直接运行 `qd console serve --open`。长期登录自启使用
 `qd service render console` 生成的 loopback-only KeepAlive plist，但必须在停掉所有 qd
 消费者的维护窗口内先升级稳定 uv tool；当前生产 canary 通过前不得为了安装总控制台而

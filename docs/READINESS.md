@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 287 tests pass in three consecutive runs; ruff and mypy pass. DCO, worktree
+- Full suite: 290 tests pass in three consecutive runs; ruff and mypy pass. DCO, worktree
   gitleaks, and full-history gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -129,6 +129,16 @@ blocked by the current open gates below.
   auth modes with both registered runtimes ready; the UI labeled them separately, exposed no
   provider output or internal system name, kept diagnostics closed, had no browser warnings, and
   had zero horizontal overflow at desktop and 390x844 mobile sizes.
+- Ready plans now separate **Modify plan** from **Start over**. Modify creates an append-only child
+  record bound to the immutable parent id/hash and a ledger-only instruction hash, passes the full
+  previous plan to the tool-free planner, rejects an identical result, and issues a new confirmation
+  hash. A valid child blocks parent confirmation. The UI keeps the old plan visible while editing,
+  then labels the revision number and lists changed structural sections; Start over alone clears the
+  composer. Backend integrity, privacy, duplicate-request, parent-blocking, and CSRF paths have
+  focused regression coverage. Rebuilt source-console acceptance kept the existing Bazi plan
+  visible while a local-only revision instruction enabled the Generate revision action; cancel
+  restored the unchanged plan without an API request. Desktop and 390x844 mobile layouts had no
+  horizontal overflow, and the browser console remained clean.
 - A real source-console acceptance submitted only the synthetic terse intent `算命师`. The first
   AionUi result failed the new brief contract, visibly moved into the repair phase, then returned a
   six-section Bazi demo brief with `DEMO-001`, deterministic `lunar-python`, knowledge-only AI

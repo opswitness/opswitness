@@ -15,6 +15,7 @@ from quarterdeck.console.aionui import (
     EphemeralSession,
     _planning_prompt,
     _validate_plan_brief,
+    _validate_revision_changed,
 )
 from quarterdeck.console.app import create_app
 from quarterdeck.console.schemas import (
@@ -24,6 +25,7 @@ from quarterdeck.console.schemas import (
     MailAuthorizationRequest,
     MailOAuthClientRequest,
     PlanRequest,
+    RevisePlanRequest,
     TaskPlan,
     TelegramConfigureRequest,
 )
@@ -199,6 +201,8 @@ class FakeAion:
         self.generated = 0
         self.dispatched = 0
         self.summarized = 0
+        self.previous_plan: TaskPlan | None = None
+        self.revision_instruction = ""
         self.stale_sessions: list[EphemeralSession] = []
         self.recovered_sessions: list[EphemeralSession] = []
 
@@ -226,14 +230,31 @@ class FakeAion:
         self.recovered_sessions.append(session)
         return {"team_deleted": session.team_id is not None, "workspace_removed": True}
 
-    def generate_plan(self, plan_id, request, catalog, progress=None, *, assistant_id=None):
+    def generate_plan(
+        self,
+        plan_id,
+        request,
+        catalog,
+        progress=None,
+        *,
+        assistant_id=None,
+        previous_plan=None,
+        revision_instruction="",
+    ):
         del plan_id, request, catalog, assistant_id
         self.generated += 1
+        self.previous_plan = previous_plan
+        self.revision_instruction = revision_instruction
         if progress is not None:
             progress("generating_plan", 30)
             progress("validating", 78)
             progress("cleaning_up", 94)
-        return _plan()
+        plan = _plan()
+        if previous_plan is not None:
+            plan.title = "每周研究摘要"
+            plan.cadence.kind = "weekly"
+            plan.cadence.update_interval = "每周五更新"
+        return plan
 
     def dispatch_plan(self, **kwargs):
         assert kwargs["paperclip_issue_id"] == "issue-1"
@@ -344,6 +365,104 @@ def test_planner_turns_terse_fortune_intent_into_a_validated_execution_brief():
     raw["stages"][0]["owner"] = "不存在"
     with pytest.raises(ValueError, match="stage owner"):
         TaskPlan.model_validate(raw)
+
+
+def test_revision_prompt_carries_the_previous_plan_and_requires_a_real_change():
+    previous = _plan()
+    prompt = _planning_prompt(
+        PlanRequest(objective="生成研究摘要"),
+        [],
+        previous_plan=previous,
+        revision_instruction="改成每周更新，并减少不必要的步骤",
+    )
+    assert "versioned revision" in prompt
+    assert "previous_plan" in prompt
+    assert "改成每周更新" in prompt
+    with pytest.raises(ValueError, match="must differ"):
+        _validate_revision_changed(previous.model_copy(deep=True), previous)
+
+
+def test_plan_revision_is_append_only_hash_bound_and_blocks_the_parent(console_env):
+    _, service, aion, _ = console_env
+    requested = service.request_plan(PlanRequest(objective="生成研究摘要"))
+    parent = service.draft_plan(requested.plan_id)
+    instruction = "改成每周更新并保留 SECRET-REVISION-ONLY"
+
+    revision = service.request_plan_revision(
+        parent.plan_id,
+        RevisePlanRequest(instruction=instruction),
+    )
+    assert revision.status == "planning"
+    assert revision.parent_plan_id == parent.plan_id
+    assert revision.parent_plan_sha256 == parent.plan_sha256
+    assert revision.revision_number == 2
+    assert revision.revision_instruction == instruction
+    assert revision.revision_instruction_sha256
+
+    duplicate = service.request_plan_revision(
+        parent.plan_id,
+        RevisePlanRequest(instruction="另一个并发修改要求"),
+    )
+    assert duplicate.plan_id == revision.plan_id
+
+    ready = service.draft_plan(revision.plan_id)
+    assert ready.status == "ready"
+    assert ready.plan is not None
+    assert ready.plan.title == "每周研究摘要"
+    assert ready.plan_sha256 != parent.plan_sha256
+    assert aion.previous_plan == parent.plan
+    assert aion.revision_instruction == instruction
+
+    with pytest.raises(ConsoleConflict, match="newer revision"):
+        service.confirm_plan(
+            parent.plan_id,
+            ConfirmRequest(plan_sha256=str(parent.plan_sha256), confirmed=True),
+        )
+    confirmed = service.confirm_plan(
+        ready.plan_id,
+        ConfirmRequest(plan_sha256=str(ready.plan_sha256), confirmed=True),
+    )
+    assert confirmed.status == "confirmed"
+
+    events = service.ledger.read_all()
+    assert [event["kind"] for event in events] == [
+        "task_plan_requested",
+        "task_plan_drafted",
+        "task_plan_revision_requested",
+        "task_plan_drafted",
+        "task_plan_confirmed",
+    ]
+    revision_event = events[2]
+    assert revision_event["payload"]["parent_plan_id"] == parent.plan_id
+    assert revision_event["payload"]["revision_number"] == 2
+    assert "revision_instruction_sha256" in revision_event["payload"]
+    assert "SECRET-REVISION-ONLY" not in json.dumps(events, ensure_ascii=False)
+
+
+def test_plan_revision_http_facade_requires_csrf(console_env, monkeypatch):
+    settings, service, _, _ = console_env
+    requested = service.request_plan(PlanRequest(objective="生成研究摘要"))
+    parent = service.draft_plan(requested.plan_id)
+    monkeypatch.setattr(service, "acquire_instance_lease", lambda: True)
+    monkeypatch.setattr(service, "recover_startup", lambda: {})
+    monkeypatch.setattr(service, "release_instance_lease", lambda: None)
+    app = create_app(settings, service=service)
+    csrf = app.state.csrf_token
+    with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+        denied = client.post(
+            f"/api/v1/plans/{parent.plan_id}/revise",
+            json={"instruction": "改成每周更新"},
+        )
+        assert denied.status_code == 403
+        accepted = client.post(
+            f"/api/v1/plans/{parent.plan_id}/revise",
+            json={"instruction": "改成每周更新"},
+            headers={"X-QD-CSRF": csrf},
+        )
+        assert accepted.status_code == 202
+        payload = accepted.json()
+        assert payload["parent_plan_id"] == parent.plan_id
+        assert payload["revision_number"] == 2
 
 
 def test_planning_has_no_execution_side_effect_before_confirmation(console_env):

@@ -39,6 +39,7 @@ from quarterdeck.console.schemas import (
     PlanRequest,
     PlanningProgress,
     ProviderConnectionJob,
+    RevisePlanRequest,
     TaskPlan,
     TelegramConfigureRequest,
     utc_now,
@@ -171,15 +172,21 @@ def _execution_plan_sha(record: PlanRecord, plan: TaskPlan | None = None) -> str
     selected_plan = plan if plan is not None else record.plan
     if selected_plan is None:
         raise ConsoleConflict("plan content is unavailable")
-    return _canonical_sha256(
-        {
-            "objective": record.objective,
-            "constraints": record.constraints,
-            "workspace": record.workspace,
-            "preferred_cadence": record.preferred_cadence,
-            "plan": selected_plan.model_dump(mode="json"),
+    envelope: dict[str, Any] = {
+        "objective": record.objective,
+        "constraints": record.constraints,
+        "workspace": record.workspace,
+        "preferred_cadence": record.preferred_cadence,
+        "plan": selected_plan.model_dump(mode="json"),
+    }
+    if record.parent_plan_id is not None:
+        envelope["revision"] = {
+            "parent_plan_id": record.parent_plan_id,
+            "parent_plan_sha256": record.parent_plan_sha256,
+            "revision_number": record.revision_number,
+            "instruction": record.revision_instruction,
         }
-    )
+    return _canonical_sha256(envelope)
 
 
 class ConsoleService:
@@ -215,6 +222,7 @@ class ConsoleService:
         self._telegram_lock = threading.Lock()
         self._provider_jobs: dict[str, ProviderConnectionJob] = {}
         self._provider_lock = threading.Lock()
+        self._plan_transition_lock = threading.Lock()
         self._lease_guard = threading.Lock()
         self._lease_fd: int | None = None
 
@@ -683,6 +691,70 @@ class ConsoleService:
         self._submit(self.draft_plan, plan_id)
         return record
 
+    def request_plan_revision(
+        self,
+        parent_plan_id: str,
+        request: RevisePlanRequest,
+    ) -> PlanRecord:
+        with self._plan_transition_lock:
+            parent = self.store.get(parent_plan_id)
+            if parent.status != "ready" or parent.plan is None or not parent.plan_sha256:
+                raise ConsoleConflict("only a ready plan can be revised")
+            if parent.plan_sha256 != _execution_plan_sha(parent):
+                raise ConsoleConflict("parent plan integrity failed; create a new plan")
+            for child in self.store.list_all():
+                if child.parent_plan_id == parent_plan_id and child.status in {
+                    "planning",
+                    "ready",
+                    "confirmed",
+                    "dispatching",
+                    "running",
+                    "awaiting_approval",
+                    "completed_unverified",
+                }:
+                    return child
+            plan_id = new_ulid()
+            instruction_sha = hashlib.sha256(request.instruction.encode()).hexdigest()
+            revision_number = parent.revision_number + 1
+            self._append(
+                "task_plan_revision_requested",
+                plan_id,
+                {
+                    "schema_version": 1,
+                    "parent_plan_id": parent.plan_id,
+                    "parent_plan_sha256": parent.plan_sha256,
+                    "revision_number": revision_number,
+                    "revision_instruction_sha256": instruction_sha,
+                },
+            )
+            started_at = utc_now()
+            expected_seconds, timeout_seconds = self._planning_time_budget()
+            record = PlanRecord(
+                plan_id=plan_id,
+                status="planning",
+                objective=parent.objective,
+                constraints=parent.constraints,
+                workspace=parent.workspace,
+                preferred_cadence=parent.preferred_cadence,
+                parent_plan_id=parent.plan_id,
+                parent_plan_sha256=parent.plan_sha256,
+                revision_number=revision_number,
+                revision_instruction=request.instruction,
+                revision_instruction_sha256=instruction_sha,
+                created_at=started_at,
+                updated_at=started_at,
+                planning_progress=PlanningProgress(
+                    phase="queued",
+                    percent=5,
+                    started_at=started_at,
+                    expected_seconds=expected_seconds,
+                    timeout_seconds=timeout_seconds,
+                ),
+            )
+            self.store.create(record)
+        self._submit(self.draft_plan, plan_id)
+        return record
+
     @staticmethod
     def _normalise_requested_workspace(value: str) -> str:
         if not value.strip():
@@ -716,6 +788,18 @@ class ConsoleService:
                 workspace=record.workspace,
                 preferred_cadence=record.preferred_cadence,
             )
+            previous_plan: TaskPlan | None = None
+            if record.parent_plan_id is not None:
+                parent = self.store.get(record.parent_plan_id)
+                if (
+                    parent.plan is None
+                    or not parent.plan_sha256
+                    or parent.plan_sha256 != record.parent_plan_sha256
+                    or parent.plan_sha256 != _execution_plan_sha(parent)
+                    or not record.revision_instruction
+                ):
+                    raise ConsoleConflict("parent plan is unavailable or changed")
+                previous_plan = parent.plan
 
             def report_progress(phase: str, percent: int) -> None:
                 def update(current: PlanRecord) -> PlanRecord:
@@ -742,6 +826,8 @@ class ConsoleService:
                 catalog,
                 report_progress,
                 assistant_id=self._planner_assistant_id(),
+                previous_plan=previous_plan,
+                revision_instruction=record.revision_instruction,
             )
             plan_sha = _execution_plan_sha(record, plan)
             self._append(
@@ -754,6 +840,8 @@ class ConsoleService:
                     "execution_mode": plan.execution_mode,
                     "workflow_id": plan.workflow_id,
                     "cadence": plan.cadence.kind,
+                    "parent_plan_id": record.parent_plan_id,
+                    "revision_number": record.revision_number,
                 },
             )
 
@@ -813,7 +901,19 @@ class ConsoleService:
             current.confirmed_at = utc_now()
             return current
 
-        record = self.store.mutate(plan_id, confirm)
+        with self._plan_transition_lock:
+            for child in self.store.list_all():
+                if child.parent_plan_id == plan_id and child.status in {
+                    "planning",
+                    "ready",
+                    "confirmed",
+                    "dispatching",
+                    "running",
+                    "awaiting_approval",
+                    "completed_unverified",
+                }:
+                    raise ConsoleConflict("this plan has a newer revision")
+            record = self.store.mutate(plan_id, confirm)
         self._submit(self.dispatch_plan, plan_id)
         return record
 

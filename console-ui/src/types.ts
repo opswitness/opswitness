@@ -117,6 +117,11 @@ export type PlanRecord = {
   } | null;
   plan?: TaskPlan | null;
   plan_sha256?: string | null;
+  parent_plan_id?: string | null;
+  parent_plan_sha256?: string | null;
+  revision_number: number;
+  revision_instruction: string;
+  revision_instruction_sha256?: string | null;
   error?: string | null;
   execution?: ExecutionState | null;
 };

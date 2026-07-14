@@ -104,6 +104,19 @@ class PlanRequest(BaseModel):
     preferred_cadence: Literal["once", "daily", "weekdays", "weekly", "manual"] = "once"
 
 
+class RevisePlanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    instruction: str = Field(min_length=3, max_length=2000)
+
+    @model_validator(mode="after")
+    def normalize_instruction(self) -> RevisePlanRequest:
+        self.instruction = self.instruction.strip()
+        if len(self.instruction) < 3:
+            raise ValueError("revision instruction must contain at least three characters")
+        return self
+
+
 class ConfirmRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -180,6 +193,13 @@ class PlanRecord(BaseModel):
     planning_progress: PlanningProgress | None = None
     plan: TaskPlan | None = None
     plan_sha256: str | None = None
+    parent_plan_id: str | None = None
+    parent_plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    revision_number: int = Field(default=1, ge=1, le=100)
+    revision_instruction: str = Field(default="", max_length=2000)
+    revision_instruction_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
     error: str | None = Field(default=None, max_length=500)
     execution: ExecutionState | None = None
 

@@ -87,7 +87,16 @@ planning -> ready -> confirmed -> dispatching -> running
                                          completed_unverified
 ```
 
-There is no auto-confirm path. Replanning creates a new request and hash.
+There is no auto-confirm path. A ready plan offers two distinct actions. **Modify plan** accepts a
+bounded change instruction and creates a new child `plan_id`; the previous plan, its hash, and its
+private record remain unchanged. The child stores `parent_plan_id`, the exact parent hash, a
+monotonic revision number, and the private instruction, while the ledger receives only the
+instruction SHA-256. The planner receives the complete previous plan plus the requested delta,
+must return a complete replacement plan rather than a patch, and may not return an identical plan.
+The UI shows the changed structural sections before confirmation. While a non-failed child exists,
+the parent cannot be confirmed. The child receives a new execution-envelope hash and requires a
+fresh checkbox confirmation. **Start over** alone clears the current presentation and creates an
+unrelated root plan from a blank composer.
 
 Planning progress is durable presentation state, not model reasoning. The backend reports only
 observable phases: queued/preparing, generating the brief and architecture, validating or repairing,
@@ -128,7 +137,7 @@ cleanup recovery does not replay planning or execution.
 
 ## Evidence and privacy
 
-The ledger records `task_plan_requested`, `task_plan_drafted`, `task_plan_failed`,
+The ledger records `task_plan_requested`, `task_plan_revision_requested`, `task_plan_drafted`, `task_plan_failed`,
 `task_plan_confirmed`, `task_execution_requested`, `task_execution_dispatched`,
 `task_execution_failed`, `task_execution_finished`, `aion_ephemeral_recovery_started`,
 `aion_ephemeral_recovery_failed`, `aion_ephemeral_recovery_finished`,
