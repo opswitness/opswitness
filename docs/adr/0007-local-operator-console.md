@@ -22,6 +22,13 @@ Quarterdeck ships a thin FastAPI + React operator console, started with:
 qd console serve --open
 ```
 
+The default left-navigation destination is **Workspace**, a deliberately small chat-first entry.
+The operator describes one outcome in plain language; the same existing planning contract renders
+the proposed Agent architecture, stages, cadence, checkpoints, artifacts, and risks inline. The
+operator can replan or confirm the hash-bound proposal without moving through a separate task
+drawer. This is a presentation layer over the existing plan state machine, not a direct chat-to-run
+path and not a second conversation or orchestration backend.
+
 It binds only to `127.0.0.1` and delegates through narrow local adapters:
 
 1. Read-only dashboard data comes from the local ledger/index, Paperclip health/approvals, AionUi
@@ -58,6 +65,11 @@ planning -> ready -> confirmed -> dispatching -> running
 ```
 
 There is no auto-confirm path. Replanning creates a new request and hash.
+
+The Workspace composer may infer only the plan's proposed cadence from explicit phrases such as
+"daily" or "weekly". That deterministic hint never installs a schedule and never bypasses plan
+validation, exact-hash confirmation, or external-side-effect recovery. Starting a new conversation
+clears only the local presentation state; it does not cancel, mutate, or hide an existing run.
 
 Startup recovery follows the external-side-effect boundary rather than guessing. A durable
 `confirmed` record is safe to enqueue again because dispatch first acquires a per-plan atomic claim;
@@ -152,6 +164,8 @@ unmounted in AionUi. Existing Quarterdeck gate and allowlist rules remain author
 ## Consequences
 
 The operator gets one concise daily surface while Paperclip, AionUi, launchd, and Quarterdeck keep
-their existing ownership boundaries. The frontend adds a packaging and responsive-layout test
-surface, but no new orchestration authority. Vertical practitioner UI remains a separate private
-product and is still blocked by the paid-design-partner gate.
+their existing ownership boundaries. The default Workspace reduces task creation to one clear
+description-and-confirm flow while the dashboard, task, evidence, and integration views remain
+separate. The frontend adds a packaging and responsive-layout test surface, but no new orchestration
+authority. Vertical practitioner UI remains a separate private product and is still blocked by the
+paid-design-partner gate.

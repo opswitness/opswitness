@@ -20,6 +20,7 @@ import {
   ListTodo,
   LoaderCircle,
   Mail,
+  MessageSquare,
   Play,
   Plus,
   RefreshCw,
@@ -61,7 +62,7 @@ import type {
   TelegramSetupStatus,
 } from './types';
 
-type View = 'dashboard' | 'tasks' | 'evidence' | 'settings';
+type View = 'workspace' | 'dashboard' | 'tasks' | 'evidence' | 'settings';
 
 const cadenceOptions = [
   { value: 'once', label: '单次' },
@@ -125,11 +126,21 @@ function statusTone(status: string): string {
   return 'success';
 }
 
+function inferCadence(objective: string): 'once' | 'daily' | 'weekdays' | 'weekly' | 'manual' {
+  const text = objective.toLocaleLowerCase();
+  if (/(工作日|weekday)/.test(text)) return 'weekdays';
+  if (/(每天|每日|天天|daily)/.test(text)) return 'daily';
+  if (/(每周|周报|weekly)/.test(text)) return 'weekly';
+  if (/(手动|按需|manual)/.test(text)) return 'manual';
+  return 'once';
+}
+
 function App() {
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
-  const [view, setView] = useState<View>('dashboard');
+  const [view, setView] = useState<View>('workspace');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activePlan, setActivePlan] = useState<PlanRecord | null>(null);
+  const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [mailJob, setMailJob] = useState<MailSummaryJob | null>(null);
   const [mailSetupOpen, setMailSetupOpen] = useState(false);
   const [telegramSetupOpen, setTelegramSetupOpen] = useState(false);
@@ -224,7 +235,20 @@ function App() {
     setDrawerOpen(true);
   };
 
+  const startWorkspaceTask = () => {
+    setActivePlan(null);
+    setDrawerOpen(false);
+    setWorkspaceRevision((value) => value + 1);
+    setView('workspace');
+  };
+
+  const changeView = (next: View) => {
+    setDrawerOpen(false);
+    setView(next);
+  };
+
   const title = {
+    workspace: '工作台',
     dashboard: '总控制台',
     tasks: '任务',
     evidence: '证据',
@@ -233,7 +257,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar view={view} onChange={setView} />
+      <Sidebar view={view} onChange={changeView} />
       <main className="main-area">
         <header className="topbar">
           <div className="topbar-title">
@@ -245,9 +269,13 @@ function App() {
             <button className="icon-button" type="button" title="刷新" onClick={() => void refresh()}>
               <RefreshCw size={17} className={loading ? 'spin' : ''} />
             </button>
-            <button className="primary-button" type="button" onClick={openNewTask}>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={view === 'workspace' ? startWorkspaceTask : openNewTask}
+            >
               <Plus size={17} />
-              新建任务
+              {view === 'workspace' ? '新对话' : '新建任务'}
             </button>
           </div>
         </header>
@@ -262,11 +290,26 @@ function App() {
           </div>
         )}
 
-        <div className="page-content">
+        <div className={view === 'workspace' ? 'page-content workspace-page' : 'page-content'}>
           {loading && !bootstrap ? (
             <LoadingState />
           ) : bootstrap ? (
             <>
+              {view === 'workspace' && (
+                <WorkspaceView
+                  key={workspaceRevision}
+                  record={activePlan}
+                  paperclipUrl={bootstrap.integrations.paperclip?.url}
+                  onPlan={async (body) => {
+                    mergePlan(await requestPlan(body));
+                  }}
+                  onConfirm={async (record) => {
+                    if (!record.plan_sha256) throw new Error('方案哈希缺失');
+                    mergePlan(await confirmPlan(record.plan_id, record.plan_sha256));
+                  }}
+                  onRestart={() => setActivePlan(null)}
+                />
+              )}
               {view === 'dashboard' && (
                 <Dashboard
                   data={bootstrap}
@@ -324,6 +367,7 @@ function App() {
 
 function Sidebar({ view, onChange }: { view: View; onChange: (view: View) => void }) {
   const items = [
+    { id: 'workspace' as const, label: '工作台', icon: MessageSquare },
     { id: 'dashboard' as const, label: '概览', icon: LayoutDashboard },
     { id: 'tasks' as const, label: '任务', icon: ListTodo },
     { id: 'evidence' as const, label: '证据', icon: FileCheck2 },
@@ -369,6 +413,207 @@ function IntegrationRow({ integrations }: { integrations?: Record<string, Integr
         );
       })}
     </div>
+  );
+}
+
+function WorkspaceView({
+  record,
+  paperclipUrl,
+  onPlan,
+  onConfirm,
+  onRestart,
+}: {
+  record: PlanRecord | null;
+  paperclipUrl?: string;
+  onPlan: (body: {
+    objective: string;
+    constraints: string;
+    workspace: string;
+    preferred_cadence: string;
+  }) => Promise<void>;
+  onConfirm: (record: PlanRecord) => Promise<void>;
+  onRestart: () => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+  const [error, setError] = useState('');
+  const quickStarts = [
+    '每天早上汇总重要邮件，并列出需要回复的事项',
+    '检查所有自动化任务的运行状态，并生成异常报告',
+    '整理本周项目进展，输出下一步行动清单',
+  ];
+
+  useEffect(() => {
+    setConfirmed(false);
+    setError('');
+  }, [record?.plan_id, record?.status]);
+
+  const locked = Boolean(
+    record && !['failed', 'completed_unverified'].includes(record.status),
+  );
+
+  const submit = async () => {
+    const objective = draft.trim();
+    if (objective.length < 3 || submitting || locked) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      await onPlan({
+        objective,
+        constraints: '',
+        workspace: '',
+        preferred_cadence: inferCadence(objective),
+      });
+      setDraft('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '规划请求失败');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const confirm = async () => {
+    if (!record || !confirmed || submitting) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      await onConfirm(record);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '确认失败');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const restart = () => {
+    if (record) setDraft(record.objective);
+    onRestart();
+  };
+
+  return (
+    <section className="workspace-shell" aria-label="AI 工作台">
+      <div className="chat-thread" aria-live="polite">
+        {!record ? (
+          <div className="chat-empty">
+            <div className="chat-empty-mark"><Sparkles size={24} /></div>
+            <h2>今天要完成什么？</h2>
+            <div className="quick-prompts">
+              {quickStarts.map((prompt) => (
+                <button key={prompt} type="button" onClick={() => setDraft(prompt)}>
+                  <MessageSquare size={15} />
+                  <span>{prompt}</span>
+                  <ChevronRight size={15} />
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="chat-message user-message">
+              <div className="chat-user-bubble">{record.objective}</div>
+              <div className="chat-avatar user-avatar">你</div>
+            </div>
+            <div className="chat-message assistant-message">
+              <div className="chat-avatar assistant-avatar"><Bot size={17} /></div>
+              <div className="chat-assistant-content">
+                <div className="chat-assistant-heading">
+                  <strong>Quarterdeck</strong>
+                  <StatusBadge status={record.status} />
+                </div>
+                {record.status === 'planning' && (
+                  <div className="planning-state">
+                    <div className="planning-orbit">
+                      <LoaderCircle size={34} className="spin" />
+                      <Sparkles size={17} />
+                    </div>
+                    <strong>AionUi 正在规划</strong>
+                    <span>正在生成 Agent 架构、执行阶段与更新节奏</span>
+                    <div className="planning-lines"><i /><i /><i /></div>
+                  </div>
+                )}
+                {record.status === 'ready' && record.plan && (
+                  <PlanReview
+                    plan={record.plan}
+                    hash={record.plan_sha256 || ''}
+                    showStatus={false}
+                  />
+                )}
+                {['confirmed', 'dispatching', 'running', 'awaiting_approval', 'completed_unverified', 'failed'].includes(record.status) && (
+                  <ExecutionView record={record} paperclipUrl={paperclipUrl} />
+                )}
+                {record.status === 'ready' && (
+                  <div className="chat-confirm-panel">
+                    <label className="confirm-check">
+                      <input
+                        type="checkbox"
+                        checked={confirmed}
+                        onChange={(event) => setConfirmed(event.target.checked)}
+                      />
+                      <span><Check size={15} />确认此方案并启动受管执行</span>
+                    </label>
+                    <div className="confirm-actions">
+                      <button className="secondary-button" type="button" onClick={restart}>
+                        重新规划
+                      </button>
+                      <button
+                        className="primary-button"
+                        type="button"
+                        disabled={!confirmed || submitting}
+                        onClick={() => void confirm()}
+                      >
+                        {submitting ? <LoaderCircle size={17} className="spin" /> : <Play size={17} />}
+                        确认并运行
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {error && <InlineError text={error} />}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="chat-composer-shell">
+        <form
+          className="chat-composer"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+        >
+          <textarea
+            aria-label="任务描述"
+            value={draft}
+            rows={3}
+            maxLength={2000}
+            disabled={locked || submitting}
+            placeholder={locked ? '当前任务等待完成或确认' : '描述你想完成的任务…'}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                void submit();
+              }
+            }}
+          />
+          <div className="chat-composer-actions">
+            <span><ShieldCheck size={14} />先规划，确认后运行</span>
+            <button
+              className="chat-send-button"
+              type="submit"
+              title="发送任务描述"
+              aria-label="发送任务描述"
+              disabled={draft.trim().length < 3 || submitting || locked}
+            >
+              {submitting ? <LoaderCircle size={18} className="spin" /> : <Send size={18} />}
+            </button>
+          </div>
+        </form>
+        {error && !record && <InlineError text={error} />}
+      </div>
+    </section>
   );
 }
 
@@ -1398,11 +1643,19 @@ function StepTrack({ phase }: { phase: number }) {
   );
 }
 
-function PlanReview({ plan, hash }: { plan: TaskPlan; hash: string }) {
+function PlanReview({
+  plan,
+  hash,
+  showStatus = true,
+}: {
+  plan: TaskPlan;
+  hash: string;
+  showStatus?: boolean;
+}) {
   return (
     <div className="plan-review">
       <div className="plan-summary">
-        <StatusBadge status="ready" />
+        {showStatus && <StatusBadge status="ready" />}
         <p>{plan.summary}</p>
         <div className="plan-facts">
           <span><Users size={15} />{plan.agents.length} Agent</span>

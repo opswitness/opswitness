@@ -99,12 +99,17 @@ blocked by the current open gates below.
   fixed readonly Gmail login command. Desktop and 390x844 mobile acceptance pass with no horizontal
   overflow; the real state remains `oauth_client_issue=missing` and disabled.
 - The local operator console is code-complete at `qd console serve`: FastAPI serves the packaged
-  React UI on loopback only; CSRF/origin/content-type/CSP controls protect writes; planning uses an
-  ephemeral tool-free AionUi Plan Mode Team; confirmation is bound to the exact plan SHA-256; only
-  then can Paperclip issue creation and AionUi Team/allowlisted-workflow dispatch occur. A real
+  React UI on loopback only. Its default left-navigation Workspace is a chat-first task entry:
+  one plain-language description opens the existing ephemeral tool-free AionUi Plan Mode contract,
+  then renders the Agent architecture, stages, cadence, checkpoints, artifacts, and risks inline.
+  CSRF/origin/content-type/CSP controls protect writes; confirmation remains bound to the exact
+  plan SHA-256; only then can Paperclip issue creation and AionUi Team/allowlisted-workflow dispatch
+  occur. A real
   synthetic request returned a four-Agent/four-stage review plan and stopped at the unchecked,
   disabled confirmation action, so no execution side effect occurred. Desktop and 390px mobile
-  layouts have zero horizontal overflow, and the built wheel contains the versioned static assets.
+  layouts have zero horizontal overflow; the Workspace composer stays above the five-item mobile
+  navigation, quick prompts only populate local input, and New conversation resets it without a
+  planning side effect. The built wheel contains the versioned static assets.
   Mail stays visibly `未启用` until the existing consent/OAuth gate closes, but its setup button now
   opens the exact readonly and model-metadata consent contract instead of a dead control. Design authority:
   [ADR-0007](adr/0007-local-operator-console.md).
