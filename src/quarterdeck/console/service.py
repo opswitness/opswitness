@@ -48,6 +48,12 @@ class ConsoleUnavailable(RuntimeError):
 
 PaperclipFactory = Callable[[], PaperclipClient]
 MAIL_SUMMARY_FAILURE = "mail summary failed; run qd mail status locally"
+PLANNING_INTERRUPTED = "planning_interrupted_by_restart"
+DISPATCH_INTERRUPTED = "execution_dispatch_interrupted"
+PLANNING_INTERRUPTED_DETAIL = "Planning was interrupted by a console restart; create a new plan."
+DISPATCH_INTERRUPTED_DETAIL = (
+    "Execution dispatch was interrupted; inspect Paperclip and AionUi before replanning."
+)
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -294,28 +300,34 @@ class ConsoleService:
         return record
 
     def dispatch_plan(self, plan_id: str) -> PlanRecord:
-        record = self.store.get(plan_id)
-        if record.status != "confirmed" or record.plan is None or not record.plan_sha256:
-            return record
         try:
-            if record.plan_sha256 != _execution_plan_sha(record):
-                raise ConsoleConflict("confirmed plan inputs changed before dispatch")
-            self._append(
-                "task_execution_requested",
-                plan_id,
-                {
-                    "schema_version": 1,
-                    "plan_sha256": record.plan_sha256,
-                    "execution_mode": record.plan.execution_mode,
-                },
-            )
+            claimed = False
 
-            def dispatching(current: PlanRecord) -> PlanRecord:
+            def claim_dispatch(current: PlanRecord) -> PlanRecord:
+                nonlocal claimed
+                if current.status != "confirmed":
+                    return current
+                if current.plan is None or not current.plan_sha256:
+                    raise ConsoleConflict("confirmed plan content is unavailable")
+                if current.plan_sha256 != _execution_plan_sha(current):
+                    raise ConsoleConflict("confirmed plan inputs changed before dispatch")
+                self._append(
+                    "task_execution_requested",
+                    plan_id,
+                    {
+                        "schema_version": 1,
+                        "plan_sha256": current.plan_sha256,
+                        "execution_mode": current.plan.execution_mode,
+                    },
+                )
                 current.status = "dispatching"
                 current.execution = ExecutionState(kind=current.plan.execution_mode)  # type: ignore[union-attr]
+                claimed = True
                 return current
 
-            record = self.store.mutate(plan_id, dispatching)
+            record = self.store.mutate(plan_id, claim_dispatch)
+            if not claimed:
+                return record
             plan = record.plan
             if plan is None:
                 raise ConsoleConflict("plan content disappeared before dispatch")
@@ -376,7 +388,9 @@ class ConsoleService:
             )
             if event is None:
                 alert(f"execution dispatched but audit evidence was lost plan={plan_id}")
-                raise ConsoleUnavailable("execution started but dispatch evidence was not persisted")
+                raise ConsoleUnavailable(
+                    "execution started but dispatch evidence was not persisted"
+                )
 
             def running(current: PlanRecord) -> PlanRecord:
                 current.status = "running"
@@ -408,6 +422,75 @@ class ConsoleService:
 
             return self.store.mutate(plan_id, failed)
 
+    def recover_plans(self) -> dict[str, int]:
+        """Recover only transitions whose side-effect boundary is unambiguous."""
+        recovered = {
+            "planning_failed": 0,
+            "dispatching_failed": 0,
+            "confirmed_scheduled": 0,
+            "active_refresh_scheduled": 0,
+        }
+        for snapshot in self.store.list_all():
+            if snapshot.status == "planning":
+                if self._fail_interrupted_plan(
+                    snapshot.plan_id,
+                    expected="planning",
+                    event_kind="task_plan_failed",
+                    reason=PLANNING_INTERRUPTED,
+                    detail=PLANNING_INTERRUPTED_DETAIL,
+                ):
+                    recovered["planning_failed"] += 1
+            elif snapshot.status == "dispatching":
+                if self._fail_interrupted_plan(
+                    snapshot.plan_id,
+                    expected="dispatching",
+                    event_kind="task_execution_failed",
+                    reason=DISPATCH_INTERRUPTED,
+                    detail=DISPATCH_INTERRUPTED_DETAIL,
+                ):
+                    recovered["dispatching_failed"] += 1
+            elif snapshot.status == "confirmed":
+                self._submit(self.dispatch_plan, snapshot.plan_id)
+                recovered["confirmed_scheduled"] += 1
+            elif snapshot.status in {"running", "awaiting_approval"}:
+                self._submit(self.refresh_execution, snapshot.plan_id)
+                recovered["active_refresh_scheduled"] += 1
+        return recovered
+
+    def _fail_interrupted_plan(
+        self,
+        plan_id: str,
+        *,
+        expected: str,
+        event_kind: str,
+        reason: str,
+        detail: str,
+    ) -> bool:
+        changed = False
+
+        def fail(current: PlanRecord) -> PlanRecord:
+            nonlocal changed
+            if current.status != expected:
+                return current
+            self._append(
+                event_kind,
+                plan_id,
+                {"schema_version": 1, "reason": reason, "recovery": True},
+            )
+            current.status = "failed"
+            current.error = detail
+            if expected == "dispatching":
+                if current.execution is None and current.plan is not None:
+                    current.execution = ExecutionState(kind=current.plan.execution_mode)
+                if current.execution is not None:
+                    current.execution.status = "failed"
+                    current.execution.error = detail
+            changed = True
+            return current
+
+        self.store.mutate(plan_id, fail)
+        return changed
+
     def _create_or_find_issue(self, record: PlanRecord) -> dict[str, Any]:
         if record.plan is None or not record.plan_sha256:
             raise ConsoleConflict("plan content is unavailable")
@@ -416,9 +499,7 @@ class ConsoleService:
         for issue in client.list_issues():
             if issue.get("title") == title:
                 return issue
-        architecture = ", ".join(
-            f"{agent.name} ({agent.runtime})" for agent in record.plan.agents
-        )
+        architecture = ", ".join(f"{agent.name} ({agent.runtime})" for agent in record.plan.agents)
         description = (
             f"Confirmed Quarterdeck plan `{record.plan_id}`.\n\n"
             f"{record.plan.summary}\n\n"
@@ -455,9 +536,7 @@ class ConsoleService:
             return record
         try:
             if execution.kind == "workflow" and execution.workflow_run_id:
-                rows = workflow_status(
-                    execution.workflow_run_id, settings=self.settings, limit=1
-                )
+                rows = workflow_status(execution.workflow_run_id, settings=self.settings, limit=1)
                 external = rows[0]["status"] if rows else "queued"
                 if external in {"requested", "dispatched", "running"}:
                     next_status = "running"
@@ -471,7 +550,9 @@ class ConsoleService:
                 )
                 next_status = str(snapshot.get("status", "running"))
                 if next_status == "failed":
-                    execution.error = _safe_error(RuntimeError(str(snapshot.get("error", "failed"))))
+                    execution.error = _safe_error(
+                        RuntimeError(str(snapshot.get("error", "failed")))
+                    )
             else:
                 next_status = "failed"
                 execution.error = "execution identifiers are incomplete"
@@ -508,6 +589,7 @@ class ConsoleService:
                 degraded=next_status == "failed",
             )
             if event is not None:
+
                 def mark(current: PlanRecord) -> PlanRecord:
                     if current.execution is not None:
                         current.execution.finish_event_recorded = True
@@ -520,7 +602,9 @@ class ConsoleService:
 
     def request_mail_summary(self) -> MailSummaryJob:
         with self._mail_lock:
-            running = next((job for job in self._mail_jobs.values() if job.status == "running"), None)
+            running = next(
+                (job for job in self._mail_jobs.values() if job.status == "running"), None
+            )
             if running is not None:
                 return running
             job = MailSummaryJob(job_id=new_ulid())

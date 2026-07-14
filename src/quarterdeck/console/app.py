@@ -35,6 +35,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        await run_in_threadpool(service.recover_plans)
         yield
         if owned_service:
             service.close()
@@ -54,7 +55,11 @@ def create_app(
     async def security_boundary(request: Request, call_next):  # type: ignore[no-untyped-def]
         if request.url.hostname not in allowed_hosts:
             return JSONResponse({"detail": "host denied"}, status_code=400)
-        if request.url.path.startswith("/api/") and request.method not in {"GET", "HEAD", "OPTIONS"}:
+        if request.url.path.startswith("/api/") and request.method not in {
+            "GET",
+            "HEAD",
+            "OPTIONS",
+        }:
             origin = request.headers.get("origin")
             if origin is not None and origin not in allowed_origins:
                 return JSONResponse({"detail": "origin denied"}, status_code=403)

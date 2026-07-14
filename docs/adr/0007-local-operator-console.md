@@ -57,6 +57,14 @@ planning -> ready -> confirmed -> dispatching -> running
 
 There is no auto-confirm path. Replanning creates a new request and hash.
 
+Startup recovery follows the external-side-effect boundary rather than guessing. A durable
+`confirmed` record is safe to enqueue again because dispatch first acquires a per-plan atomic claim;
+`running` and `awaiting_approval` records are refreshed without replay. A stranded `planning` record
+may own an unreconciled ephemeral Team, while a stranded `dispatching` record may already have
+created a Paperclip issue, AionUi Team, or workflow run. Those two states therefore fail closed with
+fixed `planning_interrupted_by_restart` or `execution_dispatch_interrupted` evidence and require a
+new plan after operator inspection. No startup path blindly repeats an ambiguous external effect.
+
 ## Evidence and privacy
 
 The ledger records `task_plan_requested`, `task_plan_drafted`, `task_plan_failed`,

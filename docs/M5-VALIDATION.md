@@ -84,6 +84,10 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   cleanup error, never the upstream exception or email fields.
 - Plan drafting uses the same mandatory ephemeral-Team cleanup primitive. A valid model plan with
   a failed Team deletion is rejected before it can enter the user-confirmable `ready` state.
+- Startup recovery atomically resumes only durable `confirmed` plans and refreshes active runs.
+  Stranded `planning` and `dispatching` plans fail closed with fixed evidence because their AionUi,
+  Paperclip, or workflow side effects cannot be proven absent. Concurrent confirmation and dispatch
+  tests prove that one plan can create at most one remote execution path.
 - Initial confirmation granted session-level access only to `qd_workflow_start` and the read-only
   `qd_workflow_status`, never to the whole server. A later single **Run now** click required no
   confirmation. Later UI verification inadvertently activated the synthetic task twice through

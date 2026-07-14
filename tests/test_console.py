@@ -1,4 +1,6 @@
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -8,9 +10,13 @@ from fastapi.testclient import TestClient
 from quarterdeck.config import Settings
 from quarterdeck.console.aionui import AionUiClient, AionUiError
 from quarterdeck.console.app import create_app
-from quarterdeck.console.schemas import ConfirmRequest, PlanRequest, TaskPlan
+from quarterdeck.console.schemas import ConfirmRequest, ExecutionState, PlanRequest, TaskPlan
 from quarterdeck.console.service import (
+    DISPATCH_INTERRUPTED,
+    DISPATCH_INTERRUPTED_DETAIL,
     MAIL_SUMMARY_FAILURE,
+    PLANNING_INTERRUPTED,
+    PLANNING_INTERRUPTED_DETAIL,
     ConsoleConflict,
     ConsoleService,
     ConsoleUnavailable,
@@ -215,6 +221,142 @@ def test_confirmation_hash_is_mandatory_and_dispatch_is_ordered(console_env):
     ]
 
 
+def test_concurrent_confirmation_consumes_ready_plan_once(console_env):
+    _, service, _, _ = console_env
+    requested = service.request_plan(PlanRequest(objective="并发确认测试"))
+    ready = service.draft_plan(requested.plan_id)
+    request = ConfirmRequest(plan_sha256=str(ready.plan_sha256), confirmed=True)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(service.confirm_plan, ready.plan_id, request) for _ in range(2)]
+    results = []
+    errors = []
+    for future in futures:
+        try:
+            results.append(future.result())
+        except ConsoleConflict as exc:
+            errors.append(exc)
+
+    assert [row.status for row in results] == ["confirmed"]
+    assert len(errors) == 1
+    assert sum(event["kind"] == "task_plan_confirmed" for event in service.ledger.read_all()) == 1
+
+
+def test_dispatch_claim_prevents_duplicate_remote_side_effects(console_env, monkeypatch):
+    _, service, aion, paperclip = console_env
+    requested = service.request_plan(PlanRequest(objective="并发派发测试"))
+    ready = service.draft_plan(requested.plan_id)
+    service.confirm_plan(
+        ready.plan_id,
+        ConfirmRequest(plan_sha256=str(ready.plan_sha256), confirmed=True),
+    )
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_list_issues():
+        entered.set()
+        assert release.wait(timeout=2)
+        return []
+
+    monkeypatch.setattr(paperclip, "list_issues", slow_list_issues)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(service.dispatch_plan, ready.plan_id)
+        assert entered.wait(timeout=2)
+        second = pool.submit(service.dispatch_plan, ready.plan_id)
+        second_result = second.result(timeout=2)
+        release.set()
+        first_result = first.result(timeout=2)
+
+    assert second_result.status == "dispatching"
+    assert first_result.status == "running"
+    assert paperclip.created == 1
+    assert aion.dispatched == 1
+    assert (
+        sum(event["kind"] == "task_execution_requested" for event in service.ledger.read_all()) == 1
+    )
+
+
+def test_startup_recovery_fails_closed_and_only_schedules_safe_transitions(
+    console_env, monkeypatch
+):
+    _, service, aion, paperclip = console_env
+    planning = service.request_plan(PlanRequest(objective="中断的规划"))
+
+    confirmed_request = service.request_plan(PlanRequest(objective="可恢复的确认"))
+    confirmed_ready = service.draft_plan(confirmed_request.plan_id)
+    service.confirm_plan(
+        confirmed_ready.plan_id,
+        ConfirmRequest(plan_sha256=str(confirmed_ready.plan_sha256), confirmed=True),
+    )
+
+    ambiguous_request = service.request_plan(PlanRequest(objective="中断的派发"))
+    ambiguous_ready = service.draft_plan(ambiguous_request.plan_id)
+    service.confirm_plan(
+        ambiguous_ready.plan_id,
+        ConfirmRequest(plan_sha256=str(ambiguous_ready.plan_sha256), confirmed=True),
+    )
+
+    def make_dispatching(current):
+        current.status = "dispatching"
+        current.execution = ExecutionState(kind="aion_team")
+        return current
+
+    service.store.mutate(ambiguous_ready.plan_id, make_dispatching)
+
+    active_request = service.request_plan(PlanRequest(objective="运行中的任务"))
+    active_ready = service.draft_plan(active_request.plan_id)
+    service.confirm_plan(
+        active_ready.plan_id,
+        ConfirmRequest(plan_sha256=str(active_ready.plan_sha256), confirmed=True),
+    )
+    service.dispatch_plan(active_ready.plan_id)
+    assert aion.dispatched == 1
+    assert paperclip.created == 1
+    submitted = []
+    monkeypatch.setattr(
+        service,
+        "_submit",
+        lambda fn, plan_id: submitted.append((fn.__name__, plan_id)),
+    )
+    result = service.recover_plans()
+
+    assert result == {
+        "planning_failed": 1,
+        "dispatching_failed": 1,
+        "confirmed_scheduled": 1,
+        "active_refresh_scheduled": 1,
+    }
+    assert set(submitted) == {
+        ("dispatch_plan", confirmed_ready.plan_id),
+        ("refresh_execution", active_ready.plan_id),
+    }
+    planning_after = service.get_plan(planning.plan_id, refresh=False)
+    assert planning_after.status == "failed"
+    assert planning_after.error == PLANNING_INTERRUPTED_DETAIL
+    ambiguous_after = service.get_plan(ambiguous_ready.plan_id, refresh=False)
+    assert ambiguous_after.status == "failed"
+    assert ambiguous_after.error == DISPATCH_INTERRUPTED_DETAIL
+    assert ambiguous_after.execution is not None
+    assert ambiguous_after.execution.status == "failed"
+    reasons = {
+        event["payload"].get("reason")
+        for event in service.ledger.read_all()
+        if event["kind"] in {"task_plan_failed", "task_execution_failed"}
+    }
+    assert {PLANNING_INTERRUPTED, DISPATCH_INTERRUPTED} <= reasons
+    assert aion.dispatched == 1
+    assert paperclip.created == 1
+
+
+def test_startup_recovery_rejects_corrupt_plan_records(console_env):
+    _, service, _, _ = console_env
+    service.store._ensure()
+    corrupt = service.store.plans_dir / "01ARZ3NDEKTSV4RRFFQ69G5FAV.json"
+    corrupt.write_text("{not-json", encoding="utf-8")
+    with pytest.raises(ValueError):
+        service.recover_plans()
+
+
 def test_plan_hash_binds_objective_constraints_workspace_and_dispatch(console_env):
     _, service, aion, paperclip = console_env
     requested = service.request_plan(PlanRequest(objective="生成严格绑定的摘要"))
@@ -352,9 +494,7 @@ def test_aionui_mail_summary_fails_when_ephemeral_team_cleanup_is_unconfirmed(
     client = AionUiClient(settings.console)
     team = {
         "id": "team-private",
-        "assistants": [
-            {"role": "lead", "conversation_id": "conversation-private"}
-        ],
+        "assistants": [{"role": "lead", "conversation_id": "conversation-private"}],
     }
     monkeypatch.setattr(client, "create_team", lambda **kwargs: team)
     monkeypatch.setattr(client, "ensure_team", lambda team_id: None)
@@ -380,16 +520,12 @@ def test_aionui_mail_summary_fails_when_ephemeral_team_cleanup_is_unconfirmed(
     assert "private subject" not in str(exc.value)
 
 
-def test_aionui_planning_fails_when_ephemeral_team_cleanup_is_unconfirmed(
-    monkeypatch, console_env
-):
+def test_aionui_planning_fails_when_ephemeral_team_cleanup_is_unconfirmed(monkeypatch, console_env):
     settings, _, _, _ = console_env
     client = AionUiClient(settings.console)
     team = {
         "id": "team-plan",
-        "assistants": [
-            {"role": "lead", "conversation_id": "conversation-plan"}
-        ],
+        "assistants": [{"role": "lead", "conversation_id": "conversation-plan"}],
     }
     monkeypatch.setattr(
         client,
@@ -546,6 +682,12 @@ def test_console_dashboard_never_reports_zero_when_approvals_are_unavailable(
 
 def test_console_requires_csrf_and_serves_built_frontend(console_env, monkeypatch):
     settings, service, _, _ = console_env
+    recoveries = []
+    monkeypatch.setattr(
+        service,
+        "recover_plans",
+        lambda: recoveries.append("startup") or {},
+    )
     monkeypatch.setattr(
         service,
         "dashboard",
@@ -602,6 +744,7 @@ def test_console_requires_csrf_and_serves_built_frontend(console_env, monkeypatc
         assert page.status_code == 200
         assert "Quarterdeck" in page.text
         assert page.headers["x-frame-options"] == "DENY"
+    assert recoveries == ["startup"]
 
 
 def test_aionui_base_is_loopback_only(tmp_path, monkeypatch):

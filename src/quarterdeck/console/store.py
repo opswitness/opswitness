@@ -5,7 +5,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from quarterdeck.console.schemas import PlanRecord, utc_now
@@ -67,6 +67,16 @@ class PlanStore:
                 continue
             if len(rows) >= limit:
                 break
+        return rows
+
+    def list_all(self) -> Sequence[PlanRecord]:
+        """Return every durable plan record, failing closed on corruption."""
+        self._ensure()
+        rows: list[PlanRecord] = []
+        for path in sorted(self.plans_dir.glob("*.json"), reverse=True):
+            if path.is_symlink():
+                raise ValueError("plan record must not be a symlink")
+            rows.append(PlanRecord.model_validate_json(path.read_text()))
         return rows
 
     def mutate(self, plan_id: str, fn: Callable[[PlanRecord], PlanRecord]) -> PlanRecord:

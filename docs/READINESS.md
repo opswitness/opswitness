@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 222 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
+- Full suite: 235 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
   gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -98,6 +98,11 @@ blocked by the current open gates below.
   layouts have zero horizontal overflow, and the built wheel contains the versioned static assets.
   Mail stays visibly `未启用` until the existing consent/OAuth gate closes. Design authority:
   [ADR-0007](adr/0007-local-operator-console.md).
+- Console startup now scans every private plan record strictly. Durable `confirmed` work is
+  resubmitted through an atomic per-plan dispatch claim, active work is refreshed, and ambiguous
+  `planning`/`dispatching` interruptions fail closed with fixed ledger evidence. Corrupt records
+  prevent startup instead of disappearing from recovery; concurrent confirmation and dispatch
+  regressions prove a single remote execution path.
 - A fifth secret-free launchd template now makes that console an optional loopback KeepAlive
   service. `qd service exec console` reads the private configuration then `execve`s the fixed
   `qd console serve --port <configured>` argv. Doctor treats it like Paperclip: installed plist,
