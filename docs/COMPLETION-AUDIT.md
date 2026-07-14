@@ -1,6 +1,6 @@
 # Quarterdeck Completion Audit
 
-Snapshot: 2026-07-13 18:13 PDT. This document maps the approved M0-M6 plan to evidence and
+Snapshot: 2026-07-13 19:15 PDT. This document maps the approved M0-M6 plan to evidence and
 remaining gates. [READINESS.md](READINESS.md) remains the single operational snapshot.
 
 ## Requirement matrix
@@ -14,12 +14,12 @@ remaining gates. [READINESS.md](READINESS.md) remains the single operational sna
 | M4 artifact/eval/signoff | Atomic CAS, ledger authority, live projection/reconciliation and restore evidence | Complete |
 | M5 open-source v0.1 | CI/release/SBOM/provenance code, tracked-only distribution verification, showcase, wheel and first-run evidence exist | Blocked by brand decision and real Git remote/Actions |
 | M6 paid practitioner Pilot | Offer, privacy contract, technical boundary and success criteria exist | Blocked by written paid commitment/deposit; product code intentionally absent |
-| Local total console | Dashboard, Plan Mode architecture drafting, hash-bound confirmation, dispatch adapters, responsive UI and packaged assets | Complete in source; stable install/KeepAlive service waits for canary maintenance window |
+| Local total console | Dashboard, Plan Mode architecture drafting, hash-bound confirmation, atomic dispatch/recovery, fixed-error privacy boundary, single-instance lease, responsive UI and packaged assets | Complete in source; stable install/KeepAlive service waits for canary maintenance window |
 
 ## Live evidence at this snapshot
 
 - Current-HEAD `qd soak status m2-canary --json`: `pending`; only blocker is
-  `minimum_duration`, with 76,218 seconds remaining at 18:13 PDT. The tracked job has one start,
+  `minimum_duration`, with 72,483 seconds remaining at 19:15 PDT. The tracked job has one start,
   one success, zero failures, and zero projection backlog since the reset contract.
 - Current-HEAD `qd status`: 13 total runs and zero pending projections. The third independently
   clicked AionUi one-click workflow run (`01KXF2VC2NGNK7NFKEXWEBWZEY`) exited 0 without degraded
@@ -41,6 +41,17 @@ remaining gates. [READINESS.md](READINESS.md) remains the single operational sna
 - Approval counts are also fail-closed: only a successful Paperclip query may display zero.
   Unavailable approval state is rendered separately as unknown/attention rather than “no pending
   approvals.”
+- Plan startup recovery resumes only safe `confirmed` work through one atomic dispatch claim,
+  refreshes active work without replay, and fails ambiguous `planning`/`dispatching` states closed.
+  Concurrent confirmation/dispatch and corrupt-record tests pass within the 241-test suite.
+- Arbitrary planning, Paperclip, workflow, runtime, and schedule-parser errors no longer cross into
+  plan API responses or ledger records. Hostile private-path echoes are covered by regressions.
+- A real primary console on port 8765 held the `0700` state directory's `0600` lease. A second
+  source-tree start on port 8766 exited 2 before recovery; primary health and the existing `ready`
+  plan were unchanged.
+- Current-HEAD real doctor has exactly one failing check: the deliberately stale stable qd lacks
+  `soak` and `console`. Every dependency, credential boundary, template, installed service,
+  runtime, port, permission, backup target, and Paperclip single-instance check passes.
 
 ## Safe remaining sequence
 
@@ -48,9 +59,10 @@ remaining gates. [READINESS.md](READINESS.md) remains the single operational sna
 2. At the checkpoint, recompute soak, doctor, status, watchdog, digest, projector backlog, backup,
    and canary evidence. Append a checkpoint only if the derived verdict passes.
 3. Enter one quiesced maintenance window: ensure no active `qd wrap`/`qd gated-claude`; boot out
-   qd periodic services and canary; install the current wheel; verify stable `qd soak` and
-   `qd console`; render/lint/install the console plist; bootstrap all services; require current
-   doctor, runtime state, watchdog, digest, and backlog to pass.
+   qd periodic services and canary; gracefully stop the manual source console without deleting its
+   persistent lease file; install the current wheel; verify stable `qd soak` and `qd console`;
+   render/lint/install the console plist; bootstrap all services; require current doctor, runtime
+   state, watchdog, digest, and backlog to pass.
 4. Adopt feed-monitor and sox-monitor only from their hash-locked idle-PID preflight, then start
    the seven-day append-only soak.
 5. Configure Telegram only through local hidden input. Enable mail only after explicit metadata
