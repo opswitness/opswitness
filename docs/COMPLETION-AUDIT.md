@@ -1,6 +1,6 @@
 # Quarterdeck Completion Audit
 
-Snapshot: 2026-07-13 20:44 PDT. This document maps the approved M0-M6 plan to evidence and
+Snapshot: 2026-07-13 21:24 PDT. This document maps the approved M0-M6 plan to evidence and
 remaining gates. [READINESS.md](READINESS.md) remains the single operational snapshot.
 
 ## Requirement matrix
@@ -19,9 +19,10 @@ remaining gates. [READINESS.md](READINESS.md) remains the single operational sna
 ## Live evidence at this snapshot
 
 - Current-HEAD `qd soak status m2-canary --json`: `pending`; only blocker is
-  `minimum_duration`, with 67,161 seconds remaining at 20:44 PDT. The tracked job has one start,
-  one success, zero failures, and zero projection backlog since the reset contract.
-- Current-HEAD `qd status`: 13 total runs and zero pending projections. The third independently
+  `minimum_duration`, with 64,757 seconds remaining at 21:24 PDT. The tracked job has two starts,
+  two successes, zero failures, a 21,606.956-second maximum gap against a 25,920-second limit,
+  and zero projection backlog since the reset contract.
+- Current-HEAD `qd status`: 14 total runs and zero pending projections. The third independently
   clicked AionUi one-click workflow run (`01KXF2VC2NGNK7NFKEXWEBWZEY`) exited 0 without degraded
   evidence.
 - Current-HEAD watchdog: all one active scheduled jobs within expectations.
@@ -72,12 +73,16 @@ remaining gates. [READINESS.md](READINESS.md) remains the single operational sna
   values are redacted even from validation errors, and a separately confirmed fixed probe cannot
   send before requested evidence is durable. Desktop and 390x844 acceptance passed with empty
   fields and a disabled save action. No credential was entered, no Telegram event exists, and no
-  message was sent. The full suite passes 269 tests in three consecutive runs.
+  message was sent. The full suite passes 270 tests in three consecutive runs.
 - Current commit `428deef` also passes a fresh isolated uv-tool rehearsal: packaged `soak` and
   `console` commands are present, an isolated wrap exits 0 without degradation, and the packaged
   loopback console health/JS/CSS endpoints return HTTP 200. Real-user-domain doctor still fails
   only the intentionally deferred stable-tool command-surface check. Feed/SOX production hashes
   remain locked and their dry-run wrapper diffs have not drifted.
+- Isolated bootstrap found that production `schedules.generated.yaml` is a stale July 12 machine
+  snapshot; the user-owned exact enrollment and the canary interval/grace remain correct. The
+  current parser produces the right wrapped register-trigger record. Regeneration is therefore a
+  named post-canary maintenance action, not a reason to mutate or reset the active evidence window.
 - Arbitrary planning, Paperclip, workflow, runtime, and schedule-parser errors no longer cross into
   plan API responses or ledger records. Hostile private-path echoes are covered by regressions.
 - A real primary console on port 8765 held the `0700` state directory's `0600` lease. A second

@@ -137,6 +137,22 @@ After the 24-48 hour canary gate passes, adoption must remain fail-closed and or
    `qd adopt launchd LABEL --rollback`, launchd reload, and removal of that label from the
    enrollment list. The seven-day soak clock starts only after both jobs are healthy.
 
+After both exact labels are wrapped, enrolled, idle/healthy, and the independent checks pass,
+append the multi-job contract with no historical anchor:
+
+```bash
+qd soak start m2-production \
+  --job com.tianyuzhou.feed-monitor \
+  --job com.tianyuzhou.sox-monitor \
+  --minimum-hours 168 \
+  --reason "post-canary production adoption"
+```
+
+Multi-job evidence begins at the `soak_started` commit. The initial nonzero result must report
+pending first-run and duration evidence; it must not be checkpointed as passed. After seven days,
+`qd soak status m2-production --json` and all independent M2 checks must pass before
+`qd soak checkpoint m2-production` is appended.
+
 ### Upgrade maintenance checkpoint: 2026-07-13 12:07 PDT
 
 - Before maintenance, the canary had four successful wrapped runs and zero projection
@@ -221,3 +237,26 @@ checks must pass independently before adopting feed-monitor or sox-monitor.
   `plutil -lint`, and both current dry-run diffs remain limited to prepending the stable wrapper.
   SOX was idle with last exit 0. Feed was in a normal interval invocation with last exit 0, proving
   again that the real adoption must wait for an idle-PID window rather than interrupting it.
+- Independent pre-gate checks also pass: status reports 13 ledger runs and zero pending
+  projections; watchdog reports its one active canary within expectations; the 24-hour digest is
+  healthy with eight runs, zero problems, and zero missed runs; a projector drain is empty; and
+  the encrypted-backup dry-run finds Paperclip state, the ledger, CAS, and configuration inputs.
+  These checks reduce checkpoint risk but do not satisfy the remaining wall-clock duration.
+- An isolated `QD_CONFIG_DIR` bootstrap against the real LaunchAgents also exposed a stale but
+  non-authoritative production `schedules.generated.yaml` last written on July 12. The current
+  parser correctly recognizes register-trigger as wrapped with the current plist hash and also
+  discovers gate-recovery plus two newer candidate jobs. The user-owned enrollment file remains
+  exact-label-only and unchanged, so no task was silently enrolled and the canary's frozen
+  interval/grace semantics are unchanged. Evaluate the canary first; then, inside the quiesced
+  post-canary maintenance window, run current-HEAD `qd init` once to regenerate the machine-owned
+  file and rerun watchdog/status/digest. Do not use this derived-file refresh to reset or backdate
+  soak evidence.
+
+### Natural cadence checkpoint: 2026-07-13 21:24 PDT
+
+Launchd performed the second post-contract register-trigger invocation without a manual kick.
+`launchctl` reports `runs=2`, idle state, and last exit 0. Ledger run
+`01KXFDVGNHMYG3Z2P9HZ097M0R` completed `succeeded`, exit 0, in 7.407 seconds. The recomputed soak
+verdict has two starts, two successes, zero failures/running runs, zero projection backlog, and a
+21,606.956-second maximum gap against the frozen 25,920-second limit. Its only blocker remains
+`minimum_duration` (64,756.646 seconds at the checkpoint); no checkpoint event was appended.

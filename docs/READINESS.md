@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 269 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
+- Full suite: 270 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
   gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -37,7 +37,9 @@ blocked by the current open gates below.
   and fails on unhealthy launchd runtime state; encrypted backup + isolated restore and the
   projector four-test matrix pass.
 - `com.tianyuzhou.register-trigger` is the sole canary; its pristine `.qd-bak` exists,
-  six runs succeeded, watchdog/digest are green, and projection backlog is zero. A 22-minute
+  seven ledger runs have succeeded, watchdog/digest are green, and projection backlog is zero.
+  The active contract contains two natural starts and two successes, with a 21,606.956-second
+  maximum gap under its frozen 25,920-second limit. A 22-minute
   schema-mismatch interruption required controlled recovery, so continuous evidence restarted
   at 2026-07-13 15:23 PDT and cannot pass 24 hours before 2026-07-14 15:23 PDT. Append-only
   contract `01KXETZM2A7BXN7D4Z54MF7RH0` now enforces that gate as `m2-canary`; its first
@@ -170,8 +172,9 @@ blocked by the current open gates below.
 The operator resumed the project after completing normal Claude login and unlocking macOS.
 The former M3 and AionUi blockers are closed without weakening their acceptance criteria:
 
-- Production now reports twelve ledger runs, six successful canary runs, and zero projection
-  backlog. The configuration mismatch and recovery window at 15:01-15:23 PDT reset continuous
+- Production now reports 14 ledger runs; register-trigger has seven historical successes, while
+  the active canary contract contains two starts and two successes with zero projection backlog.
+  The configuration mismatch and recovery window at 15:01-15:23 PDT reset continuous
   canary evidence; the earliest 24-hour checkpoint is 2026-07-14 15:23 PDT. Elapsed time cannot
   be replaced by tests or a manual trigger.
 - Two harmless real Claude sessions completed the full
@@ -221,8 +224,10 @@ Continue in this order:
    observation up to 48 hours if any result is ambiguous.
 2. Only after that gate passes, enter the documented qd maintenance window: stop qd consumers,
    gracefully stop the manually running source console without deleting `console.lease`, install
-   the current wheel, verify `soak` and `console`, install/bootstrap the console service, restore
-   periodic services/canary, and require current-HEAD doctor to become fully green.
+   the current wheel, verify `soak` and `console`, run current-HEAD `qd init` once to refresh the
+   machine-owned generated schedule snapshot without changing user enrollment, install/bootstrap
+   the console service, restore periodic services/canary, and require current-HEAD doctor,
+   watchdog, status, and digest to become fully green.
 3. Only after that upgrade passes, follow the hash-locked, idle-PID adoption procedure in
    `M2-VALIDATION.md` for feed-monitor and sox-monitor. Start the seven-day soak only when
    both jobs are wrapped, enrolled by exact label, and healthy.

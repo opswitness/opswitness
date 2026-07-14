@@ -102,7 +102,7 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   removing credentials disables future sends even if its final audit append fails. API regressions
   prove Pydantic 422 responses redact both submitted values. Desktop and 390x844 acceptance showed
   empty password fields and a disabled save action; no credentials were entered, no Telegram event
-  was written, and no message was sent. The resulting full suite passes 269 tests in three
+  was written, and no message was sent. The resulting full suite passes 270 tests in three
   consecutive runs.
 - Mail summarization now treats deletion of its temporary AionUi Team as part of success. A
   simulated cleanup failure prevents the summary from being returned and exposes only a fixed

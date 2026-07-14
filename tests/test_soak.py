@@ -121,6 +121,52 @@ def test_one_manual_success_cannot_fake_continuous_soak():
     assert any(item["code"] == "cadence_gap" for item in result["blockers"])
 
 
+def test_multi_job_soak_starts_at_contract_and_requires_every_job(tmp_path):
+    second_job = "com.example.second"
+    schedules = [_schedule(), _schedule(job=second_job)]
+    ledger = Ledger(tmp_path / "ledger")
+    contract = record_contract(
+        ledger,
+        "production",
+        [JOB, second_job],
+        schedules,
+        minimum_seconds=20,
+        reason="post-canary production adoption",
+        now=BASE,
+    )
+    assert contract["payload"]["evidence_since"] == BASE.isoformat()
+    assert "anchor_run_id" not in contract["payload"]
+
+    first_job_only = [contract]
+    first_job_only += _run("A1", BASE, job=JOB)
+    first_job_only += _run("A2", BASE + timedelta(seconds=10), job=JOB)
+    pending = evaluate_soak(
+        first_job_only,
+        "production",
+        BASE + timedelta(seconds=12),
+        schedules,
+    )
+    assert pending["state"] == "pending"
+    assert any(
+        item["code"] == "no_successful_run" and item["job"] == second_job
+        for item in pending["blockers"]
+    )
+
+    complete = list(first_job_only)
+    complete += _run("B1", BASE, job=second_job)
+    complete += _run("B2", BASE + timedelta(seconds=10), job=second_job)
+    passed = evaluate_soak(
+        complete,
+        "production",
+        BASE + timedelta(seconds=22),
+        schedules,
+    )
+    assert passed["state"] == "passed"
+    assert passed["healthy"] is True
+    assert passed["jobs"][JOB]["successes"] == 2
+    assert passed["jobs"][second_job]["successes"] == 2
+
+
 @pytest.mark.parametrize(
     ("mutation", "expected"),
     [

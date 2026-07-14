@@ -21,6 +21,14 @@ registry endpoints, the shared GitHub user/organization namespace, and Verisign 
 All four `OpsWitness` identifier checks returned `404`. A `404` proves only that the
 identifier was unregistered at that moment; it does not reserve it.
 
+### Identifier refresh: 2026-07-13 21:05 America/Los_Angeles
+
+The public PyPI JSON endpoint, GitHub shared user/organization namespace endpoint, npm registry,
+and Verisign `.com` RDAP endpoint were queried again for the exact lowercase `opswitness`
+identifier. All four still returned HTTP 404. This refresh does not replace the qualified
+similarity search, does not repeat every official trademark query below, and does not reserve any
+identifier. No account, organization, package, or domain was created.
+
 ## Official federal search checkpoint
 
 The USPTO Trademark Search system returned **No results found** for each of these live
