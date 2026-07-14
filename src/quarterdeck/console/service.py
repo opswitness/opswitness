@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -164,9 +165,62 @@ class ConsoleService:
         self._background = background
         self._mail_jobs: dict[str, MailSummaryJob] = {}
         self._mail_lock = threading.Lock()
+        self._lease_guard = threading.Lock()
+        self._lease_fd: int | None = None
 
     def close(self) -> None:
-        self._executor.shutdown(wait=False, cancel_futures=False)
+        self._executor.shutdown(wait=True, cancel_futures=True)
+        self.release_instance_lease()
+
+    def acquire_instance_lease(self) -> bool:
+        """Hold the exclusive console lease before recovery or remote side effects."""
+        with self._lease_guard:
+            if self._lease_fd is not None:
+                return False
+            root = self.settings.console.state_dir.expanduser()
+            if root.is_symlink():
+                raise ConsoleUnavailable("console state directory is unavailable")
+            fd: int | None = None
+            try:
+                root.mkdir(parents=True, exist_ok=True, mode=0o700)
+                os.chmod(root, 0o700)
+                fd = os.open(
+                    root / "console.lease",
+                    os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                )
+                os.fchmod(fd, 0o600)
+            except OSError as exc:
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+                raise ConsoleUnavailable("console instance lease is unavailable") from exc
+            if fd is None:
+                raise ConsoleUnavailable("console instance lease is unavailable")
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                os.close(fd)
+                raise ConsoleUnavailable("another console instance is already active") from None
+            self._lease_fd = fd
+            return True
+
+    def release_instance_lease(self) -> None:
+        with self._lease_guard:
+            fd = self._lease_fd
+            self._lease_fd = None
+            if fd is None:
+                return
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
     def _submit(self, fn: Callable[..., Any], *args: Any) -> None:
         if self._background:

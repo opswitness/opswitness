@@ -366,6 +366,23 @@ def test_startup_recovery_rejects_corrupt_plan_records(console_env):
         service.recover_plans()
 
 
+def test_console_instance_lease_is_exclusive_and_reusable(console_env):
+    settings, service, aion, paperclip = console_env
+    contender = ConsoleService(
+        settings,
+        aion=aion,  # type: ignore[arg-type]
+        paperclip_factory=lambda: paperclip,  # type: ignore[arg-type,return-value]
+        background=False,
+    )
+    assert service.acquire_instance_lease() is True
+    assert service.acquire_instance_lease() is False
+    with pytest.raises(ConsoleUnavailable, match="another console instance"):
+        contender.acquire_instance_lease()
+    service.release_instance_lease()
+    assert contender.acquire_instance_lease() is True
+    contender.close()
+
+
 def test_plan_hash_binds_objective_constraints_workspace_and_dispatch(console_env):
     _, service, aion, paperclip = console_env
     requested = service.request_plan(PlanRequest(objective="生成严格绑定的摘要"))
@@ -803,11 +820,21 @@ def test_console_dashboard_contains_schedule_parser_errors(monkeypatch, console_
 
 def test_console_requires_csrf_and_serves_built_frontend(console_env, monkeypatch):
     settings, service, _, _ = console_env
-    recoveries = []
+    lifecycle = []
+    monkeypatch.setattr(
+        service,
+        "acquire_instance_lease",
+        lambda: lifecycle.append("lease") or True,
+    )
     monkeypatch.setattr(
         service,
         "recover_plans",
-        lambda: recoveries.append("startup") or {},
+        lambda: lifecycle.append("recovery") or {},
+    )
+    monkeypatch.setattr(
+        service,
+        "release_instance_lease",
+        lambda: lifecycle.append("release"),
     )
     monkeypatch.setattr(
         service,
@@ -865,7 +892,35 @@ def test_console_requires_csrf_and_serves_built_frontend(console_env, monkeypatc
         assert page.status_code == 200
         assert "Quarterdeck" in page.text
         assert page.headers["x-frame-options"] == "DENY"
-    assert recoveries == ["startup"]
+    assert lifecycle == ["lease", "recovery", "release"]
+
+
+def test_console_lifespan_releases_lease_when_recovery_fails(console_env, monkeypatch):
+    settings, service, _, _ = console_env
+    lifecycle = []
+    monkeypatch.setattr(
+        service,
+        "acquire_instance_lease",
+        lambda: lifecycle.append("lease") or True,
+    )
+
+    def recovery_failed():
+        lifecycle.append("recovery")
+        raise ConsoleUnavailable("recovery failed closed")
+
+    monkeypatch.setattr(service, "recover_plans", recovery_failed)
+    monkeypatch.setattr(
+        service,
+        "release_instance_lease",
+        lambda: lifecycle.append("release"),
+    )
+    with pytest.raises(ConsoleUnavailable, match="recovery failed closed"):
+        with TestClient(
+            create_app(settings, service=service),
+            base_url="http://127.0.0.1:8765",
+        ):
+            pass
+    assert lifecycle == ["lease", "recovery", "release"]
 
 
 def test_aionui_base_is_loopback_only(tmp_path, monkeypatch):

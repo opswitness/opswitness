@@ -64,6 +64,9 @@ may own an unreconciled ephemeral Team, while a stranded `dispatching` record ma
 created a Paperclip issue, AionUi Team, or workflow run. Those two states therefore fail closed with
 fixed `planning_interrupted_by_restart` or `execution_dispatch_interrupted` evidence and require a
 new plan after operator inspection. No startup path blindly repeats an ambiguous external effect.
+Before recovery starts, the process holds a non-blocking exclusive `console.lease` for the private
+state directory. A second port or process therefore cannot inspect or mutate the same plan state;
+graceful shutdown waits for background work before releasing the lease.
 
 ## Evidence and privacy
 

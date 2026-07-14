@@ -35,10 +35,16 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        await run_in_threadpool(service.recover_plans)
-        yield
-        if owned_service:
-            service.close()
+        acquired_here = False
+        try:
+            acquired_here = await run_in_threadpool(service.acquire_instance_lease)
+            await run_in_threadpool(service.recover_plans)
+            yield
+        finally:
+            if owned_service:
+                service.close()
+            elif acquired_here:
+                service.release_instance_lease()
 
     app = FastAPI(
         title="Quarterdeck Console",

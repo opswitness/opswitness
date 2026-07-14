@@ -241,22 +241,33 @@ def console_serve(
     import uvicorn
 
     from quarterdeck.console.app import create_app
+    from quarterdeck.console.service import ConsoleService, ConsoleUnavailable
 
     settings = _load_settings_cli()
     selected_port = port or settings.console.port
     console = settings.console.model_copy(update={"host": "127.0.0.1", "port": selected_port})
     settings = settings.model_copy(update={"console": console})
-    if open_browser:
-        threading.Timer(
-            0.8, lambda: webbrowser.open(f"http://127.0.0.1:{selected_port}")
-        ).start()
-    uvicorn.run(
-        create_app(settings),
-        host="127.0.0.1",
-        port=selected_port,
-        log_level="info",
-        access_log=False,
-    )
+    service = ConsoleService(settings)
+    try:
+        service.acquire_instance_lease()
+    except ConsoleUnavailable as exc:
+        service.close()
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from None
+    try:
+        if open_browser:
+            threading.Timer(
+                0.8, lambda: webbrowser.open(f"http://127.0.0.1:{selected_port}")
+            ).start()
+        uvicorn.run(
+            create_app(settings, service=service),
+            host="127.0.0.1",
+            port=selected_port,
+            log_level="info",
+            access_log=False,
+        )
+    finally:
+        service.close()
 
 
 @telegram_app.command("configure")

@@ -91,6 +91,9 @@ Status: name-independent release engineering is ready; public release is **NO-GO
 - Planning, dispatch, runtime-refresh, and schedule-parser failures now cross the console boundary
   only as fixed reason codes and fixed user guidance. Hostile exceptions containing private paths
   and plan-like text are absent from both API records and append-only ledger events.
+- `qd console serve` acquires an exclusive state-directory lease before browser launch, recovery,
+  or remote work. A second service is rejected even on a different port; recovery failure releases
+  a lease acquired by the app, while graceful shutdown drains background work before release.
 - Initial confirmation granted session-level access only to `qd_workflow_start` and the read-only
   `qd_workflow_status`, never to the whole server. A later single **Run now** click required no
   confirmation. Later UI verification inadvertently activated the synthetic task twice through
