@@ -61,13 +61,17 @@ remaining gates. [READINESS.md](READINESS.md) remains the single operational sna
   completed with no residue, health stayed green, the sole plan remained `ready` with its original
   timestamp, the dashboard remained `1/1` covered with zero projection backlog, and the browser
   emitted no warnings or errors. No plan, mailbox, or production fleet action was triggered.
-- The local mail setup path now has a complete two-consent UI and fixed backend OAuth boundary.
-  Only `gws auth login --readonly --services gmail` is possible; activation follows a second
+- The local mail setup path now has a Desktop-client preflight, complete two-consent UI, and fixed
+  backend OAuth boundary. Missing client state cannot call login; the local import validates a
+  Desktop document and atomically enforces `0700`/`0600` without echoing client data. Only
+  `gws auth login --readonly --services gmail` is possible; activation follows a second
   encrypted-token/readonly-scope verification and uses an atomic `0600` managed file without
   rewriting user configuration. Revocation fails closed for future access. Focused tests, three
-  consecutive 261-test full runs, frontend typecheck, ruff, mypy, desktop acceptance, and 390x844
-  no-overflow acceptance pass. One checkbox leaves OAuth disabled; both enable the button, but the
-  button was not clicked, no authorization ledger event exists, and no mailbox was accessed.
+  consecutive 278-test full runs, frontend typecheck, ruff, mypy, desktop acceptance, and 390x844
+  no-overflow acceptance pass. A real first attempt exposed the previously missing client
+  precondition and created only fixed failed authorization evidence; it did not access Gmail.
+  The corrected UI now stops at the unselected local JSON import, so no client or token exists and
+  no mailbox was accessed.
 - Telegram now has a local password-only configure/test/disable path in the total console. Secret
   writes use the existing atomic `0600` merge, concurrent mutations are serialized, submitted
   values are redacted even from validation errors, and a separately confirmed fixed probe cannot

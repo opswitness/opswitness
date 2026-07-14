@@ -100,10 +100,14 @@ Planning and dispatch failures persist only fixed versioned reason codes; arbitr
 Paperclip, workflow, parser, path, or model exception text is neither returned by the API nor
 written to the ledger. Runtime failure and status-unavailable messages are fixed local guidance.
 
-When mail is not ready, the mail button opens a local authorization dialog rather than becoming a
-dead control. Two separate checkboxes bind Gmail readonly OAuth and the exact metadata fields sent
-to the configured AionUi model; the OAuth action remains disabled until both are checked. The
-backend accepts only literal true acknowledgements and the fixed readonly Gmail login command.
+When mail is not ready, the mail button opens a local setup dialog rather than becoming a dead
+control. If the fixed gws Desktop OAuth client is absent, invalid, or permission-unsafe, the dialog
+shows an explicit first step and does not render an actionable Gmail login button. A selected
+Desktop client JSON is accepted only with a private-storage acknowledgement, then validated and
+atomically published without exposing its values. Two separate checkboxes then bind Gmail readonly
+OAuth and the exact metadata fields sent to the configured AionUi model; the OAuth action remains
+disabled until both are checked. The backend accepts only literal true acknowledgements and the
+fixed readonly Gmail login command.
 Successful re-verification atomically activates the adapter without rewriting user `config.yaml`;
 the same dialog can revoke future access. A summary uses an ephemeral Plan Mode team and a unique
 private workspace; only message count and summary hash enter the ledger. Team or workspace cleanup

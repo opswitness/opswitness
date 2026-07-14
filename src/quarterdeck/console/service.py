@@ -29,6 +29,7 @@ from quarterdeck.console.schemas import (
     ExecutionState,
     MailAuthorizationJob,
     MailAuthorizationRequest,
+    MailOAuthClientRequest,
     MailSummaryJob,
     PlanRecord,
     PlanRequest,
@@ -41,7 +42,7 @@ from quarterdeck.digest import build_digest
 from quarterdeck.ids import new_ulid
 from quarterdeck.index import job_summary, query_runs, rebuild
 from quarterdeck.ledger import Ledger
-from quarterdeck.mail import authorize_mail, check_mail, mail_status
+from quarterdeck.mail import authorize_mail, check_mail, mail_status, save_oauth_client
 from quarterdeck.notify import alert
 from quarterdeck.notify.telegram import send_telegram
 from quarterdeck.paperclip import PaperclipClient, PaperclipError
@@ -62,6 +63,7 @@ MAIL_SUMMARY_FAILURE = "mail summary failed; run qd mail status locally"
 MAIL_AUTHORIZATION_FAILURE = (
     "Gmail readonly authorization failed; inspect qd mail status locally."
 )
+MAIL_OAUTH_CLIENT_REJECTED = "Google Desktop OAuth client JSON was rejected."
 TELEGRAM_CONFIGURATION_REJECTED = "Telegram credentials were rejected or already configured."
 TELEGRAM_ENVIRONMENT_CONTROLLED = "Telegram credentials are controlled outside the console."
 TELEGRAM_TEST_FAILED = "Telegram test delivery failed; inspect local diagnostics."
@@ -824,12 +826,51 @@ class ConsoleService:
             "enabled": status.get("enabled") is True,
             "available": status.get("available") is True,
             "authenticated": status.get("authenticated") is True,
+            "oauth_client_ready": status.get("oauth_client_ready") is True,
+            "oauth_client_issue": status.get("oauth_client_issue"),
             "model_metadata_consent": status.get("model_metadata_consent") is True,
             "ready": status.get("mcp_ready") is True,
             "oauth_scope": "gmail.readonly",
             "metadata_fields": ["from", "subject", "date", "message_id"],
             "privacy": "metadata_only",
         }
+
+    def configure_mail_oauth_client(
+        self, request: MailOAuthClientRequest
+    ) -> dict[str, bool]:
+        run_id = new_ulid()
+        self._append(
+            "mail_oauth_client_import_requested",
+            run_id,
+            {
+                "schema_version": 1,
+                "client_type": "desktop",
+                "private_storage_acknowledged": True,
+                "source": "console",
+            },
+        )
+        try:
+            save_oauth_client(request.client_json.get_secret_value())
+        except (OSError, ValueError) as exc:
+            try:
+                self._append(
+                    "mail_oauth_client_import_failed",
+                    run_id,
+                    {
+                        "schema_version": 1,
+                        "reason": "client_rejected",
+                        "source": "console",
+                    },
+                )
+            except ConsoleUnavailable:
+                alert("audit evidence lost after Google OAuth client rejection")
+            raise ConsoleConflict(MAIL_OAUTH_CLIENT_REJECTED) from exc
+        self._append(
+            "mail_oauth_client_import_finished",
+            run_id,
+            {"schema_version": 1, "client_type": "desktop", "source": "console"},
+        )
+        return {"configured": True}
 
     def request_mail_authorization(
         self, request: MailAuthorizationRequest

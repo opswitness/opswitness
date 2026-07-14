@@ -932,6 +932,75 @@ button.table-row:hover {
   line-height: 1.45;
 }
 
+.setup-step {
+  display: grid;
+  gap: 12px;
+}
+
+.setup-step-heading {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.setup-step-heading > span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--teal);
+  color: white;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.setup-step-heading > div {
+  display: grid;
+  gap: 2px;
+}
+
+.setup-step-heading strong {
+  color: #34413b;
+  font-size: 13px;
+}
+
+.setup-step-heading small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.client-file-field {
+  position: relative;
+  display: grid;
+  min-height: 42px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  overflow: hidden;
+  border: 1px dashed #9ba9a2;
+  border-radius: 5px;
+  padding: 10px 12px;
+  color: #44524b;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.client-file-field span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.client-file-field input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
 .drawer-layer {
   position: fixed;
   inset: 0;

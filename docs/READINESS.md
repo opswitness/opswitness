@@ -1,6 +1,6 @@
 # Quarterdeck Readiness
 
-Snapshot date: 2026-07-13 · This file is a SINGLE current snapshot; all earlier review
+Snapshot date: 2026-07-14 · This file is a SINGLE current snapshot; all earlier review
 text is preserved verbatim under History. ADRs remain the source of design truth;
 `INSTALL-PAPERCLIP.md` records the approved M2 procedure. Remaining rollout steps stay
 blocked by the current open gates below.
@@ -10,8 +10,8 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 270 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
-  gitleaks are clean.
+- Full suite: 278 tests pass in three consecutive runs; ruff and mypy pass. DCO, worktree
+  gitleaks, and full-history gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
   `(pid, create_time)`, verifies descendants, escalates after 750ms, and emits
@@ -90,11 +90,14 @@ blocked by the current open gates below.
   only `qd mcp --profile mail`, whose two tools cannot launch workflows or mutate the fleet. The
   adapter is fixed-query, metadata-only, pinned to `gws 0.22.5`, and disabled by default. The
   separate `quarterdeck-mail` connection is tested at exactly two tools but remains disabled;
-  Gmail OAuth is absent and no mailbox access has occurred. The total console now has a complete
-  local authorization/revocation dialog: two literal-true acknowledgements gate the fixed readonly
-  Gmail login command, successful login is revalidated before a private managed activation file is
-  written, and failure or missing final evidence leaves the adapter disabled. Desktop and 390px
-  mobile acceptance passed without clicking the authorization action.
+  Gmail OAuth is absent and no mailbox access has occurred. A real console attempt failed in under
+  half a second because no Google Desktop OAuth client existed; the old UI had checked only the gws
+  binary and incorrectly exposed the login action. The corrected dialog now reports structured
+  client readiness and stops at an explicit local import step. Imported JSON must be a Desktop app
+  with fixed Google endpoints and localhost redirect, is atomically stored under `0700`/`0600`, and
+  is never echoed or written to evidence. Only then do two literal-true acknowledgements gate the
+  fixed readonly Gmail login command. Desktop and 390x844 mobile acceptance pass with no horizontal
+  overflow; the real state remains `oauth_client_issue=missing` and disabled.
 - The local operator console is code-complete at `qd console serve`: FastAPI serves the packaged
   React UI on loopback only; CSRF/origin/content-type/CSP controls protect writes; planning uses an
   ephemeral tool-free AionUi Plan Mode Team; confirmation is bound to the exact plan SHA-256; only
@@ -152,7 +155,8 @@ blocked by the current open gates below.
    and the separately confirmed fixed delivery probe must be exercised during soak without
    exposing or copying tokens into chat, repo, argv, logs, or plists.
 5. **Daily mail consent and OAuth** — before enabling the adapter or creating the AionUi
-   09:00 America/Los_Angeles task, the operator must explicitly approve Gmail readonly OAuth
+   09:00 America/Los_Angeles task, the operator must create and privately import a Google Desktop
+   OAuth client, then explicitly approve Gmail readonly OAuth
    and sending sender/subject/date/message-id metadata to the model provider configured in
    AionUi, set `mail.model_metadata_consent: true`, and bind a separate assistant only to the
    mail profile. Then run one real metadata-only acceptance check; automatic

@@ -17,6 +17,7 @@ from quarterdeck.console.schemas import (
     ConfirmRequest,
     MailAuthorizationRequest,
     MailDisableRequest,
+    MailOAuthClientRequest,
     PlanRequest,
     TelegramActionRequest,
     TelegramConfigureRequest,
@@ -171,6 +172,14 @@ def create_app(
         del x_qd_csrf
         job = await run_in_threadpool(service.request_mail_authorization, body)
         return job.model_dump(mode="json")
+
+    @app.post("/api/v1/mail-authorization/client")
+    async def configure_mail_oauth_client(
+        body: MailOAuthClientRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        return await run_in_threadpool(service.configure_mail_oauth_client, body)
 
     @app.post("/api/v1/mail-authorization/disable")
     async def disable_mail(

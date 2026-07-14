@@ -89,9 +89,12 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
    neither event stores those fields. No body, draft, send, delete, label mutation, or runtime
    query exists in the CLI or MCP surface. The normal 11-tool MCP excludes mail entirely;
    `qd mcp --profile mail` exposes only status/check, and model transmission additionally
-   requires an explicit local consent bit. The loopback console can obtain that bit only after
-   two literal-true acknowledgements and an exact readonly Gmail OAuth flow; activation lives in
-   a private managed file so user configuration is never rewritten. See
+   requires an explicit local consent bit. Before login, the loopback console requires a valid
+   Google Desktop OAuth client at gws's fixed location with `0700` directory and `0600` file
+   permissions. Import is explicit, schema-validated, canonicalized, and atomically published;
+   no client field enters the API response or ledger. The console can obtain the consent bit only
+   after two literal-true acknowledgements and an exact readonly Gmail OAuth flow; activation
+   lives in a private managed file so user configuration is never rewritten. See
    [ADR-0005](adr/0005-metadata-only-mail-monitor.md).
 9. **Elapsed rollout gates are ledger contracts, not prose timestamps.** `qd soak` freezes
    each tracked job's interval/grace and recomputes first/intermediate/trailing cadence gaps,

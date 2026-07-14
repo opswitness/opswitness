@@ -182,6 +182,13 @@ class MailAuthorizationRequest(BaseModel):
     model_metadata_acknowledged: Literal[True]
 
 
+class MailOAuthClientRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_json: SecretStr = Field(min_length=2, max_length=65_536)
+    private_storage_acknowledged: Literal[True]
+
+
 class MailDisableRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

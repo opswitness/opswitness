@@ -12,14 +12,17 @@ import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Literal
+from urllib.parse import urlsplit
 
 from quarterdeck.config import Settings
+from quarterdeck.fsutil import atomic_write
 from quarterdeck.ids import new_ulid
 from quarterdeck.ledger import Ledger
 from quarterdeck.notify import alert
@@ -31,9 +34,21 @@ GMAIL_METADATA_SCOPE = "https://www.googleapis.com/auth/gmail.metadata"
 GMAIL_SCOPE_PREFIX = "https://www.googleapis.com/auth/gmail."
 GMAIL_FULL_SCOPE = "https://mail.google.com/"
 MAX_GWS_OUTPUT_BYTES = 1_048_576
+MAX_OAUTH_CLIENT_BYTES = 65_536
 _MESSAGE_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _VERSION = re.compile(r"(?:^|\s)(\d+\.\d+\.\d+)(?:\s|$)")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
+_CLIENT_ID = re.compile(r"^[A-Za-z0-9._-]{10,256}\.apps\.googleusercontent\.com$")
+_OAUTH_CLIENT_KEYS = {
+    "auth_provider_x509_cert_url",
+    "auth_uri",
+    "client_id",
+    "client_secret",
+    "project_id",
+    "redirect_uris",
+    "token_uri",
+    "universe_domain",
+}
 
 
 @dataclass(frozen=True)
@@ -44,6 +59,136 @@ class CommandResult:
 
 
 Runner = Callable[[list[str], float], CommandResult]
+
+
+def oauth_client_path() -> Path:
+    """Return the fixed gws Desktop OAuth client location without reading it."""
+    home = Path(os.environ.get("HOME", str(Path.home()))).expanduser()
+    return home / ".config" / "gws" / "client_secret.json"
+
+
+def _is_localhost_redirect(uri: str) -> bool:
+    try:
+        parsed = urlsplit(uri)
+        _ = parsed.port
+    except ValueError:
+        return False
+    return bool(
+        parsed.scheme == "http"
+        and parsed.hostname == "localhost"
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path in {"", "/"}
+        and not parsed.query
+        and not parsed.fragment
+    )
+
+
+def _validated_oauth_client(raw: str) -> dict[str, Any]:
+    if len(raw.encode("utf-8")) > MAX_OAUTH_CLIENT_BYTES:
+        raise ValueError("Google OAuth client JSON is too large")
+    try:
+        document = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Google OAuth client JSON is invalid") from exc
+    if not isinstance(document, dict) or set(document) != {"installed"}:
+        raise ValueError("Google OAuth client must be a Desktop app")
+    installed = document["installed"]
+    if not isinstance(installed, dict):
+        raise ValueError("Google OAuth client must be a Desktop app")
+
+    client_id = installed.get("client_id")
+    client_secret = installed.get("client_secret")
+    auth_uri = installed.get("auth_uri")
+    token_uri = installed.get("token_uri")
+    redirects = installed.get("redirect_uris")
+    if not isinstance(client_id, str) or not _CLIENT_ID.fullmatch(client_id):
+        raise ValueError("Google OAuth Desktop client ID is invalid")
+    if (
+        not isinstance(client_secret, str)
+        or not 8 <= len(client_secret) <= 512
+        or client_secret.strip() != client_secret
+    ):
+        raise ValueError("Google OAuth Desktop client secret is invalid")
+    if auth_uri != "https://accounts.google.com/o/oauth2/auth":
+        raise ValueError("Google OAuth authorization endpoint is invalid")
+    if token_uri != "https://oauth2.googleapis.com/token":
+        raise ValueError("Google OAuth token endpoint is invalid")
+    if not isinstance(redirects, list) or not redirects:
+        raise ValueError("Google OAuth Desktop redirect URI is missing")
+    if not all(isinstance(uri, str) and _is_localhost_redirect(uri) for uri in redirects):
+        raise ValueError("Google OAuth client must use a localhost Desktop redirect")
+    optional_strings = {
+        "project_id",
+        "auth_provider_x509_cert_url",
+        "universe_domain",
+    }
+    if any(
+        key in installed and not isinstance(installed[key], str)
+        for key in optional_strings
+    ):
+        raise ValueError("Google OAuth Desktop client metadata is invalid")
+    if installed.get(
+        "auth_provider_x509_cert_url",
+        "https://www.googleapis.com/oauth2/v1/certs",
+    ) != "https://www.googleapis.com/oauth2/v1/certs":
+        raise ValueError("Google OAuth certificate endpoint is invalid")
+    if installed.get("universe_domain", "googleapis.com") != "googleapis.com":
+        raise ValueError("Google OAuth universe is invalid")
+
+    canonical = {
+        key: installed[key]
+        for key in _OAUTH_CLIENT_KEYS
+        if key in installed
+    }
+    return {"installed": canonical}
+
+
+def oauth_client_status() -> dict[str, Any]:
+    """Report only readiness metadata; never return client identifiers or secrets."""
+    path = oauth_client_path()
+    if not path.exists():
+        return {"oauth_client_ready": False, "oauth_client_issue": "missing"}
+    if path.is_symlink() or path.parent.is_symlink():
+        return {"oauth_client_ready": False, "oauth_client_issue": "invalid"}
+    try:
+        file_mode = stat.S_IMODE(path.stat().st_mode)
+        directory_mode = stat.S_IMODE(path.parent.stat().st_mode)
+        if file_mode != 0o600 or directory_mode & 0o077:
+            return {
+                "oauth_client_ready": False,
+                "oauth_client_issue": "unsafe_permissions",
+            }
+        with path.open("rb") as handle:
+            payload = handle.read(MAX_OAUTH_CLIENT_BYTES + 1)
+        if len(payload) > MAX_OAUTH_CLIENT_BYTES:
+            return {"oauth_client_ready": False, "oauth_client_issue": "invalid"}
+        _validated_oauth_client(payload.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return {"oauth_client_ready": False, "oauth_client_issue": "invalid"}
+    return {"oauth_client_ready": True, "oauth_client_issue": None}
+
+
+def save_oauth_client(raw: str) -> Path:
+    """Validate and privately publish one gws Desktop OAuth client document."""
+    document = _validated_oauth_client(raw)
+    path = oauth_client_path()
+    directory = path.parent
+    if directory.is_symlink() or path.is_symlink():
+        raise ValueError("Google OAuth client storage path is unsafe")
+    try:
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(directory, 0o700)
+        payload = (
+            json.dumps(document, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+            + "\n"
+        ).encode("utf-8")
+        atomic_write(path, payload, mode=0o600)
+    except OSError as exc:
+        raise ValueError("Google OAuth client could not be stored privately") from exc
+    if oauth_client_status().get("oauth_client_ready") is not True:
+        raise ValueError("Google OAuth client failed private storage verification")
+    return path
 
 
 def _minimal_environment() -> dict[str, str]:
@@ -162,6 +307,7 @@ def mail_status(
     settings: Settings | None = None, *, runner: Runner = _subprocess_runner
 ) -> dict[str, Any]:
     settings = settings or Settings()
+    client = oauth_client_status()
     status: dict[str, Any] = {
         "enabled": settings.mail.enabled,
         "available": False,
@@ -171,6 +317,7 @@ def mail_status(
         "model_metadata_consent": settings.mail.model_metadata_consent,
         "required_version": settings.mail.required_version,
         "privacy": "metadata_only",
+        **client,
     }
     try:
         executable = _gws_executable(settings)
@@ -278,6 +425,12 @@ def authorize_mail(
             "authenticated": True,
             "scope_read_only": True,
             "credential_storage": "encrypted",
+            "privacy": "metadata_only",
+        }
+    if preflight.get("oauth_client_ready") is not True:
+        return {
+            "ok": False,
+            "error": "Google Desktop OAuth client is not configured",
             "privacy": "metadata_only",
         }
 

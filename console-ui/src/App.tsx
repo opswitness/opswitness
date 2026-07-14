@@ -12,6 +12,7 @@ import {
   Clock3,
   Database,
   ExternalLink,
+  FileUp,
   FileCheck2,
   FolderOpen,
   Inbox,
@@ -33,6 +34,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   confirmPlan,
+  configureMailOAuthClient,
   configureTelegram,
   disableTelegram,
   disableMail,
@@ -720,8 +722,12 @@ function MailSetupDialog({
   const [readonlyAck, setReadonlyAck] = useState(false);
   const [metadataAck, setMetadataAck] = useState(false);
   const [revokeAck, setRevokeAck] = useState(false);
+  const [clientFile, setClientFile] = useState<File | null>(null);
+  const [clientStorageAck, setClientStorageAck] = useState(false);
+  const [clientInputKey, setClientInputKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
 
   const loadStatus = useCallback(async () => {
     const next = await getMailAuthorizationStatus();
@@ -734,8 +740,11 @@ function MailSetupDialog({
     setReadonlyAck(false);
     setMetadataAck(false);
     setRevokeAck(false);
+    setClientFile(null);
+    setClientStorageAck(false);
     setJob(null);
     setError('');
+    setNotice('');
     setBusy(true);
     void loadStatus()
       .catch((err) => setError(err instanceof Error ? err.message : '邮箱状态读取失败'))
@@ -782,6 +791,27 @@ function MailSetupDialog({
     }
   };
 
+  const importOAuthClient = async () => {
+    if (!clientFile) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      if (clientFile.size > 65_536) throw new Error('OAuth client JSON 超过 64 KiB');
+      const clientJson = await clientFile.text();
+      await configureMailOAuthClient(clientJson);
+      await loadStatus();
+      setClientFile(null);
+      setClientStorageAck(false);
+      setClientInputKey((value) => value + 1);
+      setNotice('Desktop OAuth client 已安全导入；现在可以继续 Gmail 只读授权。');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'OAuth client 导入失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const revoke = async () => {
     setBusy(true);
     setError('');
@@ -799,6 +829,7 @@ function MailSetupDialog({
   };
 
   const ready = status?.ready === true;
+  const clientReady = status?.oauth_client_ready === true;
   const running = job?.status === 'running';
   return (
     <div className="modal-layer" role="dialog" aria-modal="true" aria-label="邮箱授权">
@@ -849,47 +880,109 @@ function MailSetupDialog({
           <div className="mail-setup-content">
             <div className="privacy-summary">
               <strong>最小权限</strong>
-              <span>授权页只申请 Gmail readonly，Quarterdeck 不保存账号或 token。</span>
+              <span>授权页只申请 Gmail readonly；token 由 gws 加密保存，Quarterdeck 不读取或回显。</span>
               <span>固定查询仅查看最近未读收件箱，排除垃圾邮件和回收站。</span>
             </div>
-            <label className="consent-row">
-              <input
-                type="checkbox"
-                checked={readonlyAck}
-                onChange={(event) => setReadonlyAck(event.target.checked)}
-              />
-              <span>我同意打开 Google 授权页并仅授予 Gmail 只读权限</span>
-            </label>
-            <label className="consent-row">
-              <input
-                type="checkbox"
-                checked={metadataAck}
-                onChange={(event) => setMetadataAck(event.target.checked)}
-              />
-              <span>我同意将发件人、主题、日期和 message-id 发送给当前 AionUi 模型生成摘要</span>
-            </label>
-            {running && (
-              <div className="oauth-progress" role="status">
-                <LoaderCircle size={20} className="spin" />
-                <span>请在已打开的 Google 页面完成授权</span>
-              </div>
-            )}
-            {job?.status === 'failed' && <div className="inline-error">{job.error}</div>}
-            {error && <div className="inline-error">{error}</div>}
             {status && !status.available && (
               <div className="inline-error">本机固定版本 gws 尚未就绪，请先运行 doctor。</div>
             )}
-            <button
-              className="primary-button full-button"
-              type="button"
-              disabled={
-                busy || running || !status?.available || !readonlyAck || !metadataAck
-              }
-              onClick={() => void startAuthorization()}
-            >
-              {busy ? <LoaderCircle size={17} className="spin" /> : <ShieldCheck size={17} />}
-              {status?.authenticated ? '确认并启用摘要' : '打开 Google 只读授权'}
-            </button>
+            {status?.available && !clientReady ? (
+              <div className="setup-step">
+                <div className="setup-step-heading">
+                  <span>1</span>
+                  <div>
+                    <strong>导入 Google Desktop OAuth client</strong>
+                    <small>首次设置一次；请选择 Google Cloud 下载的 client_secret JSON。</small>
+                  </div>
+                </div>
+                <a
+                  className="secondary-button link-button full-button"
+                  href="https://console.cloud.google.com/apis/credentials"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <ExternalLink size={16} />
+                  打开 Google Cloud 凭据页
+                </a>
+                <label className="client-file-field">
+                  <FileUp size={17} />
+                  <span>{clientFile?.name || '选择 Desktop client JSON'}</span>
+                  <input
+                    key={clientInputKey}
+                    type="file"
+                    accept="application/json,.json"
+                    onChange={(event) => setClientFile(event.target.files?.[0] || null)}
+                  />
+                </label>
+                <label className="consent-row">
+                  <input
+                    type="checkbox"
+                    checked={clientStorageAck}
+                    onChange={(event) => setClientStorageAck(event.target.checked)}
+                  />
+                  <span>确认将该 Desktop client 配置以 0600 权限保存到本机 gws 私有目录</span>
+                </label>
+                <button
+                  className="primary-button full-button"
+                  type="button"
+                  disabled={!clientFile || !clientStorageAck || busy}
+                  onClick={() => void importOAuthClient()}
+                >
+                  {busy ? <LoaderCircle size={17} className="spin" /> : <FileUp size={17} />}
+                  安全导入并继续
+                </button>
+              </div>
+            ) : status?.available ? (
+              <div className="setup-step">
+                <div className="setup-step-heading">
+                  <span>2</span>
+                  <div>
+                    <strong>授权与摘要同意</strong>
+                    <small>Google 授权和 AionUi 元数据传输分别确认。</small>
+                  </div>
+                </div>
+                <label className="consent-row">
+                  <input
+                    type="checkbox"
+                    checked={readonlyAck}
+                    onChange={(event) => setReadonlyAck(event.target.checked)}
+                  />
+                  <span>我同意打开 Google 授权页并仅授予 Gmail 只读权限</span>
+                </label>
+                <label className="consent-row">
+                  <input
+                    type="checkbox"
+                    checked={metadataAck}
+                    onChange={(event) => setMetadataAck(event.target.checked)}
+                  />
+                  <span>我同意将发件人、主题、日期和 message-id 发送给当前 AionUi 模型生成摘要</span>
+                </label>
+                {running && (
+                  <div className="oauth-progress" role="status">
+                    <LoaderCircle size={20} className="spin" />
+                    <span>请在已打开的 Google 页面完成授权</span>
+                  </div>
+                )}
+                <button
+                  className="primary-button full-button"
+                  type="button"
+                  disabled={busy || running || !readonlyAck || !metadataAck}
+                  onClick={() => void startAuthorization()}
+                >
+                  {busy ? <LoaderCircle size={17} className="spin" /> : <ShieldCheck size={17} />}
+                  {status?.authenticated ? '确认并启用摘要' : '打开 Google 只读授权'}
+                </button>
+              </div>
+            ) : null}
+            {status?.oauth_client_issue === 'unsafe_permissions' && (
+              <div className="inline-error">现有 OAuth client 文件权限不安全，请重新导入修复。</div>
+            )}
+            {status?.oauth_client_issue === 'invalid' && (
+              <div className="inline-error">现有 OAuth client 不是有效的 Desktop 配置，请重新导入。</div>
+            )}
+            {job?.status === 'failed' && <div className="inline-error">{job.error}</div>}
+            {notice && <div className="setup-notice">{notice}</div>}
+            {error && <div className="inline-error">{error}</div>}
           </div>
         )}
       </section>

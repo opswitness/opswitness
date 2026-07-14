@@ -77,6 +77,16 @@ export function requestMailAuthorization(): Promise<MailAuthorizationJob> {
   });
 }
 
+export function configureMailOAuthClient(clientJson: string): Promise<{ configured: true }> {
+  return api('/api/v1/mail-authorization/client', {
+    method: 'POST',
+    body: JSON.stringify({
+      client_json: clientJson,
+      private_storage_acknowledged: true,
+    }),
+  });
+}
+
 export function getMailAuthorization(jobId: string): Promise<MailAuthorizationJob> {
   return api(`/api/v1/mail-authorization/${encodeURIComponent(jobId)}`);
 }

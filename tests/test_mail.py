@@ -1,4 +1,5 @@
 import json
+import stat
 import sys
 from pathlib import Path
 
@@ -16,6 +17,9 @@ from quarterdeck.mail import (
     authorize_mail,
     check_mail,
     mail_status,
+    oauth_client_path,
+    oauth_client_status,
+    save_oauth_client,
 )
 
 
@@ -27,6 +31,28 @@ _READY_AUTH = {
     "token_valid": True,
     "scopes": [GMAIL_READONLY_SCOPE],
 }
+
+_VALID_OAUTH_CLIENT = {
+    "installed": {
+        "client_id": "1234567890-example.apps.googleusercontent.com",
+        "project_id": "example-project",
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        "client_secret": "GOCSPX-private-test-value",
+        "redirect_uris": ["http://localhost"],
+    }
+}
+
+
+def _write_oauth_client(home: Path) -> Path:
+    directory = home / ".config" / "gws"
+    directory.mkdir(parents=True, mode=0o700)
+    directory.chmod(0o700)
+    path = directory / "client_secret.json"
+    path.write_text(json.dumps(_VALID_OAUTH_CLIENT))
+    path.chmod(0o600)
+    return path
 
 
 def _ready_runner(
@@ -48,6 +74,10 @@ def _ready_runner(
 
 
 def _settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **mail: object) -> Settings:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    _write_oauth_client(home)
     config = tmp_path / "config"
     config.mkdir(mode=0o700)
     monkeypatch.setenv("QD_CONFIG_DIR", str(config))
@@ -109,6 +139,8 @@ def test_mail_status_requires_exact_version_and_encrypted_oauth(tmp_path, monkey
         "credential_storage": "encrypted",
         "token_valid": True,
         "scope_read_only": True,
+        "oauth_client_ready": True,
+        "oauth_client_issue": None,
     }
     assert calls == [
         [str(settings.mail.gws_bin), "--version"],
@@ -271,6 +303,81 @@ def test_authorize_mail_skips_login_for_existing_valid_credential(tmp_path, monk
     )
     assert result["ok"] is True
     assert all("login" not in argv for argv, _timeout in calls)
+
+
+def test_authorize_mail_requires_private_desktop_client_before_login(tmp_path, monkeypatch):
+    settings = _settings(tmp_path, monkeypatch, enabled=False, model_metadata_consent=False)
+    oauth_client_path().unlink()
+    calls: list[tuple[list[str], float]] = []
+    unauth = {
+        "auth_method": "none",
+        "storage": "none",
+        "has_refresh_token": False,
+        "encryption_valid": False,
+        "token_valid": False,
+        "scopes": [],
+    }
+
+    result = authorize_mail(
+        settings,
+        runner=_ready_runner(CommandResult(0, "must not run", ""), calls=calls, auth=unauth),
+    )
+
+    assert result == {
+        "ok": False,
+        "error": "Google Desktop OAuth client is not configured",
+        "privacy": "metadata_only",
+    }
+    assert all("login" not in argv for argv, _timeout in calls)
+
+
+def test_oauth_client_import_is_private_canonical_and_never_echoes_secret(
+    tmp_path, monkeypatch
+):
+    _settings(tmp_path, monkeypatch)
+    path = oauth_client_path()
+    path.unlink()
+    path.parent.chmod(0o755)
+    document = json.loads(json.dumps(_VALID_OAUTH_CLIENT))
+    document["installed"]["ignored_future_field"] = "not persisted"
+
+    saved = save_oauth_client(json.dumps(document))
+    status_result = oauth_client_status()
+
+    assert saved == path
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    stored = json.loads(path.read_text())
+    assert stored["installed"]["client_secret"] == "GOCSPX-private-test-value"
+    assert "ignored_future_field" not in stored["installed"]
+    assert status_result == {"oauth_client_ready": True, "oauth_client_issue": None}
+    assert "private-test-value" not in json.dumps(status_result)
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"web": _VALID_OAUTH_CLIENT["installed"]},
+        {"installed": {**_VALID_OAUTH_CLIENT["installed"], "redirect_uris": ["https://evil.example"]}},
+        {
+            "installed": {
+                **_VALID_OAUTH_CLIENT["installed"],
+                "redirect_uris": ["http://localhost:123@evil.example"],
+            }
+        },
+        {"installed": {**_VALID_OAUTH_CLIENT["installed"], "token_uri": "http://localhost/token"}},
+    ],
+)
+def test_oauth_client_import_rejects_non_desktop_or_untrusted_endpoints(
+    tmp_path, monkeypatch, document
+):
+    _settings(tmp_path, monkeypatch)
+    oauth_client_path().unlink()
+
+    with pytest.raises(ValueError):
+        save_oauth_client(json.dumps(document))
+
+    assert not oauth_client_path().exists()
 
 
 def test_authorize_mail_hides_failure_and_rejects_mutating_scope(tmp_path, monkeypatch):

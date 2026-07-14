@@ -42,19 +42,26 @@ Quarterdeck adds a narrow evidence adapter, not a mail agent:
 9. The loopback total console owns the local on-demand button and authorization dialog; AionUi
    remains the model runtime and its native Scheduled Task may own a future daily trigger.
    Quarterdeck does not build a second inbox or scheduler.
-10. Console authorization requires two independent literal-true acknowledgements: Gmail readonly
+10. Console authorization first requires a Google OAuth client whose top-level type is `installed`
+    (Desktop app), whose endpoints are Google's fixed HTTPS endpoints, and whose redirect is
+    localhost. The console accepts the JSON only after a private-storage acknowledgement,
+    canonicalizes it, and atomically writes gws's `client_secret.json` under `0700`/`0600`
+    permissions. Client identifiers and secrets never enter the ledger or API response. Missing,
+    invalid, or permission-unsafe client state prevents `gws auth login` from running.
+11. Console authorization requires two independent literal-true acknowledgements: Gmail readonly
     OAuth and transmission of sender/subject/date/message-id to the configured model provider.
     The only login argv is `gws auth login --readonly --services gmail`. Completion is accepted
     only after a second version, encrypted-storage, live-token, and readonly-scope verification.
-11. Activation state is atomically written to private `mail-activation.yaml`, which may contain
+12. Activation state is atomically written to private `mail-activation.yaml`, which may contain
     only `mail.enabled` and `mail.model_metadata_consent`. This managed file has precedence over
     user `config.yaml`, so the console never rewrites comments or unrelated settings. Environment
     overrides remain authoritative. Revocation sets both values false before any future check.
-12. Authorization records fixed `mail_authorization_requested/finished/failed` events; revocation
+13. OAuth-client import records fixed requested/finished/failed events without client data.
+    Authorization records fixed `mail_authorization_requested/finished/failed` events; revocation
     records `mail_consent_revoked`. No account identity, token, credential path, OAuth output, or
     upstream exception enters those events or API responses. If final evidence is lost after
     activation, Quarterdeck rolls activation back to false.
-13. Child output is bounded to 1 MiB and the process group is killed on timeout or overflow.
+14. Child output is bounded to 1 MiB and the process group is killed on timeout or overflow.
 
 ## Consequences
 

@@ -15,6 +15,7 @@ from quarterdeck.console.schemas import (
     ConfirmRequest,
     ExecutionState,
     MailAuthorizationRequest,
+    MailOAuthClientRequest,
     PlanRequest,
     TaskPlan,
     TelegramConfigureRequest,
@@ -30,6 +31,7 @@ from quarterdeck.console.service import (
     EXECUTION_REMOTE_FAILED_DETAIL,
     EXECUTION_STATUS_UNAVAILABLE_DETAIL,
     MAIL_AUTHORIZATION_FAILURE,
+    MAIL_OAUTH_CLIENT_REJECTED,
     MAIL_SUMMARY_FAILURE,
     PLAN_GENERATION_FAILED,
     PLAN_GENERATION_FAILED_DETAIL,
@@ -776,6 +778,55 @@ def test_mail_authorization_failure_is_fixed_and_never_activates(monkeypatch, co
     assert hostile not in encoded
     assert '"reason": "oauth_or_activation_failed"' in encoded
     assert service.settings.mail.enabled is False
+
+
+def test_mail_oauth_client_import_is_audited_without_secret_material(
+    monkeypatch, console_env
+):
+    _, service, _, _ = console_env
+    private_json = '{"installed":{"client_secret":"private-oauth-value"}}'
+    captured: list[str] = []
+    monkeypatch.setattr(
+        "quarterdeck.console.service.save_oauth_client",
+        lambda raw: captured.append(raw),
+    )
+
+    result = service.configure_mail_oauth_client(
+        MailOAuthClientRequest(
+            client_json=private_json,
+            private_storage_acknowledged=True,
+        )
+    )
+
+    assert result == {"configured": True}
+    assert captured == [private_json]
+    encoded = json.dumps(service.ledger.read_all(), ensure_ascii=False)
+    assert "private-oauth-value" not in encoded
+    assert [event["kind"] for event in service.ledger.read_all()] == [
+        "mail_oauth_client_import_requested",
+        "mail_oauth_client_import_finished",
+    ]
+
+
+def test_mail_oauth_client_import_returns_fixed_rejection(monkeypatch, console_env):
+    _, service, _, _ = console_env
+    hostile = "private-client-secret /private/path"
+    monkeypatch.setattr(
+        "quarterdeck.console.service.save_oauth_client",
+        lambda raw: (_ for _ in ()).throw(ValueError(f"rejected {raw}")),
+    )
+
+    with pytest.raises(ConsoleConflict, match=f"^{MAIL_OAUTH_CLIENT_REJECTED}$"):
+        service.configure_mail_oauth_client(
+            MailOAuthClientRequest(
+                client_json=hostile,
+                private_storage_acknowledged=True,
+            )
+        )
+
+    encoded = json.dumps(service.ledger.read_all(), ensure_ascii=False)
+    assert hostile not in encoded
+    assert '"reason": "client_rejected"' in encoded
 
 
 def test_mail_disable_revokes_future_model_access_even_when_audit_write_fails(
@@ -1541,12 +1592,19 @@ def test_mail_authorization_http_requires_both_explicit_acknowledgements(
             "enabled": False,
             "available": True,
             "authenticated": False,
+            "oauth_client_ready": False,
+            "oauth_client_issue": "missing",
             "model_metadata_consent": False,
             "ready": False,
             "oauth_scope": "gmail.readonly",
             "metadata_fields": ["from", "subject", "date", "message_id"],
             "privacy": "metadata_only",
         },
+    )
+    monkeypatch.setattr(
+        service,
+        "configure_mail_oauth_client",
+        lambda request: {"configured": True},
     )
     with TestClient(
         create_app(settings, service=service),
@@ -1562,6 +1620,29 @@ def test_mail_authorization_http_requires_both_explicit_acknowledgements(
             "date",
             "message_id",
         ]
+        assert status_response.json()["oauth_client_issue"] == "missing"
+
+        private_client = '{"installed":{"client_secret":"private-http-value"}}'
+        client_denied = client.post(
+            "/api/v1/mail-authorization/client",
+            json={
+                "client_json": private_client,
+                "private_storage_acknowledged": False,
+            },
+            headers=headers,
+        )
+        assert client_denied.status_code == 422
+        assert "private-http-value" not in client_denied.text
+        client_accepted = client.post(
+            "/api/v1/mail-authorization/client",
+            json={
+                "client_json": private_client,
+                "private_storage_acknowledged": True,
+            },
+            headers=headers,
+        )
+        assert client_accepted.json() == {"configured": True}
+        assert "private-http-value" not in client_accepted.text
 
         denied = client.post(
             "/api/v1/mail-authorization",

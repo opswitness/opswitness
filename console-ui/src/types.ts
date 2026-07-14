@@ -139,6 +139,8 @@ export type MailAuthorizationStatus = {
   enabled: boolean;
   available: boolean;
   authenticated: boolean;
+  oauth_client_ready: boolean;
+  oauth_client_issue: 'missing' | 'unsafe_permissions' | 'invalid' | null;
   model_metadata_consent: boolean;
   ready: boolean;
   oauth_scope: 'gmail.readonly';
