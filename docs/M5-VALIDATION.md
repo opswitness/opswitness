@@ -88,6 +88,9 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   Stranded `planning` and `dispatching` plans fail closed with fixed evidence because their AionUi,
   Paperclip, or workflow side effects cannot be proven absent. Concurrent confirmation and dispatch
   tests prove that one plan can create at most one remote execution path.
+- Planning, dispatch, runtime-refresh, and schedule-parser failures now cross the console boundary
+  only as fixed reason codes and fixed user guidance. Hostile exceptions containing private paths
+  and plan-like text are absent from both API records and append-only ledger events.
 - Initial confirmation granted session-level access only to `qd_workflow_start` and the read-only
   `qd_workflow_status`, never to the whole server. A later single **Run now** click required no
   confirmation. Later UI verification inadvertently activated the synthetic task twice through

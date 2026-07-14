@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 235 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
+- Full suite: 239 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
   gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -103,6 +103,9 @@ blocked by the current open gates below.
   `planning`/`dispatching` interruptions fail closed with fixed ledger evidence. Corrupt records
   prevent startup instead of disappearing from recovery; concurrent confirmation and dispatch
   regressions prove a single remote execution path.
+- The total console never persists or returns arbitrary AionUi, Paperclip, workflow, runtime, or
+  schedule-parser exception text. Fixed reason codes preserve audit semantics while hostile echo
+  tests prove that private paths and plan-like text do not cross into the API or ledger.
 - A fifth secret-free launchd template now makes that console an optional loopback KeepAlive
   service. `qd service exec console` reads the private configuration then `execve`s the fixed
   `qd console serve --port <configured>` argv. Doctor treats it like Paperclip: installed plist,

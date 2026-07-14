@@ -114,6 +114,7 @@ export type Bootstrap = {
     problem_jobs: number;
     missed_jobs: number;
     coverage_status: 'full' | 'partial' | 'none';
+    coverage_error?: string | null;
     fleet_healthy: boolean;
   };
   pending_approvals: number | null;

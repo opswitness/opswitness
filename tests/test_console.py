@@ -14,9 +14,18 @@ from quarterdeck.console.schemas import ConfirmRequest, ExecutionState, PlanRequ
 from quarterdeck.console.service import (
     DISPATCH_INTERRUPTED,
     DISPATCH_INTERRUPTED_DETAIL,
+    EXECUTION_DISPATCH_FAILED,
+    EXECUTION_DISPATCH_FAILED_DETAIL,
+    EXECUTION_PLAN_INVALID,
+    EXECUTION_PLAN_INVALID_DETAIL,
+    EXECUTION_REMOTE_FAILED_DETAIL,
+    EXECUTION_STATUS_UNAVAILABLE_DETAIL,
     MAIL_SUMMARY_FAILURE,
+    PLAN_GENERATION_FAILED,
+    PLAN_GENERATION_FAILED_DETAIL,
     PLANNING_INTERRUPTED,
     PLANNING_INTERRUPTED_DETAIL,
+    SCHEDULE_CONFIGURATION_INVALID_DETAIL,
     ConsoleConflict,
     ConsoleService,
     ConsoleUnavailable,
@@ -391,12 +400,15 @@ def test_plan_hash_binds_objective_constraints_workspace_and_dispatch(console_en
     service.store.mutate(second_ready.plan_id, alter_constraints)
     failed = service.dispatch_plan(second_ready.plan_id)
     assert failed.status == "failed"
-    assert failed.error == "confirmed plan inputs changed before dispatch"
+    assert failed.error == EXECUTION_PLAN_INVALID_DETAIL
     assert paperclip.created == 0
     assert aion.dispatched == 0
     assert "task_execution_requested" not in [
         event["kind"] for event in service.ledger.read_all() if event["run_id"] == second.plan_id
     ]
+    failure = service.ledger.read_all()[-1]
+    assert failure["kind"] == "task_execution_failed"
+    assert failure["payload"]["reason"] == EXECUTION_PLAN_INVALID
 
 
 def test_execution_completion_is_explicitly_unverified(console_env):
@@ -424,6 +436,94 @@ def test_audit_failure_prevents_planning(monkeypatch, console_env):
     with pytest.raises(ConsoleUnavailable, match="audit evidence unavailable"):
         service.request_plan(PlanRequest(objective="不应访问模型"))
     assert aion.generated == 0
+
+
+def test_planning_failure_never_persists_or_returns_third_party_error_text(
+    monkeypatch, console_env
+):
+    _, service, aion, _ = console_env
+    hostile = "private planning echo from /Users/private/research"
+    requested = service.request_plan(PlanRequest(objective="私有规划目标"))
+
+    def planning_failed(*args, **kwargs):
+        del args, kwargs
+        raise AionUiError(hostile)
+
+    monkeypatch.setattr(aion, "generate_plan", planning_failed)
+    failed = service.draft_plan(requested.plan_id)
+    assert failed.status == "failed"
+    assert failed.error == PLAN_GENERATION_FAILED_DETAIL
+    encoded = json.dumps(service.ledger.read_all(), ensure_ascii=False)
+    assert hostile not in encoded
+    assert f'"reason": "{PLAN_GENERATION_FAILED}"' in encoded
+
+
+def test_dispatch_failure_never_persists_or_returns_third_party_error_text(
+    monkeypatch, console_env
+):
+    _, service, _, paperclip = console_env
+    hostile = "private dispatch echo from /Users/private/workspace"
+    requested = service.request_plan(PlanRequest(objective="私有派发目标"))
+    ready = service.draft_plan(requested.plan_id)
+    service.confirm_plan(
+        ready.plan_id,
+        ConfirmRequest(plan_sha256=str(ready.plan_sha256), confirmed=True),
+    )
+
+    def dispatch_failed():
+        raise PaperclipError(hostile)
+
+    monkeypatch.setattr(paperclip, "list_issues", dispatch_failed)
+    failed = service.dispatch_plan(ready.plan_id)
+    assert failed.status == "failed"
+    assert failed.error == EXECUTION_DISPATCH_FAILED_DETAIL
+    assert failed.execution is not None
+    assert failed.execution.error == EXECUTION_DISPATCH_FAILED_DETAIL
+    encoded = json.dumps(service.ledger.read_all(), ensure_ascii=False)
+    assert hostile not in encoded
+    assert f'"reason": "{EXECUTION_DISPATCH_FAILED}"' in encoded
+
+
+def test_execution_refresh_contains_remote_failure_and_status_errors(monkeypatch, console_env):
+    _, service, aion, _ = console_env
+    hostile = "private runtime echo from /Users/private/output"
+    requested = service.request_plan(PlanRequest(objective="私有运行目标"))
+    ready = service.draft_plan(requested.plan_id)
+    service.confirm_plan(
+        ready.plan_id,
+        ConfirmRequest(plan_sha256=str(ready.plan_sha256), confirmed=True),
+    )
+    service.dispatch_plan(ready.plan_id)
+    monkeypatch.setattr(
+        aion,
+        "execution_snapshot",
+        lambda *args: {"status": "failed", "error": hostile},
+    )
+    failed = service.refresh_execution(ready.plan_id)
+    assert failed.status == "failed"
+    assert failed.execution is not None
+    assert failed.execution.error == EXECUTION_REMOTE_FAILED_DETAIL
+    assert hostile not in json.dumps(failed.model_dump(mode="json"), ensure_ascii=False)
+    assert hostile not in json.dumps(service.ledger.read_all(), ensure_ascii=False)
+
+    second = service.request_plan(PlanRequest(objective="第二个私有运行目标"))
+    second_ready = service.draft_plan(second.plan_id)
+    service.confirm_plan(
+        second_ready.plan_id,
+        ConfirmRequest(plan_sha256=str(second_ready.plan_sha256), confirmed=True),
+    )
+    service.dispatch_plan(second_ready.plan_id)
+
+    def status_failed(*args):
+        del args
+        raise AionUiError(hostile)
+
+    monkeypatch.setattr(aion, "execution_snapshot", status_failed)
+    unavailable = service.refresh_execution(second_ready.plan_id)
+    assert unavailable.status == "running"
+    assert unavailable.execution is not None
+    assert unavailable.execution.error == EXECUTION_STATUS_UNAVAILABLE_DETAIL
+    assert hostile not in json.dumps(unavailable.model_dump(mode="json"), ensure_ascii=False)
 
 
 def test_mail_summary_keeps_metadata_and_summary_out_of_ledger(monkeypatch, console_env):
@@ -598,6 +698,7 @@ def test_console_fleet_health_cannot_treat_success_as_watchdog_coverage():
         "problem_jobs": 1,
         "missed_jobs": 0,
         "coverage_status": "partial",
+        "coverage_error": None,
         "fleet_healthy": False,
     }
 
@@ -678,6 +779,26 @@ def test_console_dashboard_never_reports_zero_when_approvals_are_unavailable(
     assert result["approvals_available"] is False
     assert result["integrations"]["paperclip"]["status"] == "attention"
     assert result["integrations"]["paperclip"]["detail"] == "审批状态不可用"
+
+
+def test_console_dashboard_contains_schedule_parser_errors(monkeypatch, console_env):
+    _, service, _, _ = console_env
+    hostile = "private schedule parser echo from /Users/private/config.yaml"
+
+    def invalid_schedules(*args, **kwargs):
+        del args, kwargs
+        raise ValueError(hostile)
+
+    monkeypatch.setattr(
+        "quarterdeck.console.service.load_effective_schedules",
+        invalid_schedules,
+    )
+    result = service.dashboard()
+    assert result["fleet"]["coverage_status"] == "none"
+    assert result["fleet"]["fleet_healthy"] is False
+    encoded = json.dumps(result, ensure_ascii=False)
+    assert hostile not in encoded
+    assert SCHEDULE_CONFIGURATION_INVALID_DETAIL in encoded
 
 
 def test_console_requires_csrf_and_serves_built_frontend(console_env, monkeypatch):

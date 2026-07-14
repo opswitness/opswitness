@@ -33,7 +33,6 @@ from quarterdeck.ledger import Ledger
 from quarterdeck.mail import check_mail, mail_status
 from quarterdeck.notify import alert
 from quarterdeck.paperclip import PaperclipClient, PaperclipError
-from quarterdeck.redact import redact_text
 from quarterdeck.workflows import start_workflow, workflow_catalog, workflow_status
 from quarterdeck.watchdog import check as watchdog_check
 
@@ -48,6 +47,24 @@ class ConsoleUnavailable(RuntimeError):
 
 PaperclipFactory = Callable[[], PaperclipClient]
 MAIL_SUMMARY_FAILURE = "mail summary failed; run qd mail status locally"
+PLAN_GENERATION_FAILED = "plan_generation_failed"
+PLAN_GENERATION_FAILED_DETAIL = "Planning failed; inspect AionUi locally and create a new plan."
+EXECUTION_PLAN_INVALID = "execution_plan_invalid"
+EXECUTION_PLAN_INVALID_DETAIL = "Confirmed plan integrity failed; replan before dispatch."
+EXECUTION_DISPATCH_FAILED = "execution_dispatch_failed"
+EXECUTION_DISPATCH_FAILED_DETAIL = (
+    "Execution dispatch failed; inspect Paperclip and AionUi before replanning."
+)
+EXECUTION_REMOTE_FAILED_DETAIL = "Execution reported failure; inspect AionUi or workflow evidence."
+EXECUTION_STATUS_UNAVAILABLE_DETAIL = (
+    "Execution status is temporarily unavailable; retry from the console."
+)
+EXECUTION_IDENTIFIERS_MISSING_DETAIL = (
+    "Execution identifiers are incomplete; inspect local evidence before replanning."
+)
+SCHEDULE_CONFIGURATION_INVALID_DETAIL = (
+    "schedule configuration is invalid; run qd init or qd watchdog locally"
+)
 PLANNING_INTERRUPTED = "planning_interrupted_by_restart"
 DISPATCH_INTERRUPTED = "execution_dispatch_interrupted"
 PLANNING_INTERRUPTED_DETAIL = "Planning was interrupted by a console restart; create a new plan."
@@ -59,10 +76,6 @@ DISPATCH_INTERRUPTED_DETAIL = (
 def _canonical_sha256(value: Any) -> str:
     payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode()).hexdigest()
-
-
-def _safe_error(exc: BaseException) -> str:
-    return redact_text(str(exc) or exc.__class__.__name__)[:500]
 
 
 def _mail_setup_detail(status: dict[str, Any]) -> str:
@@ -113,6 +126,7 @@ def _fleet_health(
         "problem_jobs": len(attention),
         "missed_jobs": len(missed),
         "coverage_status": coverage["status"],
+        "coverage_error": coverage_error,
         "fleet_healthy": bool(digest["healthy"] and pending_projection == 0),
     }
 
@@ -256,20 +270,19 @@ class ConsoleService:
                 return current
 
             return self.store.mutate(plan_id, ready)
-        except Exception as exc:
-            reason = _safe_error(exc)
+        except Exception:
             try:
                 self._append(
                     "task_plan_failed",
                     plan_id,
-                    {"schema_version": 1, "reason": reason},
+                    {"schema_version": 1, "reason": PLAN_GENERATION_FAILED},
                 )
             except ConsoleUnavailable:
                 alert(f"audit evidence lost after task planning failure plan={plan_id}")
 
             def failed(current: PlanRecord) -> PlanRecord:
                 current.status = "failed"
-                current.error = reason
+                current.error = PLAN_GENERATION_FAILED_DETAIL
                 return current
 
             return self.store.mutate(plan_id, failed)
@@ -400,7 +413,12 @@ class ConsoleService:
 
             return self.store.mutate(plan_id, running)
         except Exception as exc:
-            reason = _safe_error(exc)
+            if isinstance(exc, ConsoleConflict):
+                reason = EXECUTION_PLAN_INVALID
+                detail = EXECUTION_PLAN_INVALID_DETAIL
+            else:
+                reason = EXECUTION_DISPATCH_FAILED
+                detail = EXECUTION_DISPATCH_FAILED_DETAIL
             try:
                 self._append(
                     "task_execution_failed",
@@ -412,12 +430,12 @@ class ConsoleService:
 
             def failed(current: PlanRecord) -> PlanRecord:
                 current.status = "failed"
-                current.error = reason
+                current.error = detail
                 if current.execution is None and current.plan is not None:
                     current.execution = ExecutionState(kind=current.plan.execution_mode)
                 if current.execution is not None:
                     current.execution.status = "failed"
-                    current.execution.error = reason
+                    current.execution.error = detail
                 return current
 
             return self.store.mutate(plan_id, failed)
@@ -550,14 +568,14 @@ class ConsoleService:
                 )
                 next_status = str(snapshot.get("status", "running"))
                 if next_status == "failed":
-                    execution.error = _safe_error(
-                        RuntimeError(str(snapshot.get("error", "failed")))
-                    )
+                    execution.error = EXECUTION_REMOTE_FAILED_DETAIL
             else:
                 next_status = "failed"
-                execution.error = "execution identifiers are incomplete"
-        except (AionUiError, PaperclipError, OSError, ValueError) as exc:
-            execution.error = _safe_error(exc)
+                execution.error = EXECUTION_IDENTIFIERS_MISSING_DETAIL
+            if next_status == "failed" and execution.error is None:
+                execution.error = EXECUTION_REMOTE_FAILED_DETAIL
+        except (AionUiError, PaperclipError, OSError, ValueError):
+            execution.error = EXECUTION_STATUS_UNAVAILABLE_DETAIL
             return record
 
         def update(current: PlanRecord) -> PlanRecord:
@@ -686,8 +704,8 @@ class ConsoleService:
         coverage_error: str | None = None
         try:
             schedules = load_effective_schedules(config_dir())["schedules"]
-        except ValueError as exc:
-            coverage_error = _safe_error(exc)
+        except ValueError:
+            coverage_error = SCHEDULE_CONFIGURATION_INVALID_DETAIL
         health = _fleet_health(
             events,
             schedules,

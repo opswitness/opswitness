@@ -71,6 +71,9 @@ The ledger records `task_plan_requested`, `task_plan_drafted`, `task_plan_failed
 `task_plan_confirmed`, `task_execution_requested`, `task_execution_dispatched`,
 `task_execution_failed`, and `task_execution_finished`. Objective, constraints, full plan text,
 mail metadata, and generated mail summaries are not copied into ledger events.
+Planning and dispatch failures persist only fixed versioned reason codes; arbitrary AionUi,
+Paperclip, workflow, parser, path, or model exception text is neither returned by the API nor
+written to the ledger. Runtime failure and status-unavailable messages are fixed local guidance.
 
 The mail button remains disabled until the existing fixed-query Gmail readonly adapter, encrypted
 OAuth, and explicit model-metadata consent are all ready. A summary uses an ephemeral Plan Mode
@@ -85,6 +88,7 @@ team; only message count and summary hash enter the ledger.
 - CSP, frame denial, nosniff, no-referrer, and no-store headers;
 - private `0700` directories and atomic `0600` plan records;
 - no credentials in frontend state, plan prompts, Paperclip metadata, or ledger payloads.
+- no third-party exception text in plan records, dashboard state, or ledger payloads.
 
 Paperclip Web UI remains the sole approval-decision surface. The standalone Paperclip MCP remains
 unmounted in AionUi. Existing Quarterdeck gate and allowlist rules remain authoritative.

@@ -348,15 +348,17 @@ function Dashboard({
   onOpenPlan: (plan: PlanRecord) => void;
   onNewTask: () => void;
 }) {
-  const healthDetail = data.fleet.coverage_status === 'none'
-    ? '无 watchdog 覆盖'
-    : data.fleet.coverage_status === 'partial'
-      ? '覆盖不完整'
-      : data.fleet.problem_jobs
-        ? `${data.fleet.problem_jobs} 个需关注`
-        : data.fleet.pending_projection
-          ? '证据待投影'
-          : '完整覆盖';
+  const healthDetail = data.fleet.coverage_error
+    ? '配置无效'
+    : data.fleet.coverage_status === 'none'
+      ? '无 watchdog 覆盖'
+      : data.fleet.coverage_status === 'partial'
+        ? '覆盖不完整'
+        : data.fleet.problem_jobs
+          ? `${data.fleet.problem_jobs} 个需关注`
+          : data.fleet.pending_projection
+            ? '证据待投影'
+            : '完整覆盖';
   return (
     <div className="dashboard-layout">
       <section className="metric-strip" aria-label="系统摘要">
