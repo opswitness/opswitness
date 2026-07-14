@@ -55,10 +55,18 @@ class PlanStore:
         except FileNotFoundError as exc:
             raise PlanNotFound(f"unknown plan: {plan_id}") from exc
 
-    def list(self, limit: int = 50) -> list[PlanRecord]:
+    def list(
+        self,
+        limit: int = 50,
+        *,
+        exclude_ids: set[str] | None = None,
+    ) -> list[PlanRecord]:
         self._ensure()
+        excluded = exclude_ids or set()
         rows: list[PlanRecord] = []
         for path in sorted(self.plans_dir.glob("*.json"), reverse=True):
+            if path.stem in excluded:
+                continue
             if path.is_symlink():
                 continue
             try:

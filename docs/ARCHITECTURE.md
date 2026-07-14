@@ -110,7 +110,10 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
     AionUi execution team or allowlisted workflow can be created only after a human confirms
     the exact plan hash. Plan modification is append-only: a child version binds the immutable
     parent hash and a hashed change instruction, shows a structural diff, and requires a fresh
-    confirmation; it never edits the reviewed parent in place. Completion remains
+    confirmation; it never edits the reviewed parent in place. User-facing deletion is likewise
+    append-only: one `task_plan_deleted` tombstone hides an inert plan while its private record and
+    evidence remain intact. Active work cannot be deleted, and version parents require child-first
+    deletion. Completion remains
     `completed_unverified` until outcome evidence exists. See
     [ADR-0007](adr/0007-local-operator-console.md).
 11. **Notification setup is narrow, local, and evidence-first.** The console is not a generic

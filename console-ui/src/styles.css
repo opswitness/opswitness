@@ -865,9 +865,8 @@ button:disabled {
   padding: 0 18px;
 }
 
-.plan-table .table-head,
-.plan-table .table-row {
-  grid-template-columns: minmax(240px, 2fr) minmax(90px, 0.55fr) minmax(120px, 0.75fr) minmax(120px, 0.7fr) 18px;
+.plan-table .table-head {
+  grid-template-columns: minmax(240px, 2fr) minmax(90px, 0.55fr) minmax(120px, 0.75fr) minmax(120px, 0.7fr) 18px 46px;
 }
 
 .run-table .table-head,
@@ -902,6 +901,68 @@ button.table-row {
 
 button.table-row:hover {
   background: #fafbfa;
+}
+
+.plan-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) 46px;
+  align-items: center;
+  border-bottom: 1px solid #edf0ed;
+  background: var(--surface);
+}
+
+.plan-row:hover {
+  background: #fafbfa;
+}
+
+.plan-row:last-child {
+  border-bottom: 0;
+}
+
+.plan-row-main {
+  display: grid;
+  min-width: 0;
+  min-height: 64px;
+  cursor: pointer;
+  grid-template-columns: minmax(240px, 2fr) minmax(90px, 0.55fr) minmax(120px, 0.75fr) minmax(120px, 0.7fr) 18px;
+  align-items: center;
+  gap: 14px;
+  border: 0;
+  background: transparent;
+  padding: 0 4px 0 18px;
+  color: #4d5751;
+  font-size: 12px;
+  text-align: left;
+}
+
+.plan-row-main > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plan-row-main > span:not(.task-name-cell):not(.status-badge) {
+  white-space: nowrap;
+}
+
+.plan-delete-button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #89928d;
+}
+
+.plan-delete-button:hover:not(:disabled),
+.delete-icon-button:hover:not(:disabled) {
+  border-color: #dfaaa4;
+  background: var(--coral-soft);
+  color: #963e37;
 }
 
 .table-row:last-child {
@@ -1588,6 +1649,63 @@ button.table-row:hover {
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.drawer-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.delete-icon-button {
+  color: #8a625e;
+}
+
+.delete-plan-dialog {
+  width: min(460px, 100%);
+}
+
+.delete-plan-summary {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  border-left: 3px solid #c86c63;
+  background: var(--coral-soft);
+  padding: 12px 14px;
+  color: #8e3c35;
+}
+
+.delete-plan-summary > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.delete-plan-summary strong {
+  overflow: hidden;
+  color: #522d29;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.delete-plan-summary span,
+.delete-plan-copy {
+  color: #76534f;
+  font-size: 11px;
+}
+
+.delete-plan-copy {
+  margin: 0;
+  line-height: 1.65;
+}
+
+.delete-plan-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .step-track {
@@ -2592,14 +2710,22 @@ input::placeholder {
   }
 
   .plan-table .table-head,
-  .plan-table .table-row {
+  .plan-table .plan-row-main {
     grid-template-columns: minmax(0, 1fr) minmax(105px, auto) 16px;
+  }
+
+  .plan-table .table-head {
+    grid-template-columns: minmax(0, 1fr) minmax(105px, auto) 16px 40px;
+  }
+
+  .plan-row {
+    grid-template-columns: minmax(0, 1fr) 40px;
   }
 
   .plan-table .table-head span:nth-child(2),
   .plan-table .table-head span:nth-child(4),
-  .plan-table .table-row > span:nth-child(2),
-  .plan-table .table-row > span:nth-child(4) {
+  .plan-table .plan-row-main > span:nth-child(2),
+  .plan-table .plan-row-main > span:nth-child(4) {
     display: none;
   }
 

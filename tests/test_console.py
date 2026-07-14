@@ -21,6 +21,7 @@ from quarterdeck.console.app import create_app
 from quarterdeck.console.schemas import (
     ApprovalDecisionRequest,
     ConfirmRequest,
+    DeletePlanRequest,
     ExecutionState,
     MailAuthorizationRequest,
     MailOAuthClientRequest,
@@ -56,6 +57,7 @@ from quarterdeck.console.service import (
     _fleet_health,
     _mail_setup_detail,
 )
+from quarterdeck.console.store import PlanNotFound
 from quarterdeck.ledger import Ledger
 from quarterdeck.paperclip import PaperclipError
 
@@ -463,6 +465,98 @@ def test_plan_revision_http_facade_requires_csrf(console_env, monkeypatch):
         payload = accepted.json()
         assert payload["parent_plan_id"] == parent.plan_id
         assert payload["revision_number"] == 2
+
+
+def test_plan_delete_is_append_only_idempotent_and_hides_the_plan(console_env):
+    _, service, _, _ = console_env
+    requested = service.request_plan(PlanRequest(objective="删除任务测试"))
+    ready = service.draft_plan(requested.plan_id)
+    plan_path = service.store.plans_dir / f"{ready.plan_id}.json"
+    original_bytes = plan_path.read_bytes()
+
+    result = service.delete_plan(ready.plan_id, DeletePlanRequest(confirmed=True))
+    assert result["plan_id"] == ready.plan_id
+    assert result["deleted"] is True
+    assert result["deleted_at"]
+    assert result["evidence_event_id"]
+    assert plan_path.read_bytes() == original_bytes
+    assert service.store.get(ready.plan_id) == ready
+    assert service.list_plans() == []
+    with pytest.raises(PlanNotFound):
+        service.get_plan(ready.plan_id)
+
+    repeated = service.delete_plan(ready.plan_id, DeletePlanRequest(confirmed=True))
+    assert repeated == result
+    events = service.ledger.read_all()
+    assert [event["kind"] for event in events] == [
+        "task_plan_requested",
+        "task_plan_drafted",
+        "task_plan_deleted",
+    ]
+    deleted = events[-1]
+    assert deleted["payload"] == {
+        "schema_version": 1,
+        "source": "local_console",
+        "status": "ready",
+        "plan_sha256": ready.plan_sha256,
+        "parent_plan_id": None,
+        "revision_number": 1,
+    }
+
+
+def test_plan_delete_rejects_active_work_and_preserves_revision_order(console_env):
+    _, service, _, _ = console_env
+    active = service.request_plan(PlanRequest(objective="规划中的任务"))
+    with pytest.raises(ConsoleConflict, match="active plans"):
+        service.delete_plan(active.plan_id, DeletePlanRequest(confirmed=True))
+
+    requested = service.request_plan(PlanRequest(objective="有修改版的任务"))
+    parent = service.draft_plan(requested.plan_id)
+    child = service.request_plan_revision(
+        parent.plan_id,
+        RevisePlanRequest(instruction="生成第二版方案"),
+    )
+    child = service.draft_plan(child.plan_id)
+    with pytest.raises(ConsoleConflict, match="newer plan revisions"):
+        service.delete_plan(parent.plan_id, DeletePlanRequest(confirmed=True))
+
+    service.delete_plan(child.plan_id, DeletePlanRequest(confirmed=True))
+    next_child = service.request_plan_revision(
+        parent.plan_id,
+        RevisePlanRequest(instruction="删除第二版后生成新的修改版"),
+    )
+    assert next_child.revision_number == 3
+
+
+def test_plan_delete_http_facade_requires_csrf_and_confirmation(console_env, monkeypatch):
+    settings, service, _, _ = console_env
+    requested = service.request_plan(PlanRequest(objective="HTTP 删除测试"))
+    ready = service.draft_plan(requested.plan_id)
+    monkeypatch.setattr(service, "acquire_instance_lease", lambda: True)
+    monkeypatch.setattr(service, "recover_startup", lambda: {})
+    monkeypatch.setattr(service, "release_instance_lease", lambda: None)
+    app = create_app(settings, service=service)
+    csrf = app.state.csrf_token
+    path = f"/api/v1/plans/{ready.plan_id}"
+    with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+        denied = client.request("DELETE", path, json={"confirmed": True})
+        assert denied.status_code == 403
+        unconfirmed = client.request(
+            "DELETE",
+            path,
+            json={"confirmed": False},
+            headers={"X-QD-CSRF": csrf},
+        )
+        assert unconfirmed.status_code == 422
+        accepted = client.request(
+            "DELETE",
+            path,
+            json={"confirmed": True},
+            headers={"X-QD-CSRF": csrf},
+        )
+        assert accepted.status_code == 200
+        assert accepted.json()["deleted"] is True
+        assert client.get(path).status_code == 404
 
 
 def test_planning_has_no_execution_side_effect_before_confirmation(console_env):

@@ -117,6 +117,12 @@ class RevisePlanRequest(BaseModel):
         return self
 
 
+class DeletePlanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirmed: Literal[True]
+
+
 class ConfirmRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

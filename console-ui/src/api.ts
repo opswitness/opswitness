@@ -56,6 +56,18 @@ export function revisePlan(planId: string, instruction: string): Promise<PlanRec
   });
 }
 
+export function deletePlan(planId: string): Promise<{
+  plan_id: string;
+  deleted: true;
+  deleted_at: string;
+  evidence_event_id: string;
+}> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ confirmed: true }),
+  });
+}
+
 export function confirmPlan(planId: string, planSha256: string): Promise<PlanRecord> {
   return api(`/api/v1/plans/${encodeURIComponent(planId)}/confirm`, {
     method: 'POST',

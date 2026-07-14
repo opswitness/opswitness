@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 290 tests pass in three consecutive runs; ruff and mypy pass. DCO, worktree
+- Full suite: 293 tests pass in three consecutive runs; ruff and mypy pass. DCO, worktree
   gitleaks, and full-history gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -139,6 +139,14 @@ blocked by the current open gates below.
   visible while a local-only revision instruction enabled the Generate revision action; cancel
   restored the unchanged plan without an API request. Desktop and 390x844 mobile layouts had no
   horizontal overflow, and the browser console remained clean.
+- Task deletion is implemented as an idempotent append-only `task_plan_deleted` visibility
+  tombstone. The private plan file and all evidence remain byte-for-byte available; ordinary list,
+  direct-get, dashboard, and startup-recovery paths hide tombstoned plans. Only ready, failed, and
+  completed-unverified plans are eligible, while active work and parents with visible revisions
+  fail closed. Both task tables and the detail drawer expose an icon action behind an explicit
+  confirmation dialog. Source-console acceptance opened and cancelled that dialog without deleting
+  any real plan; the desktop layout and 390x844 mobile dialog had no horizontal overflow, all
+  controls remained visible, and the browser console stayed clean.
 - A real source-console acceptance submitted only the synthetic terse intent `算命师`. The first
   AionUi result failed the new brief contract, visibly moved into the repair phase, then returned a
   six-section Bazi demo brief with `DEMO-001`, deterministic `lunar-python`, knowledge-only AI

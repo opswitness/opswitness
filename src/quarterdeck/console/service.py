@@ -30,6 +30,7 @@ from quarterdeck.console.aionui import AionUiClient, AionUiError
 from quarterdeck.console.schemas import (
     ApprovalDecisionRequest,
     ConfirmRequest,
+    DeletePlanRequest,
     ExecutionState,
     MailAuthorizationJob,
     MailAuthorizationRequest,
@@ -108,11 +109,28 @@ EPHEMERAL_RECOVERY_UNAVAILABLE = (
 )
 PROVIDER_CONNECTION_FAILED = "AI account connection did not complete; try again."
 APPROVAL_DECISION_FAILED = "Approval decision could not be confirmed; refresh and retry."
+DELETABLE_PLAN_STATUSES = frozenset({"ready", "failed", "completed_unverified"})
 
 
 def _canonical_sha256(value: Any) -> str:
     payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _deleted_plan_events(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    deleted: dict[str, dict[str, Any]] = {}
+    for event in events:
+        payload = event.get("payload")
+        plan_id = event.get("run_id")
+        if (
+            event.get("kind") == "task_plan_deleted"
+            and isinstance(plan_id, str)
+            and isinstance(payload, dict)
+            and payload.get("schema_version") == 1
+            and payload.get("source") == "local_console"
+        ):
+            deleted[plan_id] = event
+    return deleted
 
 
 def _mail_setup_detail(status: dict[str, Any]) -> str:
@@ -697,13 +715,21 @@ class ConsoleService:
         request: RevisePlanRequest,
     ) -> PlanRecord:
         with self._plan_transition_lock:
+            deleted = _deleted_plan_events(self.ledger.read_all())
+            if parent_plan_id in deleted:
+                raise PlanNotFound(f"unknown plan: {parent_plan_id}")
             parent = self.store.get(parent_plan_id)
             if parent.status != "ready" or parent.plan is None or not parent.plan_sha256:
                 raise ConsoleConflict("only a ready plan can be revised")
             if parent.plan_sha256 != _execution_plan_sha(parent):
                 raise ConsoleConflict("parent plan integrity failed; create a new plan")
-            for child in self.store.list_all():
-                if child.parent_plan_id == parent_plan_id and child.status in {
+            children = [
+                child
+                for child in self.store.list_all()
+                if child.parent_plan_id == parent_plan_id
+            ]
+            for child in children:
+                if child.plan_id not in deleted and child.status in {
                     "planning",
                     "ready",
                     "confirmed",
@@ -715,7 +741,11 @@ class ConsoleService:
                     return child
             plan_id = new_ulid()
             instruction_sha = hashlib.sha256(request.instruction.encode()).hexdigest()
-            revision_number = parent.revision_number + 1
+            revision_number = max(
+                [parent.revision_number, *(child.revision_number for child in children)]
+            ) + 1
+            if revision_number > 100:
+                raise ConsoleConflict("plan revision limit reached; create a new plan")
             self._append(
                 "task_plan_revision_requested",
                 plan_id,
@@ -902,20 +932,67 @@ class ConsoleService:
             return current
 
         with self._plan_transition_lock:
+            deleted = _deleted_plan_events(self.ledger.read_all())
+            if plan_id in deleted:
+                raise PlanNotFound(f"unknown plan: {plan_id}")
             for child in self.store.list_all():
-                if child.parent_plan_id == plan_id and child.status in {
-                    "planning",
-                    "ready",
-                    "confirmed",
-                    "dispatching",
-                    "running",
-                    "awaiting_approval",
-                    "completed_unverified",
-                }:
+                if (
+                    child.plan_id not in deleted
+                    and child.parent_plan_id == plan_id
+                    and child.status
+                    in {
+                        "planning",
+                        "ready",
+                        "confirmed",
+                        "dispatching",
+                        "running",
+                        "awaiting_approval",
+                        "completed_unverified",
+                    }
+                ):
                     raise ConsoleConflict("this plan has a newer revision")
             record = self.store.mutate(plan_id, confirm)
         self._submit(self.dispatch_plan, plan_id)
         return record
+
+    def delete_plan(self, plan_id: str, request: DeletePlanRequest) -> dict[str, Any]:
+        del request
+        with self._plan_transition_lock:
+            events = self.ledger.read_all()
+            deleted = _deleted_plan_events(events)
+            if existing := deleted.get(plan_id):
+                return {
+                    "plan_id": plan_id,
+                    "deleted": True,
+                    "deleted_at": existing["ts"],
+                    "evidence_event_id": existing["event_id"],
+                }
+            record = self.store.get(plan_id)
+            if record.status not in DELETABLE_PLAN_STATUSES:
+                raise ConsoleConflict("active plans cannot be deleted")
+            if any(
+                child.plan_id not in deleted and child.parent_plan_id == plan_id
+                for child in self.store.list_all()
+            ):
+                raise ConsoleConflict("delete newer plan revisions first")
+            event = self._append(
+                "task_plan_deleted",
+                plan_id,
+                {
+                    "schema_version": 1,
+                    "source": "local_console",
+                    "status": record.status,
+                    "plan_sha256": record.plan_sha256,
+                    "parent_plan_id": record.parent_plan_id,
+                    "revision_number": record.revision_number,
+                },
+            )
+            return {
+                "plan_id": plan_id,
+                "deleted": True,
+                "deleted_at": event["ts"],
+                "evidence_event_id": event["event_id"],
+            }
 
     def dispatch_plan(self, plan_id: str) -> PlanRecord:
         try:
@@ -1054,7 +1131,10 @@ class ConsoleService:
             "confirmed_scheduled": 0,
             "active_refresh_scheduled": 0,
         }
+        deleted = _deleted_plan_events(self.ledger.read_all())
         for snapshot in self.store.list_all():
+            if snapshot.plan_id in deleted:
+                continue
             if snapshot.status == "planning":
                 if self._fail_interrupted_plan(
                     snapshot.plan_id,
@@ -1192,13 +1272,21 @@ class ConsoleService:
         return root
 
     def get_plan(self, plan_id: str, *, refresh: bool = True) -> PlanRecord:
+        if plan_id in _deleted_plan_events(self.ledger.read_all()):
+            raise PlanNotFound(f"unknown plan: {plan_id}")
         record = self.store.get(plan_id)
         if refresh and record.status in {"running", "awaiting_approval"}:
             return self.refresh_execution(plan_id)
         return record
 
-    def list_plans(self, limit: int = 30) -> list[PlanRecord]:
-        return self.store.list(limit)
+    def list_plans(
+        self,
+        limit: int = 30,
+        *,
+        events: list[dict[str, Any]] | None = None,
+    ) -> list[PlanRecord]:
+        snapshot = self.ledger.read_all() if events is None else events
+        return self.store.list(limit, exclude_ids=set(_deleted_plan_events(snapshot)))
 
     def refresh_execution(self, plan_id: str) -> PlanRecord:
         record = self.store.get(plan_id)
@@ -1772,7 +1860,9 @@ class ConsoleService:
             "approvals_available": approvals_available,
             "approvals": approval_cards,
             "workflows": workflows,
-            "plans": [row.model_dump(mode="json") for row in self.list_plans(12)],
+            "plans": [
+                row.model_dump(mode="json") for row in self.list_plans(12, events=events)
+            ],
             "recent_runs": recent_runs,
             "mail_ready": bool(mail.get("mcp_ready")),
         }

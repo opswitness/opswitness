@@ -16,6 +16,7 @@ from quarterdeck.config import Settings
 from quarterdeck.console.schemas import (
     ApprovalDecisionRequest,
     ConfirmRequest,
+    DeletePlanRequest,
     MailAuthorizationRequest,
     MailDisableRequest,
     MailOAuthClientRequest,
@@ -158,6 +159,15 @@ def create_app(
         del x_qd_csrf
         record = await run_in_threadpool(service.confirm_plan, plan_id, body)
         return record.model_dump(mode="json")
+
+    @app.delete("/api/v1/plans/{plan_id}")
+    async def delete_plan(
+        plan_id: str,
+        body: DeletePlanRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        return await run_in_threadpool(service.delete_plan, plan_id, body)
 
     @app.get("/api/v1/providers")
     async def providers() -> dict:

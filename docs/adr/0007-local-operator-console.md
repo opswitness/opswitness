@@ -98,6 +98,15 @@ the parent cannot be confirmed. The child receives a new execution-envelope hash
 fresh checkbox confirmation. **Start over** alone clears the current presentation and creates an
 unrelated root plan from a blank composer.
 
+**Delete task** is a visibility tombstone, not record destruction. It is allowed only for `ready`,
+`failed`, or `completed_unverified` plans. Planning, confirmed, dispatching, running, and
+approval-waiting work must first reach a terminal state; a parent with any visible child revision
+must be deleted child-first. Quarterdeck fsyncs one idempotent `task_plan_deleted` event containing
+only non-sensitive identity/hash metadata. The private plan file, execution evidence, artifacts,
+and governance records remain unchanged, while ordinary list/get/recovery paths fold the event and
+hide the plan. This makes a crash after deletion unambiguous and prevents the UI from becoming an
+evidence eraser.
+
 Planning progress is durable presentation state, not model reasoning. The backend reports only
 observable phases: queued/preparing, generating the brief and architecture, validating or repairing,
 and cleaning the ephemeral session. The UI combines those phases with elapsed time, a conservative
@@ -138,7 +147,7 @@ cleanup recovery does not replay planning or execution.
 ## Evidence and privacy
 
 The ledger records `task_plan_requested`, `task_plan_revision_requested`, `task_plan_drafted`, `task_plan_failed`,
-`task_plan_confirmed`, `task_execution_requested`, `task_execution_dispatched`,
+`task_plan_confirmed`, `task_plan_deleted`, `task_execution_requested`, `task_execution_dispatched`,
 `task_execution_failed`, `task_execution_finished`, `aion_ephemeral_recovery_started`,
 `aion_ephemeral_recovery_failed`, `aion_ephemeral_recovery_finished`,
 `mail_authorization_requested`, `mail_authorization_finished`, `mail_authorization_failed`, and

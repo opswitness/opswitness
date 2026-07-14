@@ -37,6 +37,11 @@ Plan Mode 临时 Team 在成功或失败后删除；若删除无法确认，规�
 节奏、审批、artifact 与风险的结构变化；上一版不可改写，有有效子版本时也不可再确认。
 “重新开始”才清空当前界面并创建无父版本的新任务。任何修改版都必须重新勾选确认。
 
+任务表和任务详情提供“删除任务”。该动作只对待确认、失败或已结束的任务开放，并在二次
+确认后写入 append-only `task_plan_deleted` 事件。任务随后从普通列表消失，但计划文件、
+执行证据和 artifact 不会被物理删除；运行中任务不能删除，有修改版的父任务必须从最新
+子版本开始删除。
+
 源码验收可直接运行 `qd console serve --open`。长期登录自启使用
 `qd service render console` 生成的 loopback-only KeepAlive plist，但必须在停掉所有 qd
 消费者的维护窗口内先升级稳定 uv tool；当前生产 canary 通过前不得为了安装总控制台而

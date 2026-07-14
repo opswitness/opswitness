@@ -12,6 +12,7 @@ import {
   ClipboardCheck,
   Clock3,
   Database,
+  Trash2,
   ExternalLink,
   FileUp,
   FileCheck2,
@@ -42,6 +43,7 @@ import {
   connectProvider,
   configureMailOAuthClient,
   configureTelegram,
+  deletePlan,
   disableTelegram,
   disableMail,
   decideApproval,
@@ -151,6 +153,7 @@ function App() {
   const [view, setView] = useState<View>('workspace');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activePlan, setActivePlan] = useState<PlanRecord | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PlanRecord | null>(null);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [mailJob, setMailJob] = useState<MailSummaryJob | null>(null);
   const [mailSetupOpen, setMailSetupOpen] = useState(false);
@@ -340,12 +343,18 @@ function App() {
                   onMail={async () => setMailJob(await requestMailSummary())}
                   onMailSetup={() => setMailSetupOpen(true)}
                   onOpenPlan={openPlan}
+                  onDeletePlan={setDeleteTarget}
                   onNewTask={openNewTask}
                   onOpenApprovals={() => changeView('approvals')}
                 />
               )}
               {view === 'tasks' && (
-                <TasksView plans={bootstrap.plans} onOpen={openPlan} onNew={openNewTask} />
+                <TasksView
+                  plans={bootstrap.plans}
+                  onOpen={openPlan}
+                  onDelete={setDeleteTarget}
+                  onNew={openNewTask}
+                />
               )}
               {view === 'approvals' && (
                 <ApprovalsView data={bootstrap} onChanged={refreshAfterIntegrationChange} />
@@ -368,6 +377,7 @@ function App() {
         open={drawerOpen}
         record={activePlan}
         previousPlan={activeParentPlan}
+        plans={bootstrap?.plans || []}
         onClose={() => setDrawerOpen(false)}
         onPlan={async (body) => {
           const record = await requestPlan(body);
@@ -380,7 +390,24 @@ function App() {
           if (!record.plan_sha256) throw new Error('方案哈希缺失');
           mergePlan(await confirmPlan(record.plan_id, record.plan_sha256));
         }}
+        onDelete={setDeleteTarget}
         onRestart={() => setActivePlan(null)}
+      />
+      <DeletePlanDialog
+        record={deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={async (record) => {
+          await deletePlan(record.plan_id);
+          setBootstrap((current) => current ? {
+            ...current,
+            plans: current.plans.filter((row) => row.plan_id !== record.plan_id),
+          } : current);
+          if (activePlan?.plan_id === record.plan_id) {
+            setActivePlan(null);
+            setDrawerOpen(false);
+          }
+          setDeleteTarget(null);
+        }}
       />
       <MailSetupDialog
         open={mailSetupOpen}
@@ -684,6 +711,7 @@ function Dashboard({
   onMail,
   onMailSetup,
   onOpenPlan,
+  onDeletePlan,
   onNewTask,
   onOpenApprovals,
 }: {
@@ -692,6 +720,7 @@ function Dashboard({
   onMail: () => Promise<void>;
   onMailSetup: () => void;
   onOpenPlan: (plan: PlanRecord) => void;
+  onDeletePlan: (plan: PlanRecord) => void;
   onNewTask: () => void;
   onOpenApprovals: () => void;
 }) {
@@ -784,7 +813,13 @@ function Dashboard({
           </div>
           <span className="count-label">{data.plans.length}</span>
         </div>
-        <PlanTable plans={data.plans.slice(0, 7)} onOpen={onOpenPlan} emptyAction={onNewTask} />
+        <PlanTable
+          plans={data.plans.slice(0, 7)}
+          allPlans={data.plans}
+          onOpen={onOpenPlan}
+          onDelete={onDeletePlan}
+          emptyAction={onNewTask}
+        />
       </section>
     </div>
   );
@@ -886,7 +921,17 @@ function MailSummary({
   );
 }
 
-function TasksView({ plans, onOpen, onNew }: { plans: PlanRecord[]; onOpen: (plan: PlanRecord) => void; onNew: () => void }) {
+function TasksView({
+  plans,
+  onOpen,
+  onDelete,
+  onNew,
+}: {
+  plans: PlanRecord[];
+  onOpen: (plan: PlanRecord) => void;
+  onDelete: (plan: PlanRecord) => void;
+  onNew: () => void;
+}) {
   return (
     <section className="panel full-panel">
       <div className="section-heading compact">
@@ -898,12 +943,30 @@ function TasksView({ plans, onOpen, onNew }: { plans: PlanRecord[]; onOpen: (pla
           <Plus size={16} />新建
         </button>
       </div>
-      <PlanTable plans={plans} onOpen={onOpen} emptyAction={onNew} />
+      <PlanTable
+        plans={plans}
+        allPlans={plans}
+        onOpen={onOpen}
+        onDelete={onDelete}
+        emptyAction={onNew}
+      />
     </section>
   );
 }
 
-function PlanTable({ plans, onOpen, emptyAction }: { plans: PlanRecord[]; onOpen: (plan: PlanRecord) => void; emptyAction: () => void }) {
+function PlanTable({
+  plans,
+  allPlans,
+  onOpen,
+  onDelete,
+  emptyAction,
+}: {
+  plans: PlanRecord[];
+  allPlans: PlanRecord[];
+  onOpen: (plan: PlanRecord) => void;
+  onDelete: (plan: PlanRecord) => void;
+  emptyAction: () => void;
+}) {
   if (!plans.length) {
     return (
       <div className="table-empty">
@@ -916,22 +979,55 @@ function PlanTable({ plans, onOpen, emptyAction }: { plans: PlanRecord[]; onOpen
   return (
     <div className="data-table plan-table" role="table">
       <div className="table-head" role="row">
-        <span>任务</span><span>架构</span><span>状态</span><span>更新时间</span><span />
+        <span>任务</span><span>架构</span><span>状态</span><span>更新时间</span><span /><span />
       </div>
-      {plans.map((record) => (
-        <button className="table-row" role="row" type="button" key={record.plan_id} onClick={() => onOpen(record)}>
-          <span className="task-name-cell">
-            <strong>{record.plan?.title || record.objective}</strong>
-            <small>{shortId(record.plan_id)}</small>
-          </span>
-          <span>{record.plan ? `${record.plan.agents.length} Agent` : '—'}</span>
-          <span><StatusBadge status={record.status} /></span>
-          <span>{formatTime(record.updated_at)}</span>
-          <ChevronRight size={17} />
-        </button>
-      ))}
+      {plans.map((record) => {
+        const title = record.plan?.title || record.objective;
+        const deleteBlocked = planDeleteBlockReason(record, allPlans);
+        return (
+          <div className="plan-row" role="row" key={record.plan_id}>
+            <button
+              className="plan-row-main"
+              type="button"
+              aria-label={`打开任务：${title}`}
+              onClick={() => onOpen(record)}
+            >
+              <span className="task-name-cell">
+                <strong>{title}</strong>
+                <small>{shortId(record.plan_id)}</small>
+              </span>
+              <span>{record.plan ? `${record.plan.agents.length} Agent` : '—'}</span>
+              <span><StatusBadge status={record.status} /></span>
+              <span>{formatTime(record.updated_at)}</span>
+              <ChevronRight size={17} />
+            </button>
+            <button
+              className="plan-delete-button"
+              type="button"
+              aria-label={`删除任务：${title}`}
+              title={deleteBlocked || '删除任务'}
+              disabled={Boolean(deleteBlocked)}
+              onClick={() => onDelete(record)}
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
+}
+
+function planDeleteBlockReason(record: PlanRecord, plans: PlanRecord[]): string {
+  if (plans.some((row) => row.parent_plan_id === record.plan_id)) {
+    return '请先删除这个任务的较新修改版';
+  }
+  if (!['ready', 'failed', 'completed_unverified'].includes(record.status)) {
+    return record.status === 'planning'
+      ? '规划中的任务暂不能删除'
+      : '任务正在执行或等待处理，暂不能删除';
+  }
+  return '';
 }
 
 function EvidenceView({ runs, data }: { runs: RunRecord[]; data: Bootstrap }) {
@@ -1749,19 +1845,23 @@ function TaskDrawer({
   open,
   record,
   previousPlan,
+  plans,
   onClose,
   onPlan,
   onRevise,
   onConfirm,
+  onDelete,
   onRestart,
 }: {
   open: boolean;
   record: PlanRecord | null;
   previousPlan: TaskPlan | null;
+  plans: PlanRecord[];
   onClose: () => void;
   onPlan: (body: { objective: string; constraints: string; workspace: string; preferred_cadence: string }) => Promise<void>;
   onRevise: (record: PlanRecord, instruction: string) => Promise<void>;
   onConfirm: (record: PlanRecord) => Promise<void>;
+  onDelete: (record: PlanRecord) => void;
   onRestart: () => void;
 }) {
   const [objective, setObjective] = useState('');
@@ -1788,6 +1888,7 @@ function TaskDrawer({
 
   if (!open) return null;
   const phase = !record ? 1 : record.status === 'planning' ? 1 : record.status === 'ready' ? 2 : 3;
+  const deleteBlocked = record ? planDeleteBlockReason(record, plans) : '';
   const submit = async () => {
     setSubmitting(true);
     setError('');
@@ -1830,7 +1931,21 @@ function TaskDrawer({
       <aside className="task-drawer">
         <div className="drawer-header">
           <div><span className="section-kicker">NEW TASK</span><h2>{record?.plan?.title || '创建任务'}</h2></div>
-          <button className="icon-button" type="button" title="关闭" onClick={onClose}><X size={19} /></button>
+          <div className="drawer-header-actions">
+            {record && (
+              <button
+                className="icon-button delete-icon-button"
+                type="button"
+                title={deleteBlocked || '删除任务'}
+                aria-label="删除任务"
+                disabled={Boolean(deleteBlocked)}
+                onClick={() => onDelete(record)}
+              >
+                <Trash2 size={17} />
+              </button>
+            )}
+            <button className="icon-button" type="button" title="关闭" onClick={onClose}><X size={19} /></button>
+          </div>
         </div>
         <StepTrack phase={phase} />
         <div className="drawer-body">
@@ -1916,6 +2031,60 @@ function TaskDrawer({
           </div>
         )}
       </aside>
+    </div>
+  );
+}
+
+function DeletePlanDialog({
+  record,
+  onClose,
+  onConfirm,
+}: {
+  record: PlanRecord | null;
+  onClose: () => void;
+  onConfirm: (record: PlanRecord) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  if (!record) return null;
+  const title = record.plan?.title || record.objective;
+  const submit = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await onConfirm(record);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '任务删除失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="modal-layer" role="dialog" aria-modal="true" aria-label="确认删除任务">
+      <button className="modal-backdrop" type="button" aria-label="关闭" onClick={() => !busy && onClose()} />
+      <section className="mail-setup-dialog delete-plan-dialog">
+        <header className="modal-header">
+          <div><span className="section-kicker">删除任务</span><h2>从任务列表移除？</h2></div>
+          <button className="icon-button" type="button" title="关闭" disabled={busy} onClick={onClose}><X size={19} /></button>
+        </header>
+        <div className="mail-setup-content">
+          <div className="delete-plan-summary">
+            <Trash2 size={20} />
+            <div><strong>{title}</strong><span>{shortId(record.plan_id)}</span></div>
+          </div>
+          <p className="delete-plan-copy">
+            任务会从工作台和任务列表中移除。原始规划与审计证据仍会保留，不会被物理删除。
+          </p>
+          {error && <InlineError text={error} />}
+          <div className="delete-plan-actions">
+            <button className="secondary-button" type="button" disabled={busy} onClick={onClose}>取消</button>
+            <button className="secondary-button danger-button" type="button" disabled={busy} onClick={() => void submit()}>
+              {busy ? <LoaderCircle size={16} className="spin" /> : <Trash2 size={16} />}
+              删除任务
+            </button>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
