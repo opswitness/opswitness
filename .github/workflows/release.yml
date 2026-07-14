@@ -4,15 +4,26 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
-permissions:
-  contents: write
-  actions: read
-  id-token: write
-  attestations: write
-  artifact-metadata: write
+permissions: {}
 
 jobs:
+  preflight:
+    permissions: {}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject unapproved public tag
+        if: startsWith(github.ref, 'refs/tags/') && vars.PUBLIC_RELEASE_APPROVED != 'true'
+        run: |
+          echo "PUBLIC_RELEASE_APPROVED=true is required before any tagged build or attestation."
+          exit 1
   build:
+    needs: preflight
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +43,7 @@ jobs:
           artifact-name: distribution-sbom.spdx.json
           upload-release-assets: false
       - name: Attest distributions
+        if: startsWith(github.ref, 'refs/tags/')
         uses: actions/attest@v4
         with:
           subject-path: "dist/*"
@@ -39,11 +51,6 @@ jobs:
         with:
           name: distributions
           path: dist/*
-      - name: Enforce public-release gate
-        if: startsWith(github.ref, 'refs/tags/') && vars.PUBLIC_RELEASE_APPROVED != 'true'
-        run: |
-          echo "PUBLIC_RELEASE_APPROVED=true is required after brand and security gates pass."
-          exit 1
       - name: Create GitHub release
         if: startsWith(github.ref, 'refs/tags/') && vars.PUBLIC_RELEASE_APPROVED == 'true'
         env:

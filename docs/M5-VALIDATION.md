@@ -14,6 +14,11 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   `PUBLIC_RELEASE_APPROVED` is exactly `true`.
   Its OIDC, attestations, and artifact-metadata permissions match the current official
   `actions/attest@v4` contract.
+- The approval check is an independent `preflight` job and the build job depends on it. An
+  unapproved tag therefore fails before checkout, archive creation, SBOM, attestation, artifact
+  upload, or release creation. Preflight has no token permissions; write/OIDC permissions belong
+  only to the build job. Workflow-dispatch rehearsals build and upload an Actions artifact for
+  inspection but neither attest nor create a release.
 - A local release audit found that Hatch's default sdist discovery could include an untracked
   `.claude/settings.local.json` and local skill files. No archive was published. The build now
   uses an explicit source allowlist, and both CI and release run `verify_distribution.py` before

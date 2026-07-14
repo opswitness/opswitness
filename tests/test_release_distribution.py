@@ -4,6 +4,7 @@ import tarfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 _SPEC = importlib.util.spec_from_file_location(
@@ -59,3 +60,22 @@ def test_sdist_rejects_non_file_entries(tmp_path):
 
     with pytest.raises(DistributionError, match="non-file entry"):
         verify_sdist(path, tracked=set(SDIST_REQUIRED))
+
+
+def test_release_tag_gate_precedes_build_and_attestation():
+    workflow = yaml.load(
+        (Path(__file__).parents[1] / ".github" / "workflows" / "release.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    jobs = workflow["jobs"]
+    preflight = jobs["preflight"]
+    build = jobs["build"]
+
+    assert build["needs"] == "preflight"
+    gate = preflight["steps"][0]
+    assert gate["name"] == "Reject unapproved public tag"
+    assert "PUBLIC_RELEASE_APPROVED" in gate["if"]
+    assert preflight["permissions"] == {}
+    attest = next(step for step in build["steps"] if step.get("uses") == "actions/attest@v4")
+    assert "refs/tags/" in attest["if"]
+    assert not any("public-release gate" in step.get("name", "").casefold() for step in build["steps"])
