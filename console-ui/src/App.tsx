@@ -348,16 +348,25 @@ function Dashboard({
   onOpenPlan: (plan: PlanRecord) => void;
   onNewTask: () => void;
 }) {
+  const healthDetail = data.fleet.coverage_status === 'none'
+    ? '无 watchdog 覆盖'
+    : data.fleet.coverage_status === 'partial'
+      ? '覆盖不完整'
+      : data.fleet.problem_jobs
+        ? `${data.fleet.problem_jobs} 个需关注`
+        : data.fleet.pending_projection
+          ? '证据待投影'
+          : '完整覆盖';
   return (
     <div className="dashboard-layout">
       <section className="metric-strip" aria-label="系统摘要">
         <Metric label="任务运行" value={String(data.fleet.runs)} detail={`${data.fleet.jobs} 个任务`} icon={Activity} />
         <Metric
-          label="健康任务"
-          value={`${data.fleet.healthy_jobs}/${data.fleet.jobs || 0}`}
-          detail={data.fleet.problem_jobs ? `${data.fleet.problem_jobs} 个需关注` : '无已知异常'}
+          label="健康监控"
+          value={`${data.fleet.healthy_jobs}/${data.fleet.monitored_jobs}`}
+          detail={healthDetail}
           icon={CheckCircle2}
-          tone={data.fleet.problem_jobs ? 'warning' : 'success'}
+          tone={data.fleet.fleet_healthy ? 'success' : 'warning'}
         />
         <Metric
           label="待审批"

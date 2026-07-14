@@ -7,12 +7,14 @@ import json
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
 import httpx
 
-from quarterdeck.config import Settings, resolve_api_key
+from quarterdeck.bootstrap import load_effective_schedules
+from quarterdeck.config import Settings, config_dir, resolve_api_key
 from quarterdeck.console.aionui import AionUiClient, AionUiError
 from quarterdeck.console.schemas import (
     ConfirmRequest,
@@ -24,6 +26,7 @@ from quarterdeck.console.schemas import (
     utc_now,
 )
 from quarterdeck.console.store import PlanNotFound, PlanStore
+from quarterdeck.digest import build_digest
 from quarterdeck.ids import new_ulid
 from quarterdeck.index import job_summary, query_runs, rebuild
 from quarterdeck.ledger import Ledger
@@ -32,6 +35,7 @@ from quarterdeck.notify import alert
 from quarterdeck.paperclip import PaperclipClient, PaperclipError
 from quarterdeck.redact import redact_text
 from quarterdeck.workflows import start_workflow, workflow_catalog, workflow_status
+from quarterdeck.watchdog import check as watchdog_check
 
 
 class ConsoleConflict(ValueError):
@@ -63,6 +67,47 @@ def _mail_setup_detail(status: dict[str, Any]) -> str:
     if "consent" in error or "授权" in error:
         return "待授权"
     return "待配置"
+
+
+def _fleet_health(
+    events: list[dict[str, Any]],
+    schedules: list[dict[str, Any]],
+    *,
+    now: datetime,
+    pending_projection: int,
+    coverage_error: str | None = None,
+) -> dict[str, Any]:
+    """Derive the console health badge from the same fail-closed fleet contract as digest."""
+    missed = watchdog_check(schedules, events, now) if schedules else []
+    digest = build_digest(
+        events,
+        now,
+        hours=24,
+        missed=missed,
+        schedules=schedules,
+        coverage_error=coverage_error,
+    )
+    coverage = digest["coverage"]
+    active = set(coverage["active_covered"])
+    attention = {str(item.get("job")) for item in [*digest["problems"], *missed] if item.get("job")}
+    for key in (
+        "observed_unregistered",
+        "observed_disabled",
+        "observed_unsupported",
+        "resurrected",
+    ):
+        attention.update(str(job) for job in coverage[key])
+    for item in digest["outcomes"]["items"]:
+        if item in digest["outcomes"]["problems"] or item["pending_signoff"]:
+            attention.add(str(item.get("job") or f"artifact:{item['event_id']}"))
+    return {
+        "monitored_jobs": len(active),
+        "healthy_jobs": len(active - attention),
+        "problem_jobs": len(attention),
+        "missed_jobs": len(missed),
+        "coverage_status": coverage["status"],
+        "fleet_healthy": bool(digest["healthy"] and pending_projection == 0),
+    }
 
 
 def _execution_plan_sha(record: PlanRecord, plan: TaskPlan | None = None) -> str:
@@ -545,9 +590,23 @@ class ConsoleService:
 
     def dashboard(self) -> dict[str, Any]:
         index_db = self.settings.ledger_dir.parent / "index.db"
-        info = rebuild(index_db, self.ledger)
+        events = self.ledger.read_all()
+        info = rebuild(index_db, self.ledger, events=events)
         jobs = job_summary(index_db)
         recent_runs = query_runs(index_db, limit=8)
+        schedules: list[dict[str, Any]] = []
+        coverage_error: str | None = None
+        try:
+            schedules = load_effective_schedules(config_dir())["schedules"]
+        except ValueError as exc:
+            coverage_error = _safe_error(exc)
+        health = _fleet_health(
+            events,
+            schedules,
+            now=datetime.now(UTC),
+            pending_projection=int(info["pending_projection"]),
+            coverage_error=coverage_error,
+        )
         integrations: dict[str, Any] = {}
         try:
             self.aion.health()
@@ -612,10 +671,7 @@ class ConsoleService:
             "fleet": {
                 **info,
                 "jobs": len(jobs),
-                "healthy_jobs": sum(1 for row in jobs if row.get("last_status") == "succeeded"),
-                "problem_jobs": sum(
-                    1 for row in jobs if row.get("last_status") not in {"succeeded", "running"}
-                ),
+                **health,
             },
             "pending_approvals": pending_approvals,
             "workflows": workflows,

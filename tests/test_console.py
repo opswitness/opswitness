@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from quarterdeck.console.service import (
     ConsoleConflict,
     ConsoleService,
     ConsoleUnavailable,
+    _fleet_health,
     _mail_setup_detail,
 )
 from quarterdeck.ledger import Ledger
@@ -307,6 +309,103 @@ def test_mail_summary_keeps_metadata_and_summary_out_of_ledger(monkeypatch, cons
     assert "summary_sha256" in encoded
 
 
+def _successful_run(job: str, run_id: str, started: datetime) -> list[dict]:
+    return [
+        {
+            "event_id": f"{run_id}-start",
+            "kind": "run_started",
+            "run_id": run_id,
+            "ts": started.isoformat(),
+            "payload": {"job": job},
+        },
+        {
+            "event_id": f"{run_id}-finish",
+            "kind": "run_finished",
+            "run_id": run_id,
+            "ts": (started + timedelta(seconds=1)).isoformat(),
+            "payload": {
+                "job": job,
+                "status": "succeeded",
+                "exit_code": 0,
+                "duration_s": 1.0,
+            },
+        },
+    ]
+
+
+def test_console_fleet_health_cannot_treat_success_as_watchdog_coverage():
+    now = datetime(2026, 7, 13, 18, tzinfo=UTC)
+    events = [
+        *_successful_run("managed", "RUN1", now - timedelta(minutes=10)),
+        *_successful_run("stray", "RUN2", now - timedelta(minutes=5)),
+    ]
+    result = _fleet_health(
+        events,
+        [{"job": "managed", "expected_interval_seconds": 3600, "grace_seconds": 60}],
+        now=now,
+        pending_projection=0,
+    )
+    assert result == {
+        "monitored_jobs": 1,
+        "healthy_jobs": 1,
+        "problem_jobs": 1,
+        "missed_jobs": 0,
+        "coverage_status": "partial",
+        "fleet_healthy": False,
+    }
+
+
+def test_console_fleet_health_fails_closed_without_active_schedules():
+    now = datetime(2026, 7, 13, 18, tzinfo=UTC)
+    result = _fleet_health(
+        _successful_run("stray", "RUN1", now - timedelta(minutes=5)),
+        [],
+        now=now,
+        pending_projection=0,
+    )
+    assert result["coverage_status"] == "none"
+    assert result["monitored_jobs"] == 0
+    assert result["healthy_jobs"] == 0
+    assert result["problem_jobs"] == 1
+    assert result["fleet_healthy"] is False
+
+
+def test_console_fleet_health_requires_zero_projection_backlog():
+    now = datetime(2026, 7, 13, 18, tzinfo=UTC)
+    result = _fleet_health(
+        _successful_run("managed", "RUN1", now - timedelta(minutes=5)),
+        [{"job": "managed", "expected_interval_seconds": 3600, "grace_seconds": 60}],
+        now=now,
+        pending_projection=2,
+    )
+    assert result["coverage_status"] == "full"
+    assert result["healthy_jobs"] == 1
+    assert result["problem_jobs"] == 0
+    assert result["fleet_healthy"] is False
+
+
+def test_console_dashboard_uses_one_authoritative_ledger_snapshot(monkeypatch, console_env):
+    _, service, _, _ = console_env
+    original_read = service.ledger.read_all
+    reads = 0
+
+    def counted_read():
+        nonlocal reads
+        reads += 1
+        return original_read()
+
+    class HealthyResponse:
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(service.ledger, "read_all", counted_read)
+    monkeypatch.setattr(
+        "quarterdeck.console.service.httpx.get", lambda *args, **kwargs: HealthyResponse()
+    )
+    service.dashboard()
+    assert reads == 1
+
+
 def test_console_requires_csrf_and_serves_built_frontend(console_env, monkeypatch):
     settings, service, _, _ = console_env
     monkeypatch.setattr(
@@ -320,8 +419,12 @@ def test_console_requires_csrf_and_serves_built_frontend(console_env, monkeypatc
                 "artifacts": 0,
                 "pending_projection": 0,
                 "jobs": 0,
+                "monitored_jobs": 0,
                 "healthy_jobs": 0,
                 "problem_jobs": 0,
+                "missed_jobs": 0,
+                "coverage_status": "none",
+                "fleet_healthy": False,
             },
             "pending_approvals": 0,
             "workflows": [],

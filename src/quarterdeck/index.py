@@ -47,9 +47,14 @@ CREATE INDEX IF NOT EXISTS artifact_outcomes_artifact_idx
 """
 
 
-def rebuild(db_path: Path, ledger: Ledger) -> dict[str, Any]:
+def rebuild(
+    db_path: Path,
+    ledger: Ledger,
+    *,
+    events: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Rebuild the index from the ledger. Returns {runs, pending_projection}."""
-    events = ledger.read_all()
+    events = ledger.read_all() if events is None else events
     db_path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(db_path)
     try:

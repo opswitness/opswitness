@@ -95,6 +95,13 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   artifact, risks, and plan hash. `确认并运行` was disabled by default, enabled only while the
   explicit confirmation checkbox was selected, and became disabled again when it was cleared;
   the plan was not dispatched. The browser console contained no warnings or errors.
+- The same acceptance exposed a trust bug in the dashboard: `healthy_jobs` counted every job whose
+  latest exit was successful, even when that job was not covered by an active schedule. The
+  console now derives health from the shared effective-schedule, watchdog, lifecycle, outcome,
+  and digest contract over one authoritative ledger snapshot. Regression tests cover no active
+  schedules, a successful but unregistered stray job, and projection backlog. The live dashboard
+  consequently reports `1/1 完整覆盖` for the sole monitored canary instead of the misleading
+  historical-run count `5/5`.
 - The acceptance used the repository virtual environment only. Production `~/.local/bin/qd` and
   every launchd service remained unchanged while the canary time gate continues to accumulate.
   The guarded agent references AionUi's versioned Node/ACP runtime, so every AionUi upgrade must

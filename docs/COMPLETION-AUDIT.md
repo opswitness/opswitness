@@ -35,6 +35,9 @@ remaining gates. [READINESS.md](READINESS.md) remains the single operational sna
   document had no horizontal overflow, the current four-agent plan exposed every planning field,
   and its dispatch button remained fail-closed unless the separate confirmation checkbox was
   actively selected. No plan was dispatched during this acceptance.
+- Total-console health now uses the same fail-closed coverage/watchdog/outcome rules as the digest
+  over one ledger snapshot. The live metric is `1/1 完整覆盖`; successful historical or on-demand
+  runs no longer inflate the number of actively monitored jobs.
 
 ## Safe remaining sequence
 

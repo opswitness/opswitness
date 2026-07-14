@@ -109,8 +109,12 @@ export type Bootstrap = {
     artifacts: number;
     pending_projection: number;
     jobs: number;
+    monitored_jobs: number;
     healthy_jobs: number;
     problem_jobs: number;
+    missed_jobs: number;
+    coverage_status: 'full' | 'partial' | 'none';
+    fleet_healthy: boolean;
   };
   pending_approvals: number;
   workflows: Workflow[];
