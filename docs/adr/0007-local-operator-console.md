@@ -26,8 +26,10 @@ It binds only to `127.0.0.1` and delegates through narrow local adapters:
 
 1. Read-only dashboard data comes from the local ledger/index, Paperclip health/approvals, AionUi
    health, and the metadata-only mail readiness check.
-2. A new task first creates an ephemeral AionUi Team in Plan Mode. The planner receives no tools
-   and must return a versioned strict JSON plan with at most five agents and exactly one lead.
+2. A new task first creates an ephemeral AionUi Team in Plan Mode inside a unique per-request
+   `0700` workspace. The planner receives no tools and must return a versioned strict JSON plan
+   with at most five agents and exactly one lead. Returning a result requires confirmed deletion
+   of both the temporary Team and its local workspace.
 3. Quarterdeck validates the plan, stores its full text only in a private local plan store, and
    appends request/plan hashes plus non-sensitive structure to the authoritative ledger.
 4. The review UI displays the exact `plan_sha256`, calculated over the objective, constraints,
@@ -68,6 +70,13 @@ Before recovery starts, the process holds a non-blocking exclusive `console.leas
 state directory. A second port or process therefore cannot inspect or mutate the same plan state;
 graceful shutdown waits for background work before releasing the lease.
 
+Per-request workspace cleanup covers normal completion and in-process exceptions, including a
+failure while creating the AionUi Team. A hard process or machine crash can still leave a local
+workspace and an orphaned remote Team because there is no completed cleanup transaction and the
+pinned AionUi API provides no durable idempotency/reconciliation contract for this lifecycle.
+Startup therefore treats interrupted planning as ambiguous and fails closed; it does not claim
+that crash-residue cleanup has been proven.
+
 ## Evidence and privacy
 
 The ledger records `task_plan_requested`, `task_plan_drafted`, `task_plan_failed`,
@@ -80,7 +89,9 @@ written to the ledger. Runtime failure and status-unavailable messages are fixed
 
 The mail button remains disabled until the existing fixed-query Gmail readonly adapter, encrypted
 OAuth, and explicit model-metadata consent are all ready. A summary uses an ephemeral Plan Mode
-team; only message count and summary hash enter the ledger.
+team and a unique private workspace; only message count and summary hash enter the ledger. Team or
+workspace cleanup failure rejects the summary instead of releasing potentially residue-backed
+output.
 
 ## Local security boundary
 
@@ -90,6 +101,7 @@ team; only message count and summary hash enter the ledger.
 - exact local Origin checks and JSON content-type enforcement;
 - CSP, frame denial, nosniff, no-referrer, and no-store headers;
 - private `0700` directories and atomic `0600` plan records;
+- unique `0700` AionUi workspaces per planning or mail request, removed together with the Team;
 - no credentials in frontend state, plan prompts, Paperclip metadata, or ledger payloads.
 - no third-party exception text in plan records, dashboard state, or ledger payloads.
 

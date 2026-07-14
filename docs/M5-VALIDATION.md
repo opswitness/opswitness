@@ -84,6 +84,11 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   cleanup error, never the upstream exception or email fields.
 - Plan drafting uses the same mandatory ephemeral-Team cleanup primitive. A valid model plan with
   a failed Team deletion is rejected before it can enter the user-confirmable `ready` state.
+- Planning and mail summarization now use distinct per-request `0700` workspaces instead of shared
+  directories. Focused tests prove unique paths, cleanup after success, cleanup when Team creation
+  fails, and fail-closed behavior when workspace removal cannot be confirmed. A hard process crash
+  may still leave a local workspace and an orphaned remote Team; startup rejects the ambiguous
+  planning record and does not claim crash-residue reconciliation.
 - Startup recovery atomically resumes only durable `confirmed` plans and refreshes active runs.
   Stranded `planning` and `dispatching` plans fail closed with fixed evidence because their AionUi,
   Paperclip, or workflow side effects cannot be proven absent. Concurrent confirmation and dispatch

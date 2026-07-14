@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -66,7 +69,11 @@ class AionUiClient:
             payload = response.json()
         except ValueError as exc:
             raise AionUiError(f"AionUi {method} {path} returned invalid JSON") from exc
-        if response.status_code >= 400 or not isinstance(payload, dict) or payload.get("success") is not True:
+        if (
+            response.status_code >= 400
+            or not isinstance(payload, dict)
+            or payload.get("success") is not True
+        ):
             raw = payload.get("error") or payload.get("msg") if isinstance(payload, dict) else None
             detail = str(raw or f"HTTP {response.status_code}")[:200]
             raise AionUiError(f"AionUi {method} {path} failed: {detail}")
@@ -107,9 +114,7 @@ class AionUiClient:
         try:
             self.delete_team(team_id)
         except (AionUiError, ValueError) as exc:
-            raise AionUiError(
-                f"AionUi {purpose} team cleanup could not be confirmed"
-            ) from exc
+            raise AionUiError(f"AionUi {purpose} team cleanup could not be confirmed") from exc
 
     def ensure_team(self, team_id: str) -> None:
         self._request("POST", f"/api/teams/{team_id}/session", timeout=45.0, json={})
@@ -133,9 +138,7 @@ class AionUiClient:
         return data if isinstance(data, dict) else {}
 
     def messages(self, conversation_id: str) -> list[dict[str, Any]]:
-        data = self._request(
-            "GET", f"/api/conversations/{conversation_id}/messages", timeout=5.0
-        )
+        data = self._request("GET", f"/api/conversations/{conversation_id}/messages", timeout=5.0)
         if isinstance(data, dict) and isinstance(data.get("items"), list):
             return [item for item in data["items"] if isinstance(item, dict)]
         if isinstance(data, list):
@@ -198,15 +201,56 @@ class AionUiClient:
             time.sleep(1.0)
         raise AionUiError(f"AionUi team response timed out after {timeout_seconds:g}s")
 
-    def _workspace(self, name: str) -> Path:
+    def _ephemeral_workspace(self, purpose: str, owner_id: str) -> Path:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", purpose) or not re.fullmatch(
+            r"[A-Za-z0-9_-]{1,64}", owner_id
+        ):
+            raise ValueError("invalid ephemeral workspace identity")
         root = self.config.state_dir.expanduser()
         if root.is_symlink():
             raise ValueError("console state directory must not be a symlink")
-        workspace = root / name
-        workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
+        ephemeral = root / "ephemeral"
+        if ephemeral.is_symlink():
+            raise ValueError("ephemeral workspace directory must not be a symlink")
+        ephemeral.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(root, 0o700)
+        os.chmod(ephemeral, 0o700)
+        workspace = Path(tempfile.mkdtemp(prefix=f"{purpose}-{owner_id}-", dir=ephemeral))
         os.chmod(workspace, 0o700)
         return workspace
+
+    def _remove_ephemeral_workspace(self, workspace: Path, purpose: str) -> None:
+        expected_parent = self.config.state_dir.expanduser() / "ephemeral"
+        try:
+            if workspace.parent != expected_parent or workspace.is_symlink():
+                raise ValueError("ephemeral workspace boundary changed")
+            shutil.rmtree(workspace)
+            if os.path.lexists(workspace):
+                raise OSError("ephemeral workspace still exists")
+        except (OSError, ValueError) as exc:
+            raise AionUiError(f"AionUi {purpose} workspace cleanup could not be confirmed") from exc
+
+    def _cleanup_ephemeral_session(
+        self,
+        team_id: str | None,
+        workspace: Path,
+        purpose: str,
+    ) -> None:
+        team_failure: AionUiError | None = None
+        workspace_failure: AionUiError | None = None
+        if team_id is not None:
+            try:
+                self._delete_ephemeral_team(team_id, purpose)
+            except AionUiError as exc:
+                team_failure = exc
+        try:
+            self._remove_ephemeral_workspace(workspace, purpose)
+        except AionUiError as exc:
+            workspace_failure = exc
+        if team_failure is not None:
+            raise team_failure
+        if workspace_failure is not None:
+            raise workspace_failure
 
     def generate_plan(
         self,
@@ -217,23 +261,27 @@ class AionUiClient:
         planner_id = self.config.planner_assistant_id
         assistants = self.list_assistants()
         if not any(
-            row.get("id") == planner_id and row.get("enabled") is True and row.get("team_selectable") is True
+            row.get("id") == planner_id
+            and row.get("enabled") is True
+            and row.get("team_selectable") is True
             for row in assistants
         ):
             raise AionUiError("configured planning assistant is not enabled and team-selectable")
-        team = self.create_team(
-            name=f"QD Plan {plan_id[-6:]}",
-            workspace=self._workspace("planner-workspace"),
-            agents=[
-                {
-                    "name": "Planner",
-                    "role": "lead",
-                    "model": "default",
-                    "assistant_id": planner_id,
-                }
-            ],
-        )
+        workspace = self._ephemeral_workspace("planning", plan_id)
+        team: dict[str, Any] | None = None
         try:
+            team = self.create_team(
+                name=f"QD Plan {plan_id[-6:]}",
+                workspace=workspace,
+                agents=[
+                    {
+                        "name": "Planner",
+                        "role": "lead",
+                        "model": "default",
+                        "assistant_id": planner_id,
+                    }
+                ],
+            )
             self.ensure_team(str(team["id"]))
             self.set_team_mode(str(team["id"]), "plan")
             prompt = _planning_prompt(request, workflow_catalog)
@@ -256,22 +304,28 @@ class AionUiClient:
                 _validate_workflow_choice(plan, workflow_catalog)
                 return plan
         finally:
-            self._delete_ephemeral_team(str(team["id"]), "planning")
+            self._cleanup_ephemeral_session(
+                str(team["id"]) if team is not None else None,
+                workspace,
+                "planning",
+            )
 
     def summarize_mail(self, job_id: str, messages: list[dict[str, str]]) -> str:
-        team = self.create_team(
-            name=f"QD Mail {job_id[-6:]}",
-            workspace=self._workspace("mail-workspace"),
-            agents=[
-                {
-                    "name": "Mail summarizer",
-                    "role": "lead",
-                    "model": "default",
-                    "assistant_id": self.config.planner_assistant_id,
-                }
-            ],
-        )
+        workspace = self._ephemeral_workspace("mail", job_id)
+        team: dict[str, Any] | None = None
         try:
+            team = self.create_team(
+                name=f"QD Mail {job_id[-6:]}",
+                workspace=workspace,
+                agents=[
+                    {
+                        "name": "Mail summarizer",
+                        "role": "lead",
+                        "model": "default",
+                        "assistant_id": self.config.planner_assistant_id,
+                    }
+                ],
+            )
             self.ensure_team(str(team["id"]))
             self.set_team_mode(str(team["id"]), "plan")
             prompt = (
@@ -288,7 +342,11 @@ class AionUiClient:
                 raise AionUiError("AionUi mail summary exceeded the response limit")
             return summary
         finally:
-            self._delete_ephemeral_team(str(team["id"]), "mail")
+            self._cleanup_ephemeral_session(
+                str(team["id"]) if team is not None else None,
+                workspace,
+                "mail",
+            )
 
     def dispatch_plan(
         self,
@@ -372,7 +430,10 @@ class AionUiClient:
                 return {"status": "failed", "error": f"AionUi team run {status}"}
             return {"status": "running"}
         has_response = any(
-            any(item.get("position") == "left" and _message_text(item) for item in self.messages(cid))
+            any(
+                item.get("position") == "left" and _message_text(item)
+                for item in self.messages(cid)
+            )
             for cid in conversation_ids
         )
         return {"status": "completed_unverified" if has_response else "queued"}

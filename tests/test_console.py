@@ -673,6 +673,115 @@ def test_aionui_planning_fails_when_ephemeral_team_cleanup_is_unconfirmed(monkey
         client.generate_plan("PLAN1", PlanRequest(objective="生成摘要"), [])
 
 
+def test_aionui_ephemeral_workspaces_are_unique_private_and_removed(monkeypatch, console_env):
+    settings, _, _, _ = console_env
+    client = AionUiClient(settings.console)
+    workspaces = []
+    deleted = []
+    monkeypatch.setattr(
+        client,
+        "list_assistants",
+        lambda: [
+            {
+                "id": settings.console.planner_assistant_id,
+                "enabled": True,
+                "team_selectable": True,
+            }
+        ],
+    )
+
+    def create_team(**kwargs):
+        workspace = Path(kwargs["workspace"])
+        assert workspace.exists()
+        assert workspace.stat().st_mode & 0o777 == 0o700
+        (workspace / "private-residue.txt").write_text("private", encoding="utf-8")
+        workspaces.append(workspace)
+        index = len(workspaces)
+        return {
+            "id": f"team-{index}",
+            "assistants": [{"role": "lead", "conversation_id": f"conversation-{index}"}],
+        }
+
+    monkeypatch.setattr(client, "create_team", create_team)
+    monkeypatch.setattr(client, "ensure_team", lambda team_id: None)
+    monkeypatch.setattr(client, "set_team_mode", lambda team_id, mode: None)
+    monkeypatch.setattr(
+        client,
+        "_run_and_wait",
+        lambda team, *args, **kwargs: (
+            _plan().model_dump_json() if team["id"] == "team-1" else "摘要"
+        ),
+    )
+    monkeypatch.setattr(client, "delete_team", lambda team_id: deleted.append(team_id))
+
+    client.generate_plan("PLAN1", PlanRequest(objective="生成摘要"), [])
+    assert client.summarize_mail("MAIL1", []) == "摘要"
+
+    assert len(workspaces) == 2
+    assert workspaces[0] != workspaces[1]
+    assert workspaces[0].name.startswith("planning-PLAN1-")
+    assert workspaces[1].name.startswith("mail-MAIL1-")
+    assert all(not workspace.exists() for workspace in workspaces)
+    assert deleted == ["team-1", "team-2"]
+    assert (settings.console.state_dir / "ephemeral").stat().st_mode & 0o777 == 0o700
+
+
+def test_aionui_team_creation_failure_removes_its_private_workspace(monkeypatch, console_env):
+    settings, _, _, _ = console_env
+    client = AionUiClient(settings.console)
+    workspaces = []
+    monkeypatch.setattr(
+        client,
+        "list_assistants",
+        lambda: [
+            {
+                "id": settings.console.planner_assistant_id,
+                "enabled": True,
+                "team_selectable": True,
+            }
+        ],
+    )
+
+    def creation_failed(**kwargs):
+        workspace = Path(kwargs["workspace"])
+        (workspace / "private-residue.txt").write_text("private", encoding="utf-8")
+        workspaces.append(workspace)
+        raise AionUiError("team creation failed")
+
+    monkeypatch.setattr(client, "create_team", creation_failed)
+    with pytest.raises(AionUiError, match="team creation failed"):
+        client.generate_plan("PLAN2", PlanRequest(objective="生成摘要"), [])
+    assert len(workspaces) == 1
+    assert not workspaces[0].exists()
+
+
+def test_aionui_workspace_cleanup_failure_rejects_result_after_team_delete(
+    monkeypatch, console_env
+):
+    settings, _, _, _ = console_env
+    client = AionUiClient(settings.console)
+    team = {
+        "id": "team-mail",
+        "assistants": [{"role": "lead", "conversation_id": "conversation-mail"}],
+    }
+    deleted = []
+    monkeypatch.setattr(client, "create_team", lambda **kwargs: team)
+    monkeypatch.setattr(client, "ensure_team", lambda team_id: None)
+    monkeypatch.setattr(client, "set_team_mode", lambda team_id, mode: None)
+    monkeypatch.setattr(client, "_run_and_wait", lambda *args, **kwargs: "摘要")
+    monkeypatch.setattr(client, "delete_team", lambda team_id: deleted.append(team_id))
+
+    def cleanup_failed(path):
+        del path
+        raise OSError("private workspace path")
+
+    monkeypatch.setattr("quarterdeck.console.aionui.shutil.rmtree", cleanup_failed)
+    with pytest.raises(AionUiError, match="mail workspace cleanup could not be confirmed") as exc:
+        client.summarize_mail("MAIL2", [])
+    assert "private workspace path" not in str(exc.value)
+    assert deleted == ["team-mail"]
+
+
 def _successful_run(job: str, run_id: str, started: datetime) -> list[dict]:
     return [
         {
