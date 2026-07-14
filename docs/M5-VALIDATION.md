@@ -14,6 +14,12 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   `PUBLIC_RELEASE_APPROVED` is exactly `true`.
   Its OIDC, attestations, and artifact-metadata permissions match the current official
   `actions/attest@v4` contract.
+- A local release audit found that Hatch's default sdist discovery could include an untracked
+  `.claude/settings.local.json` and local skill files. No archive was published. The build now
+  uses an explicit source allowlist, and both CI and release run `verify_distribution.py` before
+  hashes, SBOM, attestation, or upload. Apart from Hatch's tracked root `.gitignore`, the verifier
+  rejects hidden/private paths, archive links, path traversal, unexpected roots, untracked files,
+  and missing license/console assets.
 - `NOTICE`, `SECURITY.md`, and a secret-free synthetic fleet showcase are committed release
   inputs. The showcase covers wrapped execution, outage backlog, ordered replay,
   reconcile-without-repost, one-shot approval evidence, artifact eval/signoff, and the
@@ -25,7 +31,11 @@ Status: name-independent release engineering is ready; public release is **NO-GO
 
 ## Local evidence
 
-- Full-history DCO check: 33 commits verified at the time of this snapshot.
+- 2026-07-13 release-boundary rehearsal: rebuilt wheel and sdist pass the tracked-only verifier;
+  the sdist has 114 paths, exactly one documented hidden path (`.gitignore`), and zero private
+  path hits. Three regression tests prove a valid tracked archive passes while `.claude` and an
+  arbitrary untracked Python source file fail closed. No affected archive was published.
+- Full-history DCO check: all current non-merge commits are signed off.
 - Synthetic showcase: first gate `defer`, second gate `allow`, outage backlog 5, replay 5,
   second drain 0, final backlog 0, healthy digest.
 - Fresh isolated wheel installation: 0.06 seconds.

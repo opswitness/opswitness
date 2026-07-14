@@ -36,6 +36,31 @@ dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5", "mypy>=1.10", "respx>=0
 [project.scripts]
 qd = "quarterdeck.cli:app"
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/quarterdeck"]
+
+[tool.hatch.build.targets.sdist]
+ignore-vcs = true
+only-include = [
+  "src",
+  "console-ui",
+  "docs",
+  "examples",
+  "scripts",
+  "tests",
+  "README.md",
+  "LICENSE",
+  "NOTICE",
+  "SECURITY.md",
+  "CONTRIBUTING.md",
+  "pyproject.toml",
+]
+exclude = [
+  "**/__pycache__",
+  "*.pyc",
+  "/console-ui/node_modules",
+]
+
 [project.urls]
 Homepage = "https://github.com/tianyuzhou/quarterdeck"
 

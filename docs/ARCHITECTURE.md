@@ -187,7 +187,7 @@ paid users ultimately see the vertical workbench, not the generic operations sur
 | bootstrap (candidates, two-file model) | `src/quarterdeck/bootstrap.py` | ✅ P2 |
 | adopt (dry-run plist wrapping) | `src/quarterdeck/adopt.py` | ✅ P2 (`--apply` gated on install) |
 | MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ 11-tool ops + isolated 2-tool mail profile |
-| allowlisted workflow launcher | `src/quarterdeck/workflows.py`, `workflow_worker.py` | ✅ code + tests; live AionUi task pending |
+| allowlisted workflow launcher | `src/quarterdeck/workflows.py`, `workflow_worker.py` | ✅ code + tests + live AionUi one-click acceptance |
 | metadata-only mail monitor | `src/quarterdeck/mail.py` | ✅ code + tests; OAuth and AionUi schedule pending |
 | local operator console | `src/quarterdeck/console/`, `console-ui/` | ✅ dashboard + plan/confirm/dispatch + responsive UI + optional KeepAlive service; production install pending canary |
 | install doctor / secure services / disaster recovery | `src/quarterdeck/doctor.py`, `service.py`, `backup.py` | ✅ five secret-free templates + installed-command drift check; soak pending |

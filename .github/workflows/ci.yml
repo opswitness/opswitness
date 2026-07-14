@@ -31,6 +31,7 @@ jobs:
       - run: mypy src/quarterdeck
       - run: pytest -q
       - run: python -m build
+      - run: python scripts/verify_distribution.py dist
       - run: python scripts/build_manifest.py dist
       - run: python examples/showcase/run.py --output "${RUNNER_TEMP}/showcase"
   dco:

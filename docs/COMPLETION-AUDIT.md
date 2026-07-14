@@ -12,7 +12,7 @@ remaining gates. [READINESS.md](READINESS.md) remains the single operational sna
 | M2 permanent install and soak | Postgres/Paperclip/services installed; live matrix, recovery, doctor checks and canary ledger contract exist | In progress: elapsed canary, stable-tool upgrade, then seven-day soak |
 | M3 Claude gate | Two live defer/approval/resume/consume drills and 60-second recovery service | Complete for non-interactive `qd gated-claude` only |
 | M4 artifact/eval/signoff | Atomic CAS, ledger authority, live projection/reconciliation and restore evidence | Complete |
-| M5 open-source v0.1 | CI/release/SBOM/provenance code, showcase, wheel and first-run evidence exist | Blocked by brand decision and real Git remote/Actions |
+| M5 open-source v0.1 | CI/release/SBOM/provenance code, tracked-only distribution verification, showcase, wheel and first-run evidence exist | Blocked by brand decision and real Git remote/Actions |
 | M6 paid practitioner Pilot | Offer, privacy contract, technical boundary and success criteria exist | Blocked by written paid commitment/deposit; product code intentionally absent |
 | Local total console | Dashboard, Plan Mode architecture drafting, hash-bound confirmation, dispatch adapters, responsive UI and packaged assets | Complete in source; stable install/KeepAlive service waits for canary maintenance window |
 

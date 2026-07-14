@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 216 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
+- Full suite: 220 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
   gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -25,7 +25,7 @@ blocked by the current open gates below.
   unreconciled projection events. See [ADR-0006](adr/0006-append-only-soak-gates.md).
 - M1 install readiness is implemented without touching production: structured
   `qd doctor --json`; strict config/secrets permissions; secure `qd service exec`;
-  three M2 launchd templates; encrypted backup and isolated restore dry-runs.
+  five secret-free launchd templates; encrypted backup and isolated restore dry-runs.
 - `uv build` succeeds; the wheel was installed into an isolated `/tmp` tool root,
   `qd version` ran, and a packaged watchdog plist rendered and passed `plutil -lint`.
 - Permanent Paperclip/Postgres/launchd are installed. The previously installed `qd doctor` is
@@ -64,6 +64,11 @@ blocked by the current open gates below.
   mail MCP. The first-run local core
   clears the ten-minute target. Public release remains blocked by the brand and remote
   gates. Evidence: [M5-VALIDATION.md](M5-VALIDATION.md).
+- Release-input verification now fails closed before hashes, SBOM, attestation, or upload. It was
+  added after an unpublished local audit found Hatch's default sdist selection had included
+  untracked `.claude` workspace files. The rebuilt sdist contains 114 paths; only Hatch's tracked
+  root `.gitignore` is hidden, private-path hits are zero, and every regular input is checked
+  against `git ls-files`. Focused leak regressions and the real rebuilt archives pass.
 - The AionUi launch adapter is code-complete: a strict `0600` workflow allowlist, fixed absolute
   argv, no runtime parameters or shell, per-workflow concurrency lock, detached supervisor, and
   fsync dispatch barrier. The isolated complete showcase passed and the real manifest contains
