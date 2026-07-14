@@ -10,6 +10,7 @@ from quarterdeck.console.aionui import AionUiClient
 from quarterdeck.console.app import create_app
 from quarterdeck.console.schemas import ConfirmRequest, PlanRequest, TaskPlan
 from quarterdeck.console.service import (
+    MAIL_SUMMARY_FAILURE,
     ConsoleConflict,
     ConsoleService,
     ConsoleUnavailable,
@@ -308,6 +309,40 @@ def test_mail_summary_keeps_metadata_and_summary_out_of_ledger(monkeypatch, cons
     assert "private@example.com" not in encoded
     assert "今日有一封" not in encoded
     assert "summary_sha256" in encoded
+
+
+def test_mail_summary_failure_never_persists_or_returns_third_party_error_text(
+    monkeypatch, console_env
+):
+    _, service, aion, _ = console_env
+    monkeypatch.setattr(
+        "quarterdeck.console.service.check_mail",
+        lambda **kwargs: {
+            "ok": True,
+            "messages": [
+                {
+                    "message_id": "private-id",
+                    "from": "private@example.com",
+                    "subject": "private subject",
+                    "date": "today",
+                }
+            ],
+        },
+    )
+
+    def hostile_failure(job_id, messages):
+        del job_id, messages
+        raise RuntimeError("private subject private@example.com")
+
+    monkeypatch.setattr(aion, "summarize_mail", hostile_failure)
+    job = service.request_mail_summary()
+    failed = service.run_mail_summary(job.job_id)
+    assert failed.status == "failed"
+    assert failed.error == MAIL_SUMMARY_FAILURE
+    encoded = json.dumps(service.ledger.read_all(), ensure_ascii=False)
+    assert "private subject" not in encoded
+    assert "private@example.com" not in encoded
+    assert '"reason": "mail_summary_failed"' in encoded
 
 
 def _successful_run(job: str, run_id: str, started: datetime) -> list[dict]:

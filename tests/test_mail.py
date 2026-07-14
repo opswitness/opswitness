@@ -342,13 +342,14 @@ def test_check_mail_withholds_metadata_when_finished_evidence_is_lost(tmp_path, 
     assert "private@example.com" not in json.dumps(result)
 
 
-def test_mcp_mail_check_requires_explicit_model_metadata_consent(tmp_path, monkeypatch):
+@pytest.mark.parametrize("source", ["mcp", "console"])
+def test_model_mail_check_requires_explicit_metadata_consent(tmp_path, monkeypatch, source):
     settings = _settings(tmp_path, monkeypatch, model_metadata_consent=False)
 
     def forbidden_runner(argv: list[str], timeout: float) -> CommandResult:
         pytest.fail("gws must not run without explicit model metadata consent")
 
-    result = check_mail(source="mcp", settings=settings, runner=forbidden_runner)
+    result = check_mail(source=source, settings=settings, runner=forbidden_runner)
     assert result["ok"] is False
     assert result["error"] == "model metadata transmission consent is not configured"
     assert [event["kind"] for event in Ledger(settings.ledger_dir).read_all()] == [

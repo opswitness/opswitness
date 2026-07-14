@@ -107,6 +107,8 @@ mail:
 date、message_id；本地 ledger 只保存查询哈希和数量，不保存这些邮件字段。任何审计
 首写失败都禁止访问 Gmail；结束事件落盘失败则不向 AionUi 返回元数据。每次调用还会
 重新验证有效 token 和 `gmail.readonly`，发现任何 Gmail mutation scope 都拒绝执行。
+控制台摘要失败时也只写固定 `mail_summary_failed` 错误码并返回固定本地检查提示；模型、
+CLI 或第三方异常原文不会进入 ledger/UI，避免异常回显夹带邮件元数据。
 
 邮件必须使用另一个 Custom Assistant：名称 `邮件回复`，MCP **只启用**
 `quarterdeck-mail`。不要同时启用 `quarterdeck`；mail profile 结构上只有 status/check

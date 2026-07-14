@@ -75,6 +75,10 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   a separate conversation. The pinned
   `gws 0.22.5` binary is installed, but Gmail OAuth, metadata-transmission consent, and the daily
   task are intentionally absent; no mailbox was accessed during this validation.
+- Mail consent is enforced for both MCP and total-console sources before the Gmail command can
+  run. A hostile failure test makes the summarizer exception echo a private sender and subject;
+  neither reaches the returned job nor the ledger, which records only the fixed
+  `mail_summary_failed` reason code.
 - Initial confirmation granted session-level access only to `qd_workflow_start` and the read-only
   `qd_workflow_status`, never to the whole server. A later single **Run now** click required no
   confirmation. Later UI verification inadvertently activated the synthetic task twice through

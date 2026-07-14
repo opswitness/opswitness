@@ -47,6 +47,7 @@ class ConsoleUnavailable(RuntimeError):
 
 
 PaperclipFactory = Callable[[], PaperclipClient]
+MAIL_SUMMARY_FAILURE = "mail summary failed; run qd mail status locally"
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -560,13 +561,16 @@ class ConsoleService:
                 summary=summary,
                 message_count=len(messages),
             )
-        except Exception as exc:
-            reason = _safe_error(exc)
+        except Exception:
             try:
                 self._append(
                     "mail_summary_failed",
                     job_id,
-                    {"schema_version": 1, "reason": reason, "privacy": "metadata_only"},
+                    {
+                        "schema_version": 1,
+                        "reason": "mail_summary_failed",
+                        "privacy": "metadata_only",
+                    },
                 )
             except ConsoleUnavailable:
                 alert(f"audit evidence lost after mail summary failure job={job_id}")
@@ -575,7 +579,7 @@ class ConsoleService:
                 status="failed",
                 created_at=self._mail_jobs[job_id].created_at,
                 updated_at=utc_now(),
-                error=reason,
+                error=MAIL_SUMMARY_FAILURE,
             )
         with self._mail_lock:
             self._mail_jobs[job_id] = updated
