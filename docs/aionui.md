@@ -194,6 +194,10 @@ AionUi 2.1.33 会把内置 Claude Code 的 Scheduled Task 自动模式规范化�
   `workflow_launch_requested -> workflow_launch_dispatched -> run_started -> run_finished`，
   exit 0、`degraded=false`，随后两个 Paperclip comment projection ack 均已落盘。
 - 这次验收没有替换生产 `~/.local/bin/qd`，也没有修改任何 launchd service。
+- 解锁后的独立可见验收再次从任务详情页点击一次 **Run now**，生成
+  `01KXF2VC2NGNK7NFKEXWEBWZEY`。AionUi 显示 `succeeded`；账本独立核对为 exit 0、
+  0.327 秒、`degraded=false`，随后 `qd project` 返回 `pending=0`。因此按钮、MCP、后台
+  supervisor、权威账本与 Paperclip 投影这五段均已在同一次点击中闭环。
 
 这是启动意图，不是 M3 审批。工具调用中的高风险副作用仍由 Quarterdeck gate →
 Paperclip Web UI 审批；流程退出码也只证明 execution，业务完成必须看 artifact

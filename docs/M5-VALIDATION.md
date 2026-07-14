@@ -83,6 +83,18 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   `degraded=false`, and recorded the complete authoritative workflow event chain plus Paperclip
   acknowledgements; no production fleet job ran. The task remained `Permission = default` and
   AionUi recorded `last_status=ok`.
+- After the Mac was explicitly unlocked, a fresh operator-visible **Run now** acceptance on
+  2026-07-13 at 18:11 PDT produced `01KXF2VC2NGNK7NFKEXWEBWZEY`. AionUi reported `succeeded`;
+  the authoritative ledger independently folded the same run to exit 0 in 0.327 seconds with
+  `degraded=false`, and an immediate projector drain reported `pending=0`. This was the third
+  successful `workflow:quarterdeck-showcase` run and again executed no production fleet job.
+- The local total console was also exercised in a real browser against port 8765. At a 390x844
+  viewport the document width remained exactly 390 pixels with no overflowing element. At the
+  desktop viewport the dashboard exposed all four task columns and live AionUi/Paperclip/ledger
+  status. The existing four-agent plan rendered its objective, cadence, roles, phases, approval,
+  artifact, risks, and plan hash. `确认并运行` was disabled by default, enabled only while the
+  explicit confirmation checkbox was selected, and became disabled again when it was cleared;
+  the plan was not dispatched. The browser console contained no warnings or errors.
 - The acceptance used the repository virtual environment only. Production `~/.local/bin/qd` and
   every launchd service remained unchanged while the canary time gate continues to accumulate.
   The guarded agent references AionUi's versioned Node/ACP runtime, so every AionUi upgrade must

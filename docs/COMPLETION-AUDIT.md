@@ -1,6 +1,6 @@
 # Quarterdeck Completion Audit
 
-Snapshot: 2026-07-13 17:13 PDT. This document maps the approved M0-M6 plan to evidence and
+Snapshot: 2026-07-13 18:13 PDT. This document maps the approved M0-M6 plan to evidence and
 remaining gates. [READINESS.md](READINESS.md) remains the single operational snapshot.
 
 ## Requirement matrix
@@ -19,9 +19,11 @@ remaining gates. [READINESS.md](READINESS.md) remains the single operational sna
 ## Live evidence at this snapshot
 
 - Current-HEAD `qd soak status m2-canary --json`: `pending`; only blocker is
-  `minimum_duration`, with 79,822 seconds remaining at 17:13 PDT. The tracked job has one start,
+  `minimum_duration`, with 76,218 seconds remaining at 18:13 PDT. The tracked job has one start,
   one success, zero failures, and zero projection backlog since the reset contract.
-- Current-HEAD `qd status`: 12 total runs and zero pending projections.
+- Current-HEAD `qd status`: 13 total runs and zero pending projections. The third independently
+  clicked AionUi one-click workflow run (`01KXF2VC2NGNK7NFKEXWEBWZEY`) exited 0 without degraded
+  evidence.
 - Current-HEAD watchdog: all one active scheduled jobs within expectations.
 - Current-HEAD digest: green, complete coverage, zero missed runs; execution and outcome evidence
   remain separated.
@@ -29,6 +31,10 @@ remaining gates. [READINESS.md](READINESS.md) remains the single operational sna
   register-trigger all have latest exit code 0.
 - Current-HEAD doctor correctly returns non-green for one reason only: the stable installed qd
   lacks `soak` and `console`. The older installed doctor cannot detect its own drift.
+- Real-browser total-console acceptance passed at desktop and 390x844 mobile widths. The mobile
+  document had no horizontal overflow, the current four-agent plan exposed every planning field,
+  and its dispatch button remained fail-closed unless the separate confirmation checkbox was
+  actively selected. No plan was dispatched during this acceptance.
 
 ## Safe remaining sequence
 
