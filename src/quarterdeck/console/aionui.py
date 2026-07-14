@@ -266,6 +266,8 @@ class AionUiClient:
                 }
             ],
         )
+        summary = ""
+        cleanup_error: Exception | None = None
         try:
             self.ensure_team(str(team["id"]))
             self.set_team_mode(str(team["id"]), "plan")
@@ -281,12 +283,14 @@ class AionUiClient:
             )
             if len(summary) > 12000:
                 raise AionUiError("AionUi mail summary exceeded the response limit")
-            return summary
         finally:
             try:
                 self.delete_team(str(team["id"]))
-            except (AionUiError, ValueError):
-                pass
+            except (AionUiError, ValueError) as exc:
+                cleanup_error = exc
+        if cleanup_error is not None:
+            raise AionUiError("AionUi mail team cleanup could not be confirmed") from cleanup_error
+        return summary
 
     def dispatch_plan(
         self,

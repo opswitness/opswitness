@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from quarterdeck.config import Settings
-from quarterdeck.console.aionui import AionUiClient
+from quarterdeck.console.aionui import AionUiClient, AionUiError
 from quarterdeck.console.app import create_app
 from quarterdeck.console.schemas import ConfirmRequest, PlanRequest, TaskPlan
 from quarterdeck.console.service import (
@@ -343,6 +343,41 @@ def test_mail_summary_failure_never_persists_or_returns_third_party_error_text(
     assert "private subject" not in encoded
     assert "private@example.com" not in encoded
     assert '"reason": "mail_summary_failed"' in encoded
+
+
+def test_aionui_mail_summary_fails_when_ephemeral_team_cleanup_is_unconfirmed(
+    monkeypatch, console_env
+):
+    settings, _, _, _ = console_env
+    client = AionUiClient(settings.console)
+    team = {
+        "id": "team-private",
+        "assistants": [
+            {"role": "lead", "conversation_id": "conversation-private"}
+        ],
+    }
+    monkeypatch.setattr(client, "create_team", lambda **kwargs: team)
+    monkeypatch.setattr(client, "ensure_team", lambda team_id: None)
+    monkeypatch.setattr(client, "set_team_mode", lambda team_id, mode: None)
+    monkeypatch.setattr(client, "_run_and_wait", lambda *args, **kwargs: "摘要")
+
+    def cleanup_failed(team_id):
+        raise AionUiError("private subject leaked by upstream")
+
+    monkeypatch.setattr(client, "delete_team", cleanup_failed)
+    with pytest.raises(AionUiError, match="cleanup could not be confirmed") as exc:
+        client.summarize_mail(
+            "MAIL1",
+            [
+                {
+                    "message_id": "private-id",
+                    "from": "private@example.com",
+                    "subject": "private subject",
+                    "date": "today",
+                }
+            ],
+        )
+    assert "private subject" not in str(exc.value)
 
 
 def _successful_run(job: str, run_id: str, started: datetime) -> list[dict]:

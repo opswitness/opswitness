@@ -79,6 +79,9 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   run. A hostile failure test makes the summarizer exception echo a private sender and subject;
   neither reaches the returned job nor the ledger, which records only the fixed
   `mail_summary_failed` reason code.
+- Mail summarization now treats deletion of its temporary AionUi Team as part of success. A
+  simulated cleanup failure prevents the summary from being returned and exposes only a fixed
+  cleanup error, never the upstream exception or email fields.
 - Initial confirmation granted session-level access only to `qd_workflow_start` and the read-only
   `qd_workflow_status`, never to the whole server. A later single **Run now** click required no
   confirmation. Later UI verification inadvertently activated the synthetic task twice through

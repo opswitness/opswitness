@@ -109,6 +109,8 @@ date、message_id；本地 ledger 只保存查询哈希和数量，不保存这�
 重新验证有效 token 和 `gmail.readonly`，发现任何 Gmail mutation scope 都拒绝执行。
 控制台摘要失败时也只写固定 `mail_summary_failed` 错误码并返回固定本地检查提示；模型、
 CLI 或第三方异常原文不会进入 ledger/UI，避免异常回显夹带邮件元数据。
+用于摘要的临时 AionUi Team 必须成功删除后，摘要才会返回给总控制台；无法确认清理时
+整次任务按失败处理，不能把“已生成”冒充成“已安全完成”。
 
 邮件必须使用另一个 Custom Assistant：名称 `邮件回复`，MCP **只启用**
 `quarterdeck-mail`。不要同时启用 `quarterdeck`；mail profile 结构上只有 status/check
