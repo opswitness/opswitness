@@ -91,10 +91,11 @@ The ledger records `task_plan_requested`, `task_plan_drafted`, `task_plan_failed
 `task_execution_failed`, `task_execution_finished`, `aion_ephemeral_recovery_started`,
 `aion_ephemeral_recovery_failed`, `aion_ephemeral_recovery_finished`,
 `mail_authorization_requested`, `mail_authorization_finished`, `mail_authorization_failed`, and
-`mail_consent_revoked`. Objective, constraints, full plan text, workspace path, mail metadata,
-account identity, OAuth output, and generated mail summaries are not copied into ledger events;
-recovery stores only purpose, path hash, ID-presence booleans, fixed outcomes, and a fixed failure
-reason.
+`mail_consent_revoked`; Telegram setup records fixed `telegram_configuration_requested/finished/
+failed`, `telegram_test_requested/finished/failed`, and `telegram_disabled` transitions. Objective,
+constraints, full plan text, workspace path, mail metadata, account identity, OAuth output,
+Telegram token/chat ID, and generated mail summaries are not copied into ledger events; recovery
+stores only purpose, path hash, ID-presence booleans, fixed outcomes, and a fixed failure reason.
 Planning and dispatch failures persist only fixed versioned reason codes; arbitrary AionUi,
 Paperclip, workflow, parser, path, or model exception text is neither returned by the API nor
 written to the ledger. Runtime failure and status-unavailable messages are fixed local guidance.
@@ -107,6 +108,16 @@ Successful re-verification atomically activates the adapter without rewriting us
 the same dialog can revoke future access. A summary uses an ephemeral Plan Mode team and a unique
 private workspace; only message count and summary hash enter the ledger. Team or workspace cleanup
 failure rejects the summary instead of releasing potentially residue-backed output.
+
+Telegram setup is also local and explicit. Token and chat ID use password inputs and are cleared
+from frontend state after successful storage or whenever the dialog closes. The backend accepts them only with a literal-true
+private-storage acknowledgement, delegates validation and atomic merge to the existing `0600`
+`secrets.yaml` boundary, serializes configure/test/disable operations, and never returns either
+value. Sending a fixed test message requires a separate literal-true action acknowledgement and
+durable `telegram_test_requested` evidence before network access. Removing credentials is local
+and safety-first: future sends are disabled even if the final audit append is unavailable. Values
+provided by environment variables are reported as externally managed and cannot be overwritten or
+deleted by the console.
 
 ## Local security boundary
 

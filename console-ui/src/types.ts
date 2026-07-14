@@ -153,3 +153,8 @@ export type MailAuthorizationJob = {
   updated_at: string;
   error?: string | null;
 };
+
+export type TelegramSetupStatus = {
+  configured: boolean;
+  environment_controlled: boolean;
+};

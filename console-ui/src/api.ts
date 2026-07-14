@@ -4,6 +4,7 @@ import type {
   MailAuthorizationStatus,
   MailSummaryJob,
   PlanRecord,
+  TelegramSetupStatus,
 } from './types';
 
 let csrfToken = '';
@@ -82,6 +83,36 @@ export function getMailAuthorization(jobId: string): Promise<MailAuthorizationJo
 
 export function disableMail(): Promise<{ disabled: true }> {
   return api('/api/v1/mail-authorization/disable', {
+    method: 'POST',
+    body: JSON.stringify({ confirmed: true }),
+  });
+}
+
+export function getTelegramStatus(): Promise<TelegramSetupStatus> {
+  return api('/api/v1/telegram/status');
+}
+
+export function configureTelegram(body: {
+  bot_token: string;
+  chat_id: string;
+  storage_acknowledged: true;
+  replace_existing: boolean;
+}): Promise<{ configured: true }> {
+  return api('/api/v1/telegram/configure', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function testTelegram(): Promise<{ sent: true }> {
+  return api('/api/v1/telegram/test', {
+    method: 'POST',
+    body: JSON.stringify({ confirmed: true }),
+  });
+}
+
+export function disableTelegram(): Promise<{ disabled: true }> {
+  return api('/api/v1/telegram/disable', {
     method: 'POST',
     body: JSON.stringify({ confirmed: true }),
   });

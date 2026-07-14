@@ -104,6 +104,11 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
     AionUi execution team or allowlisted workflow can be created only after a human confirms
     the exact plan hash. Completion remains `completed_unverified` until outcome evidence
     exists. See [ADR-0007](adr/0007-local-operator-console.md).
+11. **Notification setup is narrow, local, and evidence-first.** The console is not a generic
+    secret editor. It accepts only Telegram token/chat ID into password fields, writes through the
+    existing `0600` secret boundary, serializes configuration changes, and exposes only a fixed
+    test message behind a separate confirmation. Credentials never enter ledger events or API
+    responses; environment-managed values cannot be replaced from the UI.
 
 ## Necessity and shrinkability
 
@@ -191,7 +196,7 @@ paid users ultimately see the vertical workbench, not the generic operations sur
 | MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ 11-tool ops + isolated 2-tool mail profile |
 | allowlisted workflow launcher | `src/quarterdeck/workflows.py`, `workflow_worker.py` | ✅ code + tests + live AionUi one-click acceptance |
 | metadata-only mail monitor | `src/quarterdeck/mail.py`, `console/`, `console-ui/` | ✅ adapter + setup/revoke UI; live OAuth and AionUi schedule pending |
-| local operator console | `src/quarterdeck/console/`, `console-ui/` | ✅ dashboard + plan/confirm/dispatch + responsive UI + optional KeepAlive service; production install pending canary |
+| local operator console | `src/quarterdeck/console/`, `console-ui/` | ✅ dashboard + plan/confirm/dispatch + Gmail/Telegram setup + responsive UI + optional KeepAlive service; production install pending canary |
 | install doctor / secure services / disaster recovery | `src/quarterdeck/doctor.py`, `service.py`, `backup.py` | ✅ five secret-free templates + installed-command drift check; soak pending |
 | gate (PreToolUse `defer` → Paperclip approval → resume) | `gate.py`, `gated_claude.py` | ✅ M3 code + two live approval/resume drills |
 | artifacts (ledger events + content-addressed projection) | `artifacts.py`, `index.py` | ✅ M4 code + live projection |

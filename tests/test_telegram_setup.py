@@ -5,7 +5,7 @@ import yaml
 from typer.testing import CliRunner
 
 from quarterdeck.cli import app
-from quarterdeck.config import save_telegram_credentials
+from quarterdeck.config import clear_telegram_credentials, save_telegram_credentials
 
 
 def test_save_telegram_credentials_merges_atomically_with_private_modes(tmp_path):
@@ -37,6 +37,22 @@ def test_save_telegram_credentials_refuses_overwrite_without_replace(tmp_path):
     save_telegram_credentials("2:second", "67890", root=root, replace=True)
     loaded = yaml.safe_load((root / "secrets.yaml").read_text())
     assert loaded["telegram"] == {"bot_token": "2:second", "chat_id": "67890"}
+
+
+def test_clear_telegram_credentials_preserves_other_secrets(tmp_path):
+    root = tmp_path / "config"
+    root.mkdir(mode=0o700)
+    secrets = root / "secrets.yaml"
+    secrets.write_text("paperclip:\n  api_key: fixture-key\n")
+    secrets.chmod(0o600)
+    save_telegram_credentials("1:fixture", "12345", root=root)
+
+    assert clear_telegram_credentials(root=root) is True
+    assert yaml.safe_load(secrets.read_text()) == {
+        "paperclip": {"api_key": "fixture-key"}
+    }
+    assert stat.S_IMODE(secrets.stat().st_mode) == 0o600
+    assert clear_telegram_credentials(root=root) is False
 
 
 def test_save_telegram_credentials_rejects_symlinks_and_invalid_values(tmp_path):

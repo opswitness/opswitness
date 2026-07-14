@@ -1,5 +1,6 @@
 import json
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -16,6 +17,7 @@ from quarterdeck.console.schemas import (
     MailAuthorizationRequest,
     PlanRequest,
     TaskPlan,
+    TelegramConfigureRequest,
 )
 from quarterdeck.console.service import (
     DISPATCH_INTERRUPTED,
@@ -34,6 +36,9 @@ from quarterdeck.console.service import (
     PLANNING_INTERRUPTED,
     PLANNING_INTERRUPTED_DETAIL,
     SCHEDULE_CONFIGURATION_INVALID_DETAIL,
+    TELEGRAM_CONFIGURATION_REJECTED,
+    TELEGRAM_ENVIRONMENT_CONTROLLED,
+    TELEGRAM_TEST_FAILED,
     ConsoleConflict,
     ConsoleService,
     ConsoleUnavailable,
@@ -799,6 +804,170 @@ def test_mail_disable_revokes_future_model_access_even_when_audit_write_fails(
     assert service.settings.mail.model_metadata_consent is False
 
 
+def test_telegram_console_configuration_never_persists_or_returns_credentials(
+    monkeypatch, console_env
+):
+    _, service, _, _ = console_env
+    saved = []
+    monkeypatch.setattr(
+        "quarterdeck.console.service.save_telegram_credentials",
+        lambda token, chat_id, *, replace: saved.append((token, chat_id, replace)),
+    )
+    request = TelegramConfigureRequest(
+        bot_token="1:private-token",
+        chat_id="123456",
+        storage_acknowledged=True,
+        replace_existing=False,
+    )
+
+    assert service.configure_telegram(request) == {"configured": True}
+    assert saved == [("1:private-token", "123456", False)]
+    assert service.telegram_setup_status() == {
+        "configured": True,
+        "environment_controlled": False,
+    }
+    encoded = json.dumps(service.ledger.read_all(), ensure_ascii=False)
+    assert "private-token" not in encoded
+    assert "123456" not in encoded
+    assert [event["kind"] for event in service.ledger.read_all()] == [
+        "telegram_configuration_requested",
+        "telegram_configuration_finished",
+    ]
+
+
+def test_telegram_console_rejects_bad_credentials_with_fixed_error(monkeypatch, console_env):
+    _, service, _, _ = console_env
+    hostile = "1:private-token 123456 /private/secret"
+
+    def reject(*args, **kwargs):
+        del args, kwargs
+        raise ValueError(hostile)
+
+    monkeypatch.setattr(
+        "quarterdeck.console.service.save_telegram_credentials",
+        reject,
+    )
+    request = TelegramConfigureRequest(
+        bot_token="1:private-token",
+        chat_id="123456",
+        storage_acknowledged=True,
+    )
+    with pytest.raises(ConsoleConflict, match=TELEGRAM_CONFIGURATION_REJECTED):
+        service.configure_telegram(request)
+    encoded = json.dumps(service.ledger.read_all(), ensure_ascii=False)
+    assert hostile not in encoded
+    assert "private-token" not in encoded
+    assert "123456" not in encoded
+    assert '"reason": "credentials_rejected"' in encoded
+
+
+def test_telegram_console_test_is_evidence_first_and_uses_fixed_message(
+    monkeypatch, console_env
+):
+    _, service, _, _ = console_env
+    service.settings = service.settings.model_copy(
+        update={
+            "telegram": service.settings.telegram.model_copy(
+                update={"bot_token": "1:private-token", "chat_id": "123456"}
+            )
+        }
+    )
+    sent = []
+    monkeypatch.setattr(
+        "quarterdeck.console.service.send_telegram",
+        lambda text, settings: sent.append((text, settings.telegram.chat_id)) or True,
+    )
+
+    assert service.test_telegram() == {"sent": True}
+    assert sent == [("Quarterdeck Telegram delivery test", "123456")]
+    encoded = json.dumps(service.ledger.read_all(), ensure_ascii=False)
+    assert "private-token" not in encoded
+    assert "123456" not in encoded
+    assert [event["kind"] for event in service.ledger.read_all()] == [
+        "telegram_test_requested",
+        "telegram_test_finished",
+    ]
+
+    monkeypatch.setattr("quarterdeck.console.service.send_telegram", lambda *args: False)
+    with pytest.raises(ConsoleUnavailable, match=TELEGRAM_TEST_FAILED):
+        service.test_telegram()
+    assert service.ledger.read_all()[-1]["kind"] == "telegram_test_failed"
+
+
+def test_telegram_console_does_not_send_without_requested_evidence(monkeypatch, console_env):
+    _, service, _, _ = console_env
+    monkeypatch.setattr(service.ledger, "append", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "quarterdeck.console.service.send_telegram",
+        lambda *args: pytest.fail("Telegram must not send without durable requested evidence"),
+    )
+    with pytest.raises(ConsoleUnavailable, match="telegram_test_requested"):
+        service.test_telegram()
+
+
+def test_telegram_console_disable_and_environment_override_fail_closed(
+    monkeypatch, console_env
+):
+    _, service, _, _ = console_env
+    service.settings = service.settings.model_copy(
+        update={
+            "telegram": service.settings.telegram.model_copy(
+                update={"bot_token": "1:private-token", "chat_id": "123456"}
+            )
+        }
+    )
+    cleared = []
+    monkeypatch.setattr(
+        "quarterdeck.console.service.clear_telegram_credentials",
+        lambda: cleared.append(True) or True,
+    )
+    assert service.disable_telegram() == {"disabled": True}
+    assert cleared == [True]
+    assert service.telegram_setup_status()["configured"] is False
+
+    monkeypatch.setenv("QD_TELEGRAM__BOT_TOKEN", "environment-secret")
+    with pytest.raises(ConsoleConflict, match=TELEGRAM_ENVIRONMENT_CONTROLLED):
+        service.disable_telegram()
+
+
+def test_telegram_console_serializes_configuration_mutations(monkeypatch, console_env):
+    _, service, _, _ = console_env
+    guard = threading.Lock()
+    active = 0
+    maximum = 0
+
+    def save(*args, **kwargs):
+        nonlocal active, maximum
+        del args, kwargs
+        with guard:
+            active += 1
+            maximum = max(maximum, active)
+        time.sleep(0.03)
+        with guard:
+            active -= 1
+
+    monkeypatch.setattr(
+        "quarterdeck.console.service.save_telegram_credentials",
+        save,
+    )
+    first = TelegramConfigureRequest(
+        bot_token="1:first-token",
+        chat_id="123456",
+        storage_acknowledged=True,
+    )
+    second = TelegramConfigureRequest(
+        bot_token="2:second-token",
+        chat_id="654321",
+        storage_acknowledged=True,
+        replace_existing=True,
+    )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(service.configure_telegram, [first, second]))
+
+    assert results == [{"configured": True}, {"configured": True}]
+    assert maximum == 1
+
+
 def test_aionui_mail_summary_fails_when_ephemeral_team_cleanup_is_unconfirmed(
     monkeypatch, console_env
 ):
@@ -1423,6 +1592,54 @@ def test_mail_authorization_http_requires_both_explicit_acknowledgements(
             json={"confirmed": True},
         )
         assert without_csrf.status_code == 403
+
+
+def test_telegram_http_redacts_credentials_and_requires_explicit_actions(
+    console_env, monkeypatch
+):
+    settings, service, _, _ = console_env
+    monkeypatch.setattr(
+        "quarterdeck.console.service.save_telegram_credentials",
+        lambda *args, **kwargs: None,
+    )
+    with TestClient(
+        create_app(settings, service=service),
+        base_url="http://127.0.0.1:8765",
+    ) as client:
+        csrf = client.get("/api/v1/bootstrap").json()["csrf_token"]
+        headers = {"X-QD-CSRF": csrf, "Origin": "http://127.0.0.1:8765"}
+        payload = {
+            "bot_token": "1:private-token",
+            "chat_id": "123456",
+            "storage_acknowledged": False,
+            "replace_existing": False,
+        }
+        denied = client.post(
+            "/api/v1/telegram/configure",
+            json=payload,
+            headers=headers,
+        )
+        assert denied.status_code == 422
+        assert "private-token" not in denied.text
+        assert "123456" not in denied.text
+
+        payload["storage_acknowledged"] = True
+        accepted = client.post(
+            "/api/v1/telegram/configure",
+            json=payload,
+            headers=headers,
+        )
+        assert accepted.status_code == 200
+        assert accepted.json() == {"configured": True}
+        assert "private-token" not in accepted.text
+        assert "123456" not in accepted.text
+
+        denied_test = client.post(
+            "/api/v1/telegram/test",
+            json={"confirmed": False},
+            headers=headers,
+        )
+        assert denied_test.status_code == 422
 
 
 def test_console_lifespan_releases_lease_when_recovery_fails(console_env, monkeypatch):

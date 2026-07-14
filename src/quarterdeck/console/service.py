@@ -15,7 +15,14 @@ from typing import Any, Callable
 import httpx
 
 from quarterdeck.bootstrap import load_effective_schedules
-from quarterdeck.config import Settings, config_dir, resolve_api_key, save_mail_activation
+from quarterdeck.config import (
+    Settings,
+    clear_telegram_credentials,
+    config_dir,
+    resolve_api_key,
+    save_mail_activation,
+    save_telegram_credentials,
+)
 from quarterdeck.console.aionui import AionUiClient, AionUiError
 from quarterdeck.console.schemas import (
     ConfirmRequest,
@@ -26,6 +33,7 @@ from quarterdeck.console.schemas import (
     PlanRecord,
     PlanRequest,
     TaskPlan,
+    TelegramConfigureRequest,
     utc_now,
 )
 from quarterdeck.console.store import PlanNotFound, PlanStore
@@ -35,6 +43,7 @@ from quarterdeck.index import job_summary, query_runs, rebuild
 from quarterdeck.ledger import Ledger
 from quarterdeck.mail import authorize_mail, check_mail, mail_status
 from quarterdeck.notify import alert
+from quarterdeck.notify.telegram import send_telegram
 from quarterdeck.paperclip import PaperclipClient, PaperclipError
 from quarterdeck.workflows import start_workflow, workflow_catalog, workflow_status
 from quarterdeck.watchdog import check as watchdog_check
@@ -53,6 +62,9 @@ MAIL_SUMMARY_FAILURE = "mail summary failed; run qd mail status locally"
 MAIL_AUTHORIZATION_FAILURE = (
     "Gmail readonly authorization failed; inspect qd mail status locally."
 )
+TELEGRAM_CONFIGURATION_REJECTED = "Telegram credentials were rejected or already configured."
+TELEGRAM_ENVIRONMENT_CONTROLLED = "Telegram credentials are controlled outside the console."
+TELEGRAM_TEST_FAILED = "Telegram test delivery failed; inspect local diagnostics."
 PLAN_GENERATION_FAILED = "plan_generation_failed"
 PLAN_GENERATION_FAILED_DETAIL = "Planning failed; inspect AionUi locally and create a new plan."
 EXECUTION_PLAN_INVALID = "execution_plan_invalid"
@@ -175,6 +187,7 @@ class ConsoleService:
         self._mail_lock = threading.Lock()
         self._mail_auth_jobs: dict[str, MailAuthorizationJob] = {}
         self._mail_auth_lock = threading.Lock()
+        self._telegram_lock = threading.Lock()
         self._lease_guard = threading.Lock()
         self._lease_fd: int | None = None
 
@@ -937,6 +950,129 @@ class ConsoleService:
             alert("mail consent was revoked but audit evidence was unavailable")
         return {"disabled": True}
 
+    @staticmethod
+    def _telegram_environment_controlled() -> bool:
+        return any(
+            name in os.environ
+            for name in ("QD_TELEGRAM__BOT_TOKEN", "QD_TELEGRAM__CHAT_ID")
+        )
+
+    def telegram_setup_status(self) -> dict[str, bool]:
+        configured = bool(
+            self.settings.telegram.bot_token and self.settings.telegram.chat_id
+        )
+        return {
+            "configured": configured,
+            "environment_controlled": self._telegram_environment_controlled(),
+        }
+
+    def configure_telegram(self, request: TelegramConfigureRequest) -> dict[str, bool]:
+        with self._telegram_lock:
+            return self._configure_telegram_locked(request)
+
+    def _configure_telegram_locked(
+        self, request: TelegramConfigureRequest
+    ) -> dict[str, bool]:
+        if self._telegram_environment_controlled():
+            raise ConsoleConflict(TELEGRAM_ENVIRONMENT_CONTROLLED)
+        run_id = new_ulid()
+        self._append(
+            "telegram_configuration_requested",
+            run_id,
+            {
+                "schema_version": 1,
+                "replace_existing": request.replace_existing,
+                "private_storage_acknowledged": True,
+                "source": "console",
+            },
+        )
+        token = request.bot_token.get_secret_value()
+        chat_id = request.chat_id.get_secret_value()
+        try:
+            save_telegram_credentials(
+                token,
+                chat_id,
+                replace=request.replace_existing,
+            )
+        except (OSError, ValueError) as exc:
+            try:
+                self._append(
+                    "telegram_configuration_failed",
+                    run_id,
+                    {
+                        "schema_version": 1,
+                        "reason": "credentials_rejected",
+                        "source": "console",
+                    },
+                )
+            except ConsoleUnavailable:
+                alert("audit evidence lost after Telegram configuration failure")
+            raise ConsoleConflict(TELEGRAM_CONFIGURATION_REJECTED) from exc
+        telegram = self.settings.telegram.model_copy(
+            update={"bot_token": token, "chat_id": chat_id}
+        )
+        self.settings = self.settings.model_copy(update={"telegram": telegram})
+        self._append(
+            "telegram_configuration_finished",
+            run_id,
+            {"schema_version": 1, "source": "console"},
+        )
+        return {"configured": True}
+
+    def test_telegram(self) -> dict[str, bool]:
+        with self._telegram_lock:
+            return self._test_telegram_locked()
+
+    def _test_telegram_locked(self) -> dict[str, bool]:
+        run_id = new_ulid()
+        self._append(
+            "telegram_test_requested",
+            run_id,
+            {"schema_version": 1, "source": "console"},
+        )
+        if not send_telegram("Quarterdeck Telegram delivery test", self.settings):
+            self._append(
+                "telegram_test_failed",
+                run_id,
+                {
+                    "schema_version": 1,
+                    "reason": "delivery_failed",
+                    "source": "console",
+                },
+            )
+            raise ConsoleUnavailable(TELEGRAM_TEST_FAILED)
+        self._append(
+            "telegram_test_finished",
+            run_id,
+            {"schema_version": 1, "source": "console"},
+        )
+        return {"sent": True}
+
+    def disable_telegram(self) -> dict[str, bool]:
+        with self._telegram_lock:
+            return self._disable_telegram_locked()
+
+    def _disable_telegram_locked(self) -> dict[str, bool]:
+        if self._telegram_environment_controlled():
+            raise ConsoleConflict(TELEGRAM_ENVIRONMENT_CONTROLLED)
+        try:
+            clear_telegram_credentials()
+        except (OSError, ValueError) as exc:
+            raise ConsoleUnavailable("Telegram credentials could not be removed safely") from exc
+        telegram = self.settings.telegram.model_copy(
+            update={"bot_token": "", "chat_id": ""}
+        )
+        self.settings = self.settings.model_copy(update={"telegram": telegram})
+        event = self.ledger.append(
+            "telegram_disabled",
+            new_ulid(),
+            {"schema_version": 1, "source": "console"},
+            fsync=True,
+        )
+        if event is None:
+            alert("Telegram credentials were removed but audit evidence was unavailable")
+        return {"disabled": True}
+
     def dashboard(self) -> dict[str, Any]:
         index_db = self.settings.ledger_dir.parent / "index.db"
         events = self.ledger.read_all()
@@ -999,6 +1135,16 @@ class ConsoleService:
             "label": "邮箱",
             "detail": _mail_setup_detail(mail),
             "privacy": "metadata_only",
+        }
+        telegram = self.telegram_setup_status()
+        integrations["telegram"] = {
+            "status": "online" if telegram["configured"] else "setup",
+            "label": "Telegram",
+            "detail": (
+                "外部环境管理"
+                if telegram["environment_controlled"]
+                else "已配置" if telegram["configured"] else "待配置"
+            ),
         }
         integrations["ledger"] = {
             "status": "online" if info["pending_projection"] == 0 else "attention",

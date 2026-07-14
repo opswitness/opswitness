@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 
 def utc_now() -> str:
@@ -196,6 +196,21 @@ class MailAuthorizationJob(BaseModel):
     created_at: str = Field(default_factory=utc_now)
     updated_at: str = Field(default_factory=utc_now)
     error: str | None = Field(default=None, max_length=500)
+
+
+class TelegramConfigureRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    bot_token: SecretStr = Field(min_length=3, max_length=512)
+    chat_id: SecretStr = Field(min_length=1, max_length=64)
+    storage_acknowledged: Literal[True]
+    replace_existing: bool = False
+
+
+class TelegramActionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirmed: Literal[True]
 
 
 JsonObject = dict[str, Any]

@@ -88,6 +88,18 @@ State execution evidence and outcome evidence separately. Fail closed on any mis
 audit degradation, unavailable service, or tool error.
 ```
 
+## Telegram 通知
+
+总控制台的“连接 → Telegram”提供本机配置、固定测试消息与停用。Bot token 和 chat ID
+均使用 password input，只有用户确认保存后才通过既有校验器原子合并进 `0600`
+`secrets.yaml`；API、ledger 和页面响应从不返回这些值。配置、测试和停用由同一服务锁
+串行化。测试消息需要单独确认，并且 `telegram_test_requested` 必须先 fsync，网络请求才
+能发生。环境变量提供的凭据只显示为“外部环境管理”，控制台不能覆盖或删除。
+
+真实 token/chat ID 只能在这个本机密码框或 `qd telegram configure` 的隐藏提示中输入，
+不得放入聊天、命令参数、文档、plist、日志或 Git。当前生产尚未配置，本轮 UI 验收没有
+输入凭据或发送消息。
+
 ## 每日邮件回复检查
 
 邮件桥使用固定版本 `gws 0.22.5` 和加密 OAuth 凭据。`config.yaml` 只能由本机管理员

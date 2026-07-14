@@ -912,6 +912,26 @@ button.table-row:hover {
   color: #963e37;
 }
 
+.secret-field {
+  display: grid;
+  gap: 7px;
+}
+
+.secret-field > span {
+  color: #4a544f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.setup-notice {
+  border-left: 3px solid #7395bb;
+  background: var(--blue-soft);
+  padding: 10px 12px;
+  color: #345f8b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .drawer-layer {
   position: fixed;
   inset: 0;

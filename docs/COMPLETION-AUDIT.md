@@ -1,6 +1,6 @@
 # Quarterdeck Completion Audit
 
-Snapshot: 2026-07-13 20:25 PDT. This document maps the approved M0-M6 plan to evidence and
+Snapshot: 2026-07-13 20:44 PDT. This document maps the approved M0-M6 plan to evidence and
 remaining gates. [READINESS.md](READINESS.md) remains the single operational snapshot.
 
 ## Requirement matrix
@@ -19,7 +19,7 @@ remaining gates. [READINESS.md](READINESS.md) remains the single operational sna
 ## Live evidence at this snapshot
 
 - Current-HEAD `qd soak status m2-canary --json`: `pending`; only blocker is
-  `minimum_duration`, with 68,289 seconds remaining at 20:25 PDT. The tracked job has one start,
+  `minimum_duration`, with 67,161 seconds remaining at 20:44 PDT. The tracked job has one start,
   one success, zero failures, and zero projection backlog since the reset contract.
 - Current-HEAD `qd status`: 13 total runs and zero pending projections. The third independently
   clicked AionUi one-click workflow run (`01KXF2VC2NGNK7NFKEXWEBWZEY`) exited 0 without degraded
@@ -67,6 +67,12 @@ remaining gates. [READINESS.md](READINESS.md) remains the single operational sna
   consecutive 261-test full runs, frontend typecheck, ruff, mypy, desktop acceptance, and 390x844
   no-overflow acceptance pass. One checkbox leaves OAuth disabled; both enable the button, but the
   button was not clicked, no authorization ledger event exists, and no mailbox was accessed.
+- Telegram now has a local password-only configure/test/disable path in the total console. Secret
+  writes use the existing atomic `0600` merge, concurrent mutations are serialized, submitted
+  values are redacted even from validation errors, and a separately confirmed fixed probe cannot
+  send before requested evidence is durable. Desktop and 390x844 acceptance passed with empty
+  fields and a disabled save action. No credential was entered, no Telegram event exists, and no
+  message was sent. The full suite passes 269 tests in three consecutive runs.
 - Arbitrary planning, Paperclip, workflow, runtime, and schedule-parser errors no longer cross into
   plan API responses or ledger records. Hostile private-path echoes are covered by regressions.
 - A real primary console on port 8765 held the `0700` state directory's `0600` lease. A second

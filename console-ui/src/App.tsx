@@ -22,6 +22,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Send,
   Server,
   Settings,
   ShieldCheck,
@@ -32,15 +33,19 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   confirmPlan,
+  configureTelegram,
+  disableTelegram,
   disableMail,
   getMailAuthorization,
   getMailAuthorizationStatus,
   getMailSummary,
   getPlan,
+  getTelegramStatus,
   loadBootstrap,
   requestMailAuthorization,
   requestMailSummary,
   requestPlan,
+  testTelegram,
 } from './api';
 import type {
   Bootstrap,
@@ -51,6 +56,7 @@ import type {
   PlanRecord,
   RunRecord,
   TaskPlan,
+  TelegramSetupStatus,
 } from './types';
 
 type View = 'dashboard' | 'tasks' | 'evidence' | 'settings';
@@ -124,6 +130,7 @@ function App() {
   const [activePlan, setActivePlan] = useState<PlanRecord | null>(null);
   const [mailJob, setMailJob] = useState<MailSummaryJob | null>(null);
   const [mailSetupOpen, setMailSetupOpen] = useState(false);
+  const [telegramSetupOpen, setTelegramSetupOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -140,7 +147,7 @@ function App() {
     }
   }, []);
 
-  const refreshAfterMailChange = useCallback(async () => {
+  const refreshAfterIntegrationChange = useCallback(async () => {
     await refresh(true);
   }, [refresh]);
 
@@ -273,7 +280,11 @@ function App() {
               )}
               {view === 'evidence' && <EvidenceView runs={bootstrap.recent_runs} data={bootstrap} />}
               {view === 'settings' && (
-                <ConnectionsView data={bootstrap} onMailSetup={() => setMailSetupOpen(true)} />
+                <ConnectionsView
+                  data={bootstrap}
+                  onMailSetup={() => setMailSetupOpen(true)}
+                  onTelegramSetup={() => setTelegramSetupOpen(true)}
+                />
               )}
             </>
           ) : null}
@@ -298,7 +309,12 @@ function App() {
       <MailSetupDialog
         open={mailSetupOpen}
         onClose={() => setMailSetupOpen(false)}
-        onChanged={refreshAfterMailChange}
+        onChanged={refreshAfterIntegrationChange}
+      />
+      <TelegramSetupDialog
+        open={telegramSetupOpen}
+        onClose={() => setTelegramSetupOpen(false)}
+        onChanged={refreshAfterIntegrationChange}
       />
     </div>
   );
@@ -637,8 +653,22 @@ function EvidenceView({ runs, data }: { runs: RunRecord[]; data: Bootstrap }) {
   );
 }
 
-function ConnectionsView({ data, onMailSetup }: { data: Bootstrap; onMailSetup: () => void }) {
-  const icons: Record<string, typeof Server> = { aionui: Bot, paperclip: Server, ledger: Database, mail: Mail };
+function ConnectionsView({
+  data,
+  onMailSetup,
+  onTelegramSetup,
+}: {
+  data: Bootstrap;
+  onMailSetup: () => void;
+  onTelegramSetup: () => void;
+}) {
+  const icons: Record<string, typeof Server> = {
+    aionui: Bot,
+    paperclip: Server,
+    ledger: Database,
+    mail: Mail,
+    telegram: Send,
+  };
   return (
     <section className="panel full-panel">
       <div className="section-heading compact">
@@ -656,12 +686,14 @@ function ConnectionsView({ data, onMailSetup }: { data: Bootstrap; onMailSetup: 
                 <a href={item.url} target="_blank" rel="noreferrer" title={`打开 ${item.label}`}>
                   <ExternalLink size={17} />
                 </a>
-              ) : key === 'mail' ? (
+              ) : key === 'mail' || key === 'telegram' ? (
                 <button
                   className="icon-button compact-icon"
                   type="button"
-                  title={data.mail_ready ? '管理邮箱授权' : '设置邮箱'}
-                  onClick={onMailSetup}
+                  title={key === 'mail'
+                    ? data.mail_ready ? '管理邮箱授权' : '设置邮箱'
+                    : item.status === 'online' ? '管理 Telegram' : '设置 Telegram'}
+                  onClick={key === 'mail' ? onMailSetup : onTelegramSetup}
                 >
                   <Settings size={16} />
                 </button>
@@ -860,6 +892,254 @@ function MailSetupDialog({
             </button>
           </div>
         )}
+      </section>
+    </div>
+  );
+}
+
+function TelegramSetupDialog({
+  open,
+  onClose,
+  onChanged,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onChanged: () => Promise<void>;
+}) {
+  const [status, setStatus] = useState<TelegramSetupStatus | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [botToken, setBotToken] = useState('');
+  const [chatId, setChatId] = useState('');
+  const [storageAck, setStorageAck] = useState(false);
+  const [testAck, setTestAck] = useState(false);
+  const [disableAck, setDisableAck] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const loadStatus = useCallback(async () => {
+    const next = await getTelegramStatus();
+    setStatus(next);
+    setEditing(!next.configured && !next.environment_controlled);
+    return next;
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    setBotToken('');
+    setChatId('');
+    setStorageAck(false);
+    setTestAck(false);
+    setDisableAck(false);
+    setError('');
+    setNotice('');
+    setBusy(true);
+    void loadStatus()
+      .catch((err) => setError(err instanceof Error ? err.message : 'Telegram 状态读取失败'))
+      .finally(() => setBusy(false));
+  }, [open, loadStatus]);
+
+  if (!open) return null;
+
+  const closeDialog = () => {
+    setBotToken('');
+    setChatId('');
+    setStorageAck(false);
+    onClose();
+  };
+
+  const configure = async () => {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await configureTelegram({
+        bot_token: botToken,
+        chat_id: chatId,
+        storage_acknowledged: true,
+        replace_existing: status?.configured === true,
+      });
+      setBotToken('');
+      setChatId('');
+      setStorageAck(false);
+      await loadStatus();
+      await onChanged();
+      setNotice('凭据已保存；发送测试消息后才算交付链路验收完成。');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Telegram 配置失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendTest = async () => {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await testTelegram();
+      setTestAck(false);
+      setNotice('固定测试消息已发送。');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Telegram 测试失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disable = async () => {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await disableTelegram();
+      await loadStatus();
+      await onChanged();
+      setDisableAck(false);
+      setNotice('本机 Telegram 凭据已移除。');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Telegram 停用失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Telegram 设置">
+      <button className="modal-backdrop" type="button" aria-label="关闭" onClick={closeDialog} />
+      <section className="mail-setup-dialog">
+        <header className="modal-header">
+          <div>
+            <span className="section-kicker">TELEGRAM</span>
+            <h2>{status?.configured ? 'Telegram 已配置' : '设置 Telegram'}</h2>
+          </div>
+          <button className="icon-button" type="button" title="关闭" onClick={closeDialog}>
+            <X size={19} />
+          </button>
+        </header>
+
+        <div className="mail-setup-content">
+          <div className="privacy-summary">
+            <strong>本机秘密边界</strong>
+            <span>Bot token 与 chat ID 只写入本机 0600 secrets.yaml，不进入账本或页面回显。</span>
+            <span>测试按钮只发送固定的 Quarterdeck 探针文本。</span>
+          </div>
+
+          {status?.environment_controlled ? (
+            <div className="inline-error">凭据由外部环境管理，控制台不能覆盖或删除。</div>
+          ) : status?.configured && !editing ? (
+            <>
+              <div className="setup-success">
+                <Send size={22} />
+                <div>
+                  <strong>本机凭据已配置</strong>
+                  <span>不会显示 token 或 chat ID。</span>
+                </div>
+              </div>
+              <label className="consent-row">
+                <input
+                  type="checkbox"
+                  checked={testAck}
+                  onChange={(event) => setTestAck(event.target.checked)}
+                />
+                <span>确认向已配置的目标发送一条固定测试消息</span>
+              </label>
+              <button
+                className="primary-button full-button"
+                type="button"
+                disabled={!testAck || busy}
+                onClick={() => void sendTest()}
+              >
+                <Send size={17} />发送测试消息
+              </button>
+              <button
+                className="secondary-button full-button"
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setEditing(true);
+                  setNotice('');
+                  setError('');
+                }}
+              >
+                更换凭据
+              </button>
+              <label className="consent-row">
+                <input
+                  type="checkbox"
+                  checked={disableAck}
+                  onChange={(event) => setDisableAck(event.target.checked)}
+                />
+                <span>确认从本机移除 Telegram 凭据并停止后续推送</span>
+              </label>
+              <button
+                className="secondary-button danger-button"
+                type="button"
+                disabled={!disableAck || busy}
+                onClick={() => void disable()}
+              >
+                停用 Telegram
+              </button>
+            </>
+          ) : !status?.environment_controlled ? (
+            <>
+              <label className="secret-field">
+                <span>Bot token</span>
+                <input
+                  type="password"
+                  value={botToken}
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) => setBotToken(event.target.value)}
+                />
+              </label>
+              <label className="secret-field">
+                <span>Chat ID</span>
+                <input
+                  type="password"
+                  value={chatId}
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) => setChatId(event.target.value)}
+                />
+              </label>
+              <label className="consent-row">
+                <input
+                  type="checkbox"
+                  checked={storageAck}
+                  onChange={(event) => setStorageAck(event.target.checked)}
+                />
+                <span>确认将这两项凭据保存到本机私有 secrets.yaml</span>
+              </label>
+              <button
+                className="primary-button full-button"
+                type="button"
+                disabled={!botToken || !chatId || !storageAck || busy}
+                onClick={() => void configure()}
+              >
+                {busy ? <LoaderCircle size={17} className="spin" /> : <ShieldCheck size={17} />}
+                {status?.configured ? '替换本机凭据' : '保存本机凭据'}
+              </button>
+              {status?.configured && (
+                <button
+                  className="text-button"
+                  type="button"
+                  onClick={() => {
+                    setEditing(false);
+                    setBotToken('');
+                    setChatId('');
+                    setStorageAck(false);
+                  }}
+                >
+                  取消更换
+                </button>
+              )}
+            </>
+          ) : null}
+
+          {notice && <div className="setup-notice">{notice}</div>}
+          {error && <div className="inline-error">{error}</div>}
+        </div>
       </section>
     </div>
   );

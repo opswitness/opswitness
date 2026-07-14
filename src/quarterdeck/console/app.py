@@ -18,6 +18,8 @@ from quarterdeck.console.schemas import (
     MailAuthorizationRequest,
     MailDisableRequest,
     PlanRequest,
+    TelegramActionRequest,
+    TelegramConfigureRequest,
 )
 from quarterdeck.console.service import ConsoleConflict, ConsoleService, ConsoleUnavailable
 from quarterdeck.console.store import PlanNotFound
@@ -182,6 +184,34 @@ def create_app(
     async def get_mail_authorization(job_id: str) -> dict:
         job = await run_in_threadpool(service.get_mail_authorization, job_id)
         return job.model_dump(mode="json")
+
+    @app.get("/api/v1/telegram/status")
+    async def telegram_status() -> dict:
+        return await run_in_threadpool(service.telegram_setup_status)
+
+    @app.post("/api/v1/telegram/configure")
+    async def configure_telegram(
+        body: TelegramConfigureRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        return await run_in_threadpool(service.configure_telegram, body)
+
+    @app.post("/api/v1/telegram/test")
+    async def test_telegram(
+        body: TelegramActionRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del body, x_qd_csrf
+        return await run_in_threadpool(service.test_telegram)
+
+    @app.post("/api/v1/telegram/disable")
+    async def disable_telegram(
+        body: TelegramActionRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del body, x_qd_csrf
+        return await run_in_threadpool(service.disable_telegram)
 
     static_dir = Path(__file__).with_name("static")
     assets_dir = static_dir / "assets"

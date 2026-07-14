@@ -306,6 +306,27 @@ def save_telegram_credentials(
     return secrets_path
 
 
+def clear_telegram_credentials(*, root: Path | None = None) -> bool:
+    """Remove only Telegram values while preserving every other secret."""
+    root = (root or config_dir()).expanduser()
+    if root.is_symlink():
+        raise ValueError(f"{root}: config directory must not be a symlink")
+    secrets_path = root / "secrets.yaml"
+    if not root.exists() or not secrets_path.exists():
+        return False
+    if secrets_path.is_symlink():
+        raise ValueError(f"{secrets_path}: secrets file must not be a symlink")
+    validate_config_files(root)
+    raw = _yaml_mapping(secrets_path)
+    if "telegram" not in raw:
+        return False
+    del raw["telegram"]
+    payload = yaml.safe_dump(raw, sort_keys=False, allow_unicode=True).encode()
+    atomic_write(secrets_path, payload, mode=0o600)
+    validate_config_files(root)
+    return True
+
+
 def save_mail_activation(
     *,
     enabled: bool,

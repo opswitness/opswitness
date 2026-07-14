@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 261 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
+- Full suite: 269 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
   gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -144,10 +144,11 @@ blocked by the current open gates below.
    console plist, rebootstrap services, and require current-HEAD doctor to return fully green.
 3. **Seven-day soak** — only after the canary and stable-tool upgrade pass may feed-monitor and sox-monitor
    be adopted; M2 remains incomplete until seven days pass.
-4. **Telegram digest** — secure hidden-input `qd telegram configure/test` tooling is
-   implemented, atomically writes only the `0600` secret file, and refuses silent
-   replacement. Production credentials are still absent and delivery must be exercised
-   during soak without exposing or copying tokens into chat, repo, argv, logs, or plists.
+4. **Telegram digest** — secure hidden-input CLI and total-console setup/test/disable tooling is
+   implemented, atomically writes only the `0600` secret file, refuses silent replacement, hides
+   validation inputs, and records no credential values. Production credentials are still absent
+   and the separately confirmed fixed delivery probe must be exercised during soak without
+   exposing or copying tokens into chat, repo, argv, logs, or plists.
 5. **Daily mail consent and OAuth** — before enabling the adapter or creating the AionUi
    09:00 America/Los_Angeles task, the operator must explicitly approve Gmail readonly OAuth
    and sending sender/subject/date/message-id metadata to the model provider configured in
@@ -205,9 +206,10 @@ The former M3 and AionUi blockers are closed without weakening their acceptance 
 - `OpsWitness` remains only a preliminary replacement candidate. No package rename, GitHub
   remote, identifier reservation, or public release is authorized until the operator makes
   an explicit brand decision.
-- Telegram delivery remains unconfigured. Any token/chat identifier must be entered locally
-  through the permission-checked secrets boundary, never pasted into documentation, git, a
-  plist, or chat.
+- Telegram delivery remains unconfigured. The total console now offers password-only local input,
+  fixed-probe confirmation, and removal under the permission-checked secrets boundary. No values
+  were entered and no message was sent during acceptance; token/chat identifiers must never be
+  pasted into documentation, git, a plist, logs, or chat.
 - M6 remains behind its paid-design-partner gate; no practitioner UI should be built merely
   to create the appearance of Pilot progress.
 
