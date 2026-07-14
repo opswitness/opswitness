@@ -134,12 +134,15 @@ Python 包目录始终完整；实测 gate-recovery 恰在这个窗口启动时�
 failure。因此升级前必须先进入维护窗口：
 
 1. 确认没有运行中的 `qd gated-claude` 或 `qd wrap` 进程。
-2. `bootout` projector、watchdog、gate-recovery、console（若已安装），以及所有已经由
+2. 正常停止所有手动启动的源码树或稳定入口 `qd console serve`。`console.lease` 是
+   持久锁文件，文件存在不代表锁仍被持有；只能等待进程退出释放 flock，**绝不删除
+   锁文件**。确认配置端口不再监听后再继续。
+3. `bootout` projector、watchdog、gate-recovery、console（若已安装），以及所有已经由
    `qd wrap` 接管的 launchd 任务。Paperclip 已经 `execve` 成 Node，不依赖 qd 的 Python
    环境，可保持运行。
-3. 构建并执行用户级 `uv tool install --force --with mcp <wheel>`；立刻运行
+4. 构建并执行用户级 `uv tool install --force --with mcp <wheel>`；立刻运行
    `qd version`、`qd doctor` 和 MCP handshake。
-4. 按原 plist 逐项 bootstrap 周期服务和接管任务；验证每项最近退出码为 0、投影
+5. 按原 plist 逐项 bootstrap 周期服务和接管任务；验证每项最近退出码为 0、投影
    backlog 为 0、watchdog/digest 无假绿后才退出维护窗口。
 
 总控制台加入后，当前 HEAD 的 doctor 还要求稳定入口同时具备 `qd soak` 与
@@ -154,7 +157,8 @@ plutil -lint /tmp/qd-launchd-render/com.quarterdeck.console.plist
 
 人工审阅后才复制并 bootstrap `com.quarterdeck.console.plist`。它是 loopback-only
 KeepAlive 服务；安装后 `qd doctor` 必须同时看到 `runtime_console=running` 和配置的
-console port open。现有 canary 通过前不得为升级它而提前中断连续证据。
+console port open。正式服务通过后不得再启动源码树 console。现有 canary 通过前不得
+为升级它而提前中断连续证据。
 
 不得在 qd 周期服务或接管任务仍可能被 launchd 触发时原地更新 tool environment。
 

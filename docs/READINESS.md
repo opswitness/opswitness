@@ -205,8 +205,9 @@ Continue in this order:
    evidence checks. Append `qd soak checkpoint m2-canary` only after recomputing the verdict. Continue
    observation up to 48 hours if any result is ambiguous.
 2. Only after that gate passes, enter the documented qd maintenance window: stop qd consumers,
-   install the current wheel, verify `soak` and `console`, install/bootstrap the console service,
-   restore periodic services/canary, and require current-HEAD doctor to become fully green.
+   gracefully stop the manually running source console without deleting `console.lease`, install
+   the current wheel, verify `soak` and `console`, install/bootstrap the console service, restore
+   periodic services/canary, and require current-HEAD doctor to become fully green.
 3. Only after that upgrade passes, follow the hash-locked, idle-PID adoption procedure in
    `M2-VALIDATION.md` for feed-monitor and sox-monitor. Start the seven-day soak only when
    both jobs are wrapped, enrolled by exact label, and healthy.
