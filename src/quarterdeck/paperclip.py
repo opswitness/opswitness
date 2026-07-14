@@ -6,6 +6,7 @@ never as authority.
 """
 
 from typing import Any
+from uuid import UUID
 
 import httpx
 
@@ -101,6 +102,24 @@ class PaperclipClient:
         )
         if not isinstance(data, dict):
             raise PaperclipError("create approval: expected an object")
+        return data
+
+    def resolve_approval(
+        self,
+        approval_id: str,
+        decision: str,
+        decision_note: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            UUID(approval_id)
+        except ValueError as exc:
+            raise PaperclipError("approval id is invalid") from exc
+        if decision not in {"approve", "reject"}:
+            raise PaperclipError("approval decision is invalid")
+        payload = {"decisionNote": decision_note or None}
+        data = self._req("POST", f"/api/approvals/{approval_id}/{decision}", json=payload)
+        if not isinstance(data, dict):
+            raise PaperclipError("resolve approval: expected an object")
         return data
 
     def list_work_products(self, issue_id: str) -> list[dict[str, Any]]:

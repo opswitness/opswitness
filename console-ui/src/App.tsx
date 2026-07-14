@@ -6,6 +6,7 @@ import {
   CalendarClock,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Circle,
   ClipboardCheck,
@@ -35,14 +36,17 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   confirmPlan,
+  connectProvider,
   configureMailOAuthClient,
   configureTelegram,
   disableTelegram,
   disableMail,
+  decideApproval,
   getMailAuthorization,
   getMailAuthorizationStatus,
   getMailSummary,
   getPlan,
+  getProviderConnection,
   getTelegramStatus,
   loadBootstrap,
   requestMailAuthorization,
@@ -52,17 +56,20 @@ import {
 } from './api';
 import type {
   Bootstrap,
+  AIProvider,
+  ApprovalCard,
   Integration,
   MailAuthorizationJob,
   MailAuthorizationStatus,
   MailSummaryJob,
   PlanRecord,
+  ProviderConnectionJob,
   RunRecord,
   TaskPlan,
   TelegramSetupStatus,
 } from './types';
 
-type View = 'workspace' | 'dashboard' | 'tasks' | 'evidence' | 'settings';
+type View = 'workspace' | 'dashboard' | 'tasks' | 'approvals' | 'evidence' | 'settings';
 
 const cadenceOptions = [
   { value: 'once', label: '单次' },
@@ -95,9 +102,9 @@ const roleLabel: Record<string, string> = {
 };
 
 const runtimeLabel: Record<string, string> = {
-  claude_code: 'Claude Code',
-  codex_cli: 'Codex',
-  aion_cli: 'Aion',
+  claude_code: 'Claude',
+  codex_cli: 'OpenAI',
+  aion_cli: '本地 AI',
 };
 
 function formatTime(value?: string | null): string {
@@ -254,6 +261,7 @@ function App() {
     workspace: '工作台',
     dashboard: '总控制台',
     tasks: '任务',
+    approvals: '审批',
     evidence: '证据',
     settings: '连接',
   }[view];
@@ -268,7 +276,7 @@ function App() {
             <h1>{title}</h1>
           </div>
           <div className="topbar-actions">
-            <IntegrationRow integrations={bootstrap?.integrations} />
+            <IntegrationRow integrations={bootstrap?.system} />
             <button className="icon-button" type="button" title="刷新" onClick={() => void refresh()}>
               <RefreshCw size={17} className={loading ? 'spin' : ''} />
             </button>
@@ -302,7 +310,6 @@ function App() {
                 <WorkspaceView
                   key={workspaceRevision}
                   record={activePlan}
-                  paperclipUrl={bootstrap.integrations.paperclip?.url}
                   onPlan={async (body) => {
                     mergePlan(await requestPlan(body));
                   }}
@@ -321,10 +328,14 @@ function App() {
                   onMailSetup={() => setMailSetupOpen(true)}
                   onOpenPlan={openPlan}
                   onNewTask={openNewTask}
+                  onOpenApprovals={() => changeView('approvals')}
                 />
               )}
               {view === 'tasks' && (
                 <TasksView plans={bootstrap.plans} onOpen={openPlan} onNew={openNewTask} />
+              )}
+              {view === 'approvals' && (
+                <ApprovalsView data={bootstrap} onChanged={refreshAfterIntegrationChange} />
               )}
               {view === 'evidence' && <EvidenceView runs={bootstrap.recent_runs} data={bootstrap} />}
               {view === 'settings' && (
@@ -332,6 +343,7 @@ function App() {
                   data={bootstrap}
                   onMailSetup={() => setMailSetupOpen(true)}
                   onTelegramSetup={() => setTelegramSetupOpen(true)}
+                  onChanged={refreshAfterIntegrationChange}
                 />
               )}
             </>
@@ -342,7 +354,6 @@ function App() {
       <TaskDrawer
         open={drawerOpen}
         record={activePlan}
-        paperclipUrl={bootstrap?.integrations.paperclip?.url}
         onClose={() => setDrawerOpen(false)}
         onPlan={async (body) => {
           const record = await requestPlan(body);
@@ -373,6 +384,7 @@ function Sidebar({ view, onChange }: { view: View; onChange: (view: View) => voi
     { id: 'workspace' as const, label: '工作台', icon: MessageSquare },
     { id: 'dashboard' as const, label: '概览', icon: LayoutDashboard },
     { id: 'tasks' as const, label: '任务', icon: ListTodo },
+    { id: 'approvals' as const, label: '审批', icon: ClipboardCheck },
     { id: 'evidence' as const, label: '证据', icon: FileCheck2 },
     { id: 'settings' as const, label: '连接', icon: Settings },
   ];
@@ -405,7 +417,7 @@ function IntegrationRow({ integrations }: { integrations?: Record<string, Integr
   if (!integrations) return null;
   return (
     <div className="integration-row" aria-label="服务状态">
-      {['aionui', 'paperclip', 'ledger'].map((key) => {
+      {['ai', 'governance', 'evidence'].map((key) => {
         const item = integrations[key];
         if (!item) return null;
         return (
@@ -421,13 +433,11 @@ function IntegrationRow({ integrations }: { integrations?: Record<string, Integr
 
 function WorkspaceView({
   record,
-  paperclipUrl,
   onPlan,
   onConfirm,
   onRestart,
 }: {
   record: PlanRecord | null;
-  paperclipUrl?: string;
   onPlan: (body: {
     objective: string;
     constraints: string;
@@ -535,7 +545,7 @@ function WorkspaceView({
                   />
                 )}
                 {['confirmed', 'dispatching', 'running', 'awaiting_approval', 'completed_unverified', 'failed'].includes(record.status) && (
-                  <ExecutionView record={record} paperclipUrl={paperclipUrl} />
+                  <ExecutionView record={record} />
                 )}
                 {record.status === 'ready' && (
                   <div className="chat-confirm-panel">
@@ -619,6 +629,7 @@ function Dashboard({
   onMailSetup,
   onOpenPlan,
   onNewTask,
+  onOpenApprovals,
 }: {
   data: Bootstrap;
   mailJob: MailSummaryJob | null;
@@ -626,6 +637,7 @@ function Dashboard({
   onMailSetup: () => void;
   onOpenPlan: (plan: PlanRecord) => void;
   onNewTask: () => void;
+  onOpenApprovals: () => void;
 }) {
   const healthDetail = data.fleet.coverage_error
     ? '配置无效'
@@ -652,7 +664,7 @@ function Dashboard({
         <Metric
           label="待审批"
           value={data.approvals_available ? String(data.pending_approvals ?? 0) : '—'}
-          detail={data.approvals_available ? 'Paperclip' : '状态不可用'}
+          detail={data.approvals_available ? 'Quarterdeck 审批队列' : '状态不可用'}
           icon={ClipboardCheck}
           tone={!data.approvals_available || data.pending_approvals ? 'warning' : 'neutral'}
         />
@@ -693,18 +705,18 @@ function Dashboard({
             </span>
             <ArrowRight size={18} />
           </button>
-          <div className="quick-action muted">
+          <button className="quick-action" type="button" onClick={onOpenApprovals}>
             <span className="quick-icon"><ShieldCheck size={20} /></span>
             <span>
               <strong>治理状态</strong>
               <small>{!data.approvals_available
-                ? 'Paperclip 审批状态不可用'
+                ? '审批状态暂不可用'
                 : data.pending_approvals
                   ? `${data.pending_approvals} 项等待处理`
                   : '当前无待审批项'}</small>
             </span>
-            <span className={`status-dot ${!data.approvals_available || data.pending_approvals ? 'warning' : 'success'}`} />
-          </div>
+            <ChevronRight size={18} />
+          </button>
         </section>
       </div>
 
@@ -872,7 +884,7 @@ function EvidenceView({ runs, data }: { runs: RunRecord[]; data: Bootstrap }) {
       <section className="metric-strip compact-metrics">
         <Metric label="账本运行" value={String(data.fleet.runs)} detail="append-only" icon={Database} tone="success" />
         <Metric label="Artifact" value={String(data.fleet.artifacts)} detail="content-addressed" icon={FileCheck2} />
-        <Metric label="待投影" value={String(data.fleet.pending_projection)} detail="Paperclip" icon={RefreshCw} tone={data.fleet.pending_projection ? 'warning' : 'success'} />
+        <Metric label="待同步" value={String(data.fleet.pending_projection)} detail="治理记录" icon={RefreshCw} tone={data.fleet.pending_projection ? 'warning' : 'success'} />
       </section>
       <section className="panel full-panel">
         <div className="section-heading compact">
@@ -895,56 +907,255 @@ function EvidenceView({ runs, data }: { runs: RunRecord[]; data: Bootstrap }) {
   );
 }
 
+function ApprovalsView({
+  data,
+  onChanged,
+}: {
+  data: Bootstrap;
+  onChanged: () => Promise<void>;
+}) {
+  const [selected, setSelected] = useState<ApprovalCard | null>(null);
+  const [decision, setDecision] = useState<'approve' | 'reject'>('approve');
+  const [decisionNote, setDecisionNote] = useState('');
+  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const openDecision = (approval: ApprovalCard, next: 'approve' | 'reject') => {
+    setSelected(approval);
+    setDecision(next);
+    setDecisionNote('');
+    setConfirmed(false);
+    setError('');
+  };
+
+  const submitDecision = async () => {
+    if (!selected || !confirmed || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await decideApproval(selected.approval_id, decision, decisionNote);
+      await onChanged();
+      setSelected(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '审批提交失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="approvals-layout">
+      <section className="panel full-panel">
+        <div className="section-heading compact">
+          <div><span className="section-kicker">人工检查点</span><h2>待审批</h2></div>
+          <span className="count-label">{data.approvals_available ? data.approvals.length : '—'}</span>
+        </div>
+        {!data.approvals_available ? (
+          <div className="table-empty danger-state">
+            <AlertTriangle size={28} />
+            <span>审批服务暂不可用，所有受管操作继续保持阻断。</span>
+          </div>
+        ) : data.approvals.length === 0 ? (
+          <div className="table-empty">
+            <ClipboardCheck size={28} />
+            <span>当前没有需要你处理的审批</span>
+          </div>
+        ) : (
+          <div className="approval-list">
+            {data.approvals.map((approval) => (
+              <article className="approval-card" key={approval.approval_id}>
+                <div className="approval-card-main">
+                  <div className="approval-card-heading">
+                    <span className="approval-kind"><ShieldCheck size={14} />{approval.kind === 'tool_call' ? '工具调用' : '治理请求'}</span>
+                    <span>{formatTime(approval.requested_at)}</span>
+                  </div>
+                  <h3>{approval.title}</h3>
+                  <p>{approval.summary}</p>
+                  {approval.tool_name && (
+                    <div className="approval-tool"><span>工具</span><code>{approval.tool_name}</code></div>
+                  )}
+                  {approval.tool_input && <pre className="approval-input">{approval.tool_input}</pre>}
+                  {approval.risks.length > 0 && (
+                    <div className="approval-risks">
+                      {approval.risks.map((risk) => <span key={risk}><AlertTriangle size={13} />{risk}</span>)}
+                    </div>
+                  )}
+                  <small>{approval.recommended_action}</small>
+                </div>
+                <div className="approval-actions">
+                  <button className="secondary-button danger-button" type="button" onClick={() => openDecision(approval, 'reject')}>
+                    <X size={16} />拒绝
+                  </button>
+                  <button className="primary-button" type="button" onClick={() => openDecision(approval, 'approve')}>
+                    <Check size={16} />批准
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {selected && (
+        <div className="modal-layer" role="dialog" aria-modal="true" aria-label="确认审批决定">
+          <button className="modal-backdrop" type="button" aria-label="关闭" onClick={() => !busy && setSelected(null)} />
+          <section className="mail-setup-dialog approval-dialog">
+            <header className="modal-header">
+              <div><span className="section-kicker">人工决定</span><h2>{decision === 'approve' ? '批准这项操作' : '拒绝这项操作'}</h2></div>
+              <button className="icon-button" type="button" title="关闭" disabled={busy} onClick={() => setSelected(null)}><X size={19} /></button>
+            </header>
+            <div className="mail-setup-content">
+              <div className="decision-summary"><strong>{selected.title}</strong><span>{selected.summary}</span></div>
+              <label className="secret-field">
+                <span>决定说明（可选）</span>
+                <textarea rows={3} maxLength={500} value={decisionNote} onChange={(event) => setDecisionNote(event.target.value)} placeholder="记录为什么批准或拒绝" />
+              </label>
+              <label className="consent-row">
+                <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
+                <span>我已检查这项请求的内容、工具和风险，并确认本次决定</span>
+              </label>
+              {error && <InlineError text={error} />}
+              <button
+                className={decision === 'approve' ? 'primary-button full-button' : 'secondary-button danger-button full-button'}
+                type="button"
+                disabled={!confirmed || busy}
+                onClick={() => void submitDecision()}
+              >
+                {busy ? <LoaderCircle size={17} className="spin" /> : decision === 'approve' ? <Check size={17} /> : <X size={17} />}
+                {decision === 'approve' ? '确认批准' : '确认拒绝'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ConnectionsView({
   data,
   onMailSetup,
   onTelegramSetup,
+  onChanged,
 }: {
   data: Bootstrap;
   onMailSetup: () => void;
   onTelegramSetup: () => void;
+  onChanged: () => Promise<void>;
 }) {
-  const icons: Record<string, typeof Server> = {
-    aionui: Bot,
-    paperclip: Server,
-    ledger: Database,
-    mail: Mail,
-    telegram: Send,
+  const [job, setJob] = useState<ProviderConnectionJob | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!job || job.status !== 'running') return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const next = await getProviderConnection(job.job_id);
+        if (cancelled) return;
+        setJob(next);
+        if (next.status === 'ready') await onChanged();
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : '连接状态读取失败');
+      }
+    };
+    const timer = window.setInterval(() => void poll(), 1500);
+    void poll();
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [job?.job_id, job?.status, onChanged]);
+
+  const startConnection = async (provider: 'openai' | 'anthropic') => {
+    setError('');
+    try {
+      setJob(await connectProvider(provider));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '无法启动登录');
+    }
   };
+
+  const providerRows = [data.providers.openai, data.providers.anthropic];
+  const dailyRows = [
+    ['mail', data.integrations.mail, Mail, onMailSetup],
+    ['telegram', data.integrations.telegram, Send, onTelegramSetup],
+  ] as const;
   return (
-    <section className="panel full-panel">
-      <div className="section-heading compact">
-        <div><span className="section-kicker">本机</span><h2>服务连接</h2></div>
-      </div>
-      <div className="connection-list">
-        {Object.entries(data.integrations).map(([key, item]) => {
-          const Icon = icons[key] || Server;
-          return (
+    <div className="connections-layout">
+      <section className="panel full-panel">
+        <div className="section-heading compact">
+          <div><span className="section-kicker">AI</span><h2>模型连接</h2></div>
+        </div>
+        <div className="provider-list">
+          {providerRows.map((provider: AIProvider) => {
+            const connecting = job?.provider === provider.provider && job.status === 'running';
+            const connected = provider.status === 'online';
+            return (
+              <div className="provider-row" key={provider.provider}>
+                <div className="provider-mark"><Bot size={21} /></div>
+                <div className="provider-copy">
+                  <strong>{provider.label}</strong>
+                  <span>{provider.detail}</span>
+                  <small>{provider.privacy}</small>
+                </div>
+                <StatusBadge
+                  status={provider.status}
+                  label={connected ? '可用' : provider.authenticated ? '准备中' : provider.installed ? '待连接' : '未安装'}
+                />
+                <button
+                  className={connected ? 'secondary-button provider-button connected' : 'primary-button provider-button'}
+                  type="button"
+                  disabled={!provider.installed || connected || connecting}
+                  onClick={() => void startConnection(provider.provider)}
+                >
+                  {connecting ? <LoaderCircle size={16} className="spin" /> : connected ? <Check size={16} /> : <ExternalLink size={16} />}
+                  {connecting ? '等待登录' : connected ? '已连接' : provider.authenticated ? '重新连接' : '连接'}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        {job?.status === 'running' && (
+          <div className="provider-notice" role="status">
+            <LoaderCircle size={17} className="spin" />请在厂商打开的页面完成登录；Quarterdeck 不会读取登录凭据。
+          </div>
+        )}
+        {job?.status === 'failed' && <InlineError text={job.error || '登录未完成'} />}
+        {error && <InlineError text={error} />}
+      </section>
+
+      <section className="panel full-panel">
+        <div className="section-heading compact">
+          <div><span className="section-kicker">日常工具</span><h2>消息与数据</h2></div>
+        </div>
+        <div className="connection-list">
+          {dailyRows.map(([key, item, Icon, action]) => (
             <div className="connection-row" key={key}>
               <div className="connection-icon"><Icon size={19} /></div>
-              <div><strong>{item.label}</strong><span>{item.detail || (item.status === 'online' ? '已连接' : '不可用')}</span></div>
-              <StatusBadge status={item.status} label={item.status === 'online' ? '在线' : undefined} />
-              {item.url ? (
-                <a href={item.url} target="_blank" rel="noreferrer" title={`打开 ${item.label}`}>
-                  <ExternalLink size={17} />
-                </a>
-              ) : key === 'mail' || key === 'telegram' ? (
-                <button
-                  className="icon-button compact-icon"
-                  type="button"
-                  title={key === 'mail'
-                    ? data.mail_ready ? '管理邮箱授权' : '设置邮箱'
-                    : item.status === 'online' ? '管理 Telegram' : '设置 Telegram'}
-                  onClick={key === 'mail' ? onMailSetup : onTelegramSetup}
-                >
-                  <Settings size={16} />
-                </button>
-              ) : <span />}
+              <div><strong>{item.label}</strong><span>{item.detail || (item.status === 'online' ? '已连接' : '待配置')}</span></div>
+              <StatusBadge status={item.status} label={item.status === 'online' ? '已连接' : '待设置'} />
+              <button className="icon-button compact-icon" type="button" title={`管理${item.label}`} onClick={action}>
+                <Settings size={16} />
+              </button>
             </div>
-          );
-        })}
-      </div>
-    </section>
+          ))}
+        </div>
+      </section>
+
+      <details className="diagnostics-panel">
+        <summary><span><Server size={16} />系统诊断</span><ChevronDown size={16} /></summary>
+        <div className="diagnostics-list">
+          {['aionui', 'paperclip', 'ledger'].map((key) => {
+            const item = data.integrations[key];
+            return item ? (
+              <div key={key}><span className={`status-dot ${statusTone(item.status)}`} /><strong>{item.label}</strong><small>{item.detail}</small></div>
+            ) : null;
+          })}
+        </div>
+      </details>
+    </div>
   );
 }
 
@@ -1178,7 +1389,7 @@ function MailSetupDialog({
                   <span>2</span>
                   <div>
                     <strong>授权与摘要同意</strong>
-                    <small>Google 授权和 AionUi 元数据传输分别确认。</small>
+                    <small>Google 授权和 AI 摘要元数据传输分别确认。</small>
                   </div>
                 </div>
                 <label className="consent-row">
@@ -1195,7 +1406,7 @@ function MailSetupDialog({
                     checked={metadataAck}
                     onChange={(event) => setMetadataAck(event.target.checked)}
                   />
-                  <span>我同意将发件人、主题、日期和 message-id 发送给当前 AionUi 模型生成摘要</span>
+                  <span>我同意将发件人、主题、日期和 message-id 发送给当前 AI 模型生成摘要</span>
                 </label>
                 {running && (
                   <div className="oauth-progress" role="status">
@@ -1481,7 +1692,6 @@ function TelegramSetupDialog({
 function TaskDrawer({
   open,
   record,
-  paperclipUrl,
   onClose,
   onPlan,
   onConfirm,
@@ -1489,7 +1699,6 @@ function TaskDrawer({
 }: {
   open: boolean;
   record: PlanRecord | null;
-  paperclipUrl?: string;
   onClose: () => void;
   onPlan: (body: { objective: string; constraints: string; workspace: string; preferred_cadence: string }) => Promise<void>;
   onConfirm: (record: PlanRecord) => Promise<void>;
@@ -1592,7 +1801,7 @@ function TaskDrawer({
           )}
 
           {record && ['confirmed', 'dispatching', 'running', 'awaiting_approval', 'completed_unverified', 'failed'].includes(record.status) && (
-            <ExecutionView record={record} paperclipUrl={paperclipUrl} />
+            <ExecutionView record={record} />
           )}
         </div>
 
@@ -1690,7 +1899,7 @@ function PlanningProgressView({ progress }: { progress: PlanRecord['planning_pro
         <LoaderCircle size={34} className="spin" />
         <Sparkles size={17} />
       </div>
-      <strong>AionUi 正在规划</strong>
+      <strong>AI 正在规划</strong>
       <span>{phaseLabel}</span>
       <div
         className="planning-progress-track"
@@ -1744,7 +1953,7 @@ function PlanReview({
       </div>
 
       <section className="review-section">
-        <div className="review-title"><h3>Agent 架构</h3><span>{plan.execution_mode === 'workflow' ? plan.workflow_id : 'AionUi Team'}</span></div>
+        <div className="review-title"><h3>Agent 架构</h3><span>{plan.execution_mode === 'workflow' ? plan.workflow_id : 'Agent 团队'}</span></div>
         <div className="agent-flow">
           {plan.agents.map((agent, index) => (
             <div className={`agent-node role-${agent.role}`} key={agent.name}>
@@ -1799,7 +2008,7 @@ function DetailList({ title, items, empty }: { title: string; items: string[]; e
   );
 }
 
-function ExecutionView({ record, paperclipUrl }: { record: PlanRecord; paperclipUrl?: string }) {
+function ExecutionView({ record }: { record: PlanRecord }) {
   const execution = record.execution;
   const failed = record.status === 'failed';
   const done = record.status === 'completed_unverified';
@@ -1810,17 +2019,12 @@ function ExecutionView({ record, paperclipUrl }: { record: PlanRecord; paperclip
       </div>
       <StatusBadge status={record.status} />
       <h3>{failed ? '任务未启动或已停止' : done ? '执行已结束' : record.status === 'awaiting_approval' ? '等待人工审批' : '任务正在运行'}</h3>
-      <p>{failed ? record.error : done ? '进程行为已记录，业务结果仍需 artifact、eval 或审签证明。' : 'Paperclip 保存治理任务，AionUi 运行已确认的 Agent Team。'}</p>
+      <p>{failed ? record.error : done ? '进程行为已记录，业务结果仍需 artifact、eval 或审签证明。' : '治理记录已保存，已确认的 Agent 团队正在执行。'}</p>
       <div className="execution-identifiers">
-        <div><span>Plan</span><code>{shortId(record.plan_id)}</code></div>
-        <div><span>Paperclip issue</span><code>{shortId(execution?.paperclip_issue_id)}</code></div>
-        <div><span>{execution?.kind === 'workflow' ? 'Workflow run' : 'AionUi team'}</span><code>{shortId(execution?.workflow_run_id || execution?.aion_team_id)}</code></div>
+        <div><span>任务计划</span><code>{shortId(record.plan_id)}</code></div>
+        <div><span>治理记录</span><code>{shortId(execution?.paperclip_issue_id)}</code></div>
+        <div><span>{execution?.kind === 'workflow' ? '工作流运行' : '执行会话'}</span><code>{shortId(execution?.workflow_run_id || execution?.aion_team_id)}</code></div>
       </div>
-      {paperclipUrl && execution?.paperclip_issue_id && (
-        <a className="secondary-button link-button" href={paperclipUrl} target="_blank" rel="noreferrer">
-          <ExternalLink size={16} />打开 Paperclip
-        </a>
-      )}
     </div>
   );
 }

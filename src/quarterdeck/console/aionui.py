@@ -435,9 +435,11 @@ class AionUiClient:
         request: PlanRequest,
         workflow_catalog: list[dict[str, Any]],
         progress: Callable[[str, int], None] | None = None,
+        *,
+        assistant_id: str | None = None,
     ) -> TaskPlan:
         _emit_progress(progress, "preparing", 10)
-        planner_id = self.config.planner_assistant_id
+        planner_id = assistant_id or self.config.planner_assistant_id
         assistants = self.list_assistants()
         if not any(
             row.get("id") == planner_id

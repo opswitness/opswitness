@@ -4,6 +4,7 @@ import type {
   MailAuthorizationStatus,
   MailSummaryJob,
   PlanRecord,
+  ProviderConnectionJob,
   TelegramSetupStatus,
 } from './types';
 
@@ -52,6 +53,34 @@ export function confirmPlan(planId: string, planSha256: string): Promise<PlanRec
   return api(`/api/v1/plans/${encodeURIComponent(planId)}/confirm`, {
     method: 'POST',
     body: JSON.stringify({ plan_sha256: planSha256, confirmed: true }),
+  });
+}
+
+export function connectProvider(
+  provider: 'openai' | 'anthropic',
+): Promise<ProviderConnectionJob> {
+  return api(`/api/v1/providers/${provider}/connect`, {
+    method: 'POST',
+    body: '{}',
+  });
+}
+
+export function getProviderConnection(jobId: string): Promise<ProviderConnectionJob> {
+  return api(`/api/v1/provider-connections/${encodeURIComponent(jobId)}`);
+}
+
+export function decideApproval(
+  approvalId: string,
+  decision: 'approve' | 'reject',
+  decisionNote: string,
+): Promise<{ approval_id: string; status: 'approved' | 'rejected'; reconciled: boolean }> {
+  return api(`/api/v1/approvals/${encodeURIComponent(approvalId)}/decision`, {
+    method: 'POST',
+    body: JSON.stringify({
+      decision,
+      decision_note: decisionNote,
+      confirmed: true,
+    }),
   });
 }
 

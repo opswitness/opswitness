@@ -5,7 +5,7 @@ from __future__ import annotations
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncIterator
+from typing import AsyncIterator, Literal
 
 from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -14,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 
 from quarterdeck.config import Settings
 from quarterdeck.console.schemas import (
+    ApprovalDecisionRequest,
     ConfirmRequest,
     MailAuthorizationRequest,
     MailDisableRequest,
@@ -146,6 +147,37 @@ def create_app(
         del x_qd_csrf
         record = await run_in_threadpool(service.confirm_plan, plan_id, body)
         return record.model_dump(mode="json")
+
+    @app.get("/api/v1/providers")
+    async def providers() -> dict:
+        return await run_in_threadpool(service.provider_statuses)
+
+    @app.post("/api/v1/providers/{provider}/connect", status_code=status.HTTP_202_ACCEPTED)
+    async def connect_provider(
+        provider: Literal["openai", "anthropic"],
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        job = await run_in_threadpool(service.request_provider_connection, provider)
+        return job.model_dump(mode="json")
+
+    @app.get("/api/v1/provider-connections/{job_id}")
+    async def provider_connection(job_id: str) -> dict:
+        job = await run_in_threadpool(service.get_provider_connection, job_id)
+        return job.model_dump(mode="json")
+
+    @app.get("/api/v1/approvals")
+    async def approvals() -> list[dict]:
+        return await run_in_threadpool(service.list_pending_approvals)
+
+    @app.post("/api/v1/approvals/{approval_id}/decision")
+    async def decide_approval(
+        approval_id: str,
+        body: ApprovalDecisionRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        return await run_in_threadpool(service.decide_approval, approval_id, body)
 
     @app.post("/api/v1/mail-summary", status_code=status.HTTP_202_ACCEPTED)
     async def create_mail_summary(

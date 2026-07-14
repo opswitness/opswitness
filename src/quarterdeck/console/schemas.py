@@ -226,6 +226,25 @@ class MailAuthorizationJob(BaseModel):
     error: str | None = Field(default=None, max_length=500)
 
 
+class ProviderConnectionJob(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str
+    provider: Literal["openai", "anthropic"]
+    status: Literal["running", "ready", "failed"] = "running"
+    created_at: str = Field(default_factory=utc_now)
+    updated_at: str = Field(default_factory=utc_now)
+    error: str | None = Field(default=None, max_length=500)
+
+
+class ApprovalDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["approve", "reject"]
+    decision_note: str = Field(default="", max_length=500)
+    confirmed: Literal[True]
+
+
 class TelegramConfigureRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

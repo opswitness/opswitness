@@ -8,6 +8,29 @@ export type Integration = {
   privacy?: string;
 };
 
+export type AIProvider = Integration & {
+  provider: 'openai' | 'anthropic';
+  installed: boolean;
+  authenticated: boolean;
+  auth_mode: 'none' | 'unknown' | 'chatgpt' | 'api_key' | 'account' | 'console';
+  runtime_ready: boolean;
+};
+
+export type ApprovalCard = {
+  approval_id: string;
+  status: 'pending';
+  kind: 'tool_call' | 'governance';
+  title: string;
+  summary: string;
+  recommended_action: string;
+  tool_name?: string | null;
+  tool_input?: string | null;
+  risks: string[];
+  expires_at?: string | null;
+  requested_at?: string | null;
+  can_decide: boolean;
+};
+
 export type PlannedAgent = {
   name: string;
   role: 'lead' | 'researcher' | 'operator' | 'reviewer' | 'reporter' | 'specialist';
@@ -120,6 +143,8 @@ export type Bootstrap = {
   csrf_token: string;
   generated_at: string;
   integrations: Record<string, Integration>;
+  providers: Record<'openai' | 'anthropic', AIProvider>;
+  system: Record<'ai' | 'governance' | 'evidence', Integration>;
   fleet: {
     runs: number;
     artifacts: number;
@@ -135,10 +160,20 @@ export type Bootstrap = {
   };
   pending_approvals: number | null;
   approvals_available: boolean;
+  approvals: ApprovalCard[];
   workflows: Workflow[];
   plans: PlanRecord[];
   recent_runs: RunRecord[];
   mail_ready: boolean;
+};
+
+export type ProviderConnectionJob = {
+  job_id: string;
+  provider: 'openai' | 'anthropic';
+  status: 'running' | 'ready' | 'failed';
+  created_at: string;
+  updated_at: string;
+  error?: string | null;
 };
 
 export type MailSummaryJob = {

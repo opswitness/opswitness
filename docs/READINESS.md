@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 278 tests pass in three consecutive runs; ruff and mypy pass. DCO, worktree
+- Full suite: 287 tests pass in three consecutive runs; ruff and mypy pass. DCO, worktree
   gitleaks, and full-history gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -110,12 +110,25 @@ blocked by the current open gates below.
   occur. A real
   synthetic request returned a four-Agent/four-stage review plan and stopped at the unchecked,
   disabled confirmation action, so no execution side effect occurred. Desktop and 390px mobile
-  layouts have zero horizontal overflow; the Workspace composer stays above the five-item mobile
+  layouts have zero horizontal overflow; the Workspace composer stays above the six-item mobile
   navigation, quick prompts only populate local input, and New conversation resets it without a
   planning side effect. The built wheel contains the versioned static assets.
   Mail stays visibly `未启用` until the existing consent/OAuth gate closes, but its setup button now
   opens the exact readonly and model-metadata consent contract instead of a dead control. Design authority:
   [ADR-0007](adr/0007-local-operator-console.md).
+- Quarterdeck is now the sole ordinary operator surface. The Connections view probes the real
+  local ChatGPT/OpenAI and Claude login state and launches only fixed vendor-owned login flows;
+  it never accepts or returns model credentials. Planning automatically selects a ready provider
+  and starts the hidden AI adapter when needed. The new Approval view lists redacted pending calls
+  and performs fixed approve/reject mutations behind explicit review, loopback Origin, CSRF, and
+  JSON gates. The local ledger fsyncs the request before the governance API call and records a
+  fixed outcome afterward; free-text notes enter the ledger only as SHA-256. AionUi and Paperclip
+  are absent from normal navigation and appear only in a closed advanced-diagnostics disclosure.
+  Version 1 is explicitly a single-user loopback surface whose local actor is `local_console`, not
+  a multi-user identity system. Final source-console acceptance showed `chatgpt` and `account`
+  auth modes with both registered runtimes ready; the UI labeled them separately, exposed no
+  provider output or internal system name, kept diagnostics closed, had no browser warnings, and
+  had zero horizontal overflow at desktop and 390x844 mobile sizes.
 - A real source-console acceptance submitted only the synthetic terse intent `算命师`. The first
   AionUi result failed the new brief contract, visibly moved into the repair phase, then returned a
   six-section Bazi demo brief with `DEMO-001`, deterministic `lunar-python`, knowledge-only AI
@@ -170,11 +183,11 @@ blocked by the current open gates below.
    validation inputs, and records no credential values. Production credentials are still absent
    and the separately confirmed fixed delivery probe must be exercised during soak without
    exposing or copying tokens into chat, repo, argv, logs, or plists.
-5. **Daily mail consent and OAuth** — before enabling the adapter or creating the AionUi
+5. **Daily mail consent and OAuth** — before enabling the adapter or creating the hidden
    09:00 America/Los_Angeles task, the operator must create and privately import a Google Desktop
    OAuth client, then explicitly approve Gmail readonly OAuth
-   and sending sender/subject/date/message-id metadata to the model provider configured in
-   AionUi, set `mail.model_metadata_consent: true`, and bind a separate assistant only to the
+   and sending sender/subject/date/message-id metadata to the selected model provider,
+   set `mail.model_metadata_consent: true`, and bind a separate internal assistant only to the
    mail profile. Then run one real metadata-only acceptance check; automatic
    send/draft/delete/label mutation remains out of scope.
 6. **Brand gate** — `QUARTERDECK` has an active US class-42 software registration and
@@ -203,7 +216,7 @@ The former M3 and AionUi blockers are closed without weakening their acceptance 
 - AionUi's own Check MCP Availability action succeeded and displayed all eight Quarterdeck
   tools, closing the in-app acceptance gate. The full Paperclip MCP is intentionally not
   mounted: its pinned package exposes approval writes and a generic API escape hatch without
-  a server-enforced read-only mode. Approval decisions remain in Paperclip Web UI.
+  a server-enforced read-only mode. Approval decisions now use Quarterdeck's fixed local facade.
 - That eight-tool acceptance remains valid for the evidence console. ADR-0004 subsequently
   added three allowlisted launch tools. Their direct eleven-tool handshake, isolated workflow,
   and live AionUi Manual Task now pass. Built-in Claude cron was found to force
@@ -277,7 +290,9 @@ own independent acceptance gates.
 
 ## Truth split for approvals (P3)
 
-- **Paperclip owns**: approval UI, human identity, workflow state machine.
+- **Paperclip owns**: remote approval state and workflow state machine.
+- **Quarterdeck console owns**: the only ordinary decision UI and the explicit local click
+  acknowledgement. Version 1 identifies this single local operator only as `local_console`.
 - **Quarterdeck ledger owns**: the authoritative evidence — request hash,
   tool_use_id, expiry, approval id, decision, decider, resume/consume outcome.
 - Paperclip database loss ⇒ pending calls stay denied; every past decision remains
@@ -288,7 +303,7 @@ own independent acceptance gates.
 Keep register-trigger under observation until `qd soak status m2-canary` can be evaluated no
 earlier than 2026-07-14 15:23:32 PDT.
 Approve or reject the `OpsWitness` candidate before starting the atomic rename. Revalidate the
-guarded AionUi agent after any AionUi upgrade.
+hidden guarded AionUi adapter after any AionUi upgrade.
 Do not adopt feed-monitor/sox-monitor, publish a release, or build the practitioner UI before
 their respective gates pass.
 

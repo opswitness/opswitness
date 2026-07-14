@@ -18,6 +18,7 @@ from quarterdeck.console.aionui import (
 )
 from quarterdeck.console.app import create_app
 from quarterdeck.console.schemas import (
+    ApprovalDecisionRequest,
     ConfirmRequest,
     ExecutionState,
     MailAuthorizationRequest,
@@ -204,6 +205,20 @@ class FakeAion:
     def health(self):
         return {"platform": "darwin"}
 
+    def list_assistants(self):
+        return [
+            {
+                "id": "bare:8e1acf31",
+                "enabled": True,
+                "team_selectable": True,
+            },
+            {
+                "id": "bare:2d23ff1c",
+                "enabled": True,
+                "team_selectable": True,
+            },
+        ]
+
     def stale_ephemeral_sessions(self):
         return list(self.stale_sessions)
 
@@ -211,8 +226,8 @@ class FakeAion:
         self.recovered_sessions.append(session)
         return {"team_deleted": session.team_id is not None, "workspace_removed": True}
 
-    def generate_plan(self, plan_id, request, catalog, progress=None):
-        del plan_id, request, catalog
+    def generate_plan(self, plan_id, request, catalog, progress=None, *, assistant_id=None):
+        del plan_id, request, catalog, assistant_id
         self.generated += 1
         if progress is not None:
             progress("generating_plan", 30)
@@ -244,6 +259,7 @@ class FakeAion:
 class FakePaperclip:
     def __init__(self) -> None:
         self.created = 0
+        self.approvals: list[dict] = []
 
     def list_issues(self):
         return []
@@ -256,7 +272,16 @@ class FakePaperclip:
 
     def list_approvals(self, status=None):
         del status
-        return []
+        return [row for row in self.approvals if row.get("status") == "pending"]
+
+    def get_approval(self, approval_id):
+        return next(row for row in self.approvals if row["id"] == approval_id)
+
+    def resolve_approval(self, approval_id, decision, decision_note=None):
+        row = self.get_approval(approval_id)
+        row["status"] = "approved" if decision == "approve" else "rejected"
+        row["decisionNote"] = decision_note
+        return row
 
 
 @pytest.fixture
@@ -275,6 +300,16 @@ def console_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         settings,
         aion=aion,  # type: ignore[arg-type]
         paperclip_factory=lambda: paperclip,  # type: ignore[arg-type,return-value]
+        provider_probe=lambda provider: {
+            "provider": provider,
+            "label": "ChatGPT / OpenAI" if provider == "openai" else "Claude",
+            "installed": True,
+            "authenticated": provider == "openai",
+            "auth_mode": "chatgpt" if provider == "openai" else "none",
+            "status": "online" if provider == "openai" else "setup",
+            "detail": "账号已登录" if provider == "openai" else "待登录",
+        },
+        provider_login=lambda provider: provider == "openai",
         background=False,
     )
     yield settings, service, aion, paperclip
@@ -1609,6 +1644,170 @@ def test_console_dashboard_never_reports_zero_when_approvals_are_unavailable(
     assert result["approvals_available"] is False
     assert result["integrations"]["paperclip"]["status"] == "attention"
     assert result["integrations"]["paperclip"]["detail"] == "审批状态不可用"
+
+
+def test_console_exposes_user_facing_provider_readiness_without_internal_ids(console_env):
+    _, service, _, _ = console_env
+    providers = service.provider_statuses()
+    assert providers["openai"]["runtime_ready"] is True
+    assert providers["openai"]["status"] == "online"
+    assert providers["openai"]["detail"] == "已通过 ChatGPT 登录，可用于任务"
+    assert providers["anthropic"]["status"] == "setup"
+    encoded = json.dumps(providers, ensure_ascii=False)
+    assert "bare:" not in encoded
+    assert "AionUi" not in encoded
+
+
+def test_console_does_not_mislabel_claude_account_auth_as_console_billing(console_env):
+    _, service, _, _ = console_env
+
+    def account_probe(provider):
+        return {
+            "provider": provider,
+            "label": "ChatGPT / OpenAI" if provider == "openai" else "Claude",
+            "installed": True,
+            "authenticated": provider == "anthropic",
+            "auth_mode": "account" if provider == "anthropic" else "none",
+            "status": "online" if provider == "anthropic" else "setup",
+            "detail": "账号已登录" if provider == "anthropic" else "待登录",
+        }
+
+    service._provider_probe = account_probe
+    providers = service.provider_statuses()
+    assert providers["anthropic"]["runtime_ready"] is True
+    assert providers["anthropic"]["detail"] == "Claude 账号已登录，可用于本机任务"
+    assert "Console" not in str(providers["anthropic"]["detail"])
+
+
+def test_provider_connection_is_vendor_owned_and_audited_without_credentials(console_env):
+    _, service, _, _ = console_env
+    requested = service.request_provider_connection("openai")
+    assert requested.status == "running"
+    ready = service.run_provider_connection(requested.job_id)
+    assert ready.status == "ready"
+    events = service.ledger.read_all()
+    assert [event["kind"] for event in events] == [
+        "provider_connection_requested",
+        "provider_connection_finished",
+    ]
+    encoded = json.dumps(events, ensure_ascii=False)
+    assert "token" not in encoded.casefold()
+    assert "password" not in encoded.casefold()
+
+
+def test_local_console_can_resolve_pending_approval_with_append_only_evidence(console_env):
+    _, service, _, paperclip = console_env
+    approval_id = "11111111-1111-4111-8111-111111111111"
+    paperclip.approvals.append(
+        {
+            "id": approval_id,
+            "status": "pending",
+            "createdAt": "2026-07-14T12:00:00+00:00",
+            "payload": {
+                "title": "Approve Claude tool: Bash",
+                "summary": "Quarterdeck deferred a tool call.",
+                "recommendedAction": "Inspect and decide.",
+                "risks": ["May modify files"],
+            },
+        }
+    )
+    service.ledger.append(
+        "tool_gate_requested",
+        "session-1",
+        {
+            "schema_version": 1,
+            "request_id": "request-1",
+            "request_hash": "a" * 64,
+            "session_id": "session-1",
+            "tool_use_id": "tool-1",
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo safe"},
+            "cwd": "/tmp/demo",
+            "expires_at": "2026-07-14T13:00:00+00:00",
+        },
+        fsync=True,
+    )
+    service.ledger.append(
+        "tool_gate_linked",
+        "session-1",
+        {
+            "schema_version": 1,
+            "request_id": "request-1",
+            "request_hash": "a" * 64,
+            "session_id": "session-1",
+            "tool_use_id": "tool-1",
+            "approval_id": approval_id,
+            "resume_args": [],
+        },
+        fsync=True,
+    )
+    cards = service.list_pending_approvals()
+    assert cards[0]["tool_name"] == "Bash"
+    assert cards[0]["tool_input"] == '{"command":"echo safe"}'
+
+    result = service.decide_approval(
+        approval_id,
+        ApprovalDecisionRequest(
+            decision="approve",
+            decision_note="I reviewed this exact request",
+            confirmed=True,
+        ),
+    )
+    assert result == {"approval_id": approval_id, "status": "approved", "reconciled": False}
+    assert paperclip.approvals[0]["status"] == "approved"
+    events = service.ledger.read_all()
+    assert [event["kind"] for event in events[-2:]] == [
+        "approval_decision_requested",
+        "approval_decision_finished",
+    ]
+    encoded = json.dumps(events, ensure_ascii=False)
+    assert "I reviewed this exact request" not in encoded
+
+    reconciled = service.decide_approval(
+        approval_id,
+        ApprovalDecisionRequest(decision="approve", confirmed=True),
+    )
+    assert reconciled["reconciled"] is True
+
+
+def test_provider_and_approval_http_facade_requires_local_csrf(
+    console_env, monkeypatch
+):
+    settings, service, _, paperclip = console_env
+    approval_id = "22222222-2222-4222-8222-222222222222"
+    paperclip.approvals.append(
+        {
+            "id": approval_id,
+            "status": "pending",
+            "payload": {"title": "Approve a governed operation"},
+        }
+    )
+    monkeypatch.setattr(service, "acquire_instance_lease", lambda: True)
+    monkeypatch.setattr(service, "recover_startup", lambda: {})
+    monkeypatch.setattr(service, "release_instance_lease", lambda: None)
+    app = create_app(settings, service=service)
+    csrf = app.state.csrf_token
+    with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+        denied = client.post("/api/v1/providers/openai/connect", json={})
+        assert denied.status_code == 403
+        connected = client.post(
+            "/api/v1/providers/openai/connect",
+            json={},
+            headers={"X-QD-CSRF": csrf},
+        )
+        assert connected.status_code == 202
+        job_id = connected.json()["job_id"]
+        assert client.get(f"/api/v1/provider-connections/{job_id}").status_code == 200
+        approvals = client.get("/api/v1/approvals")
+        assert approvals.status_code == 200
+        assert approvals.json()[0]["approval_id"] == approval_id
+        decided = client.post(
+            f"/api/v1/approvals/{approval_id}/decision",
+            json={"decision": "reject", "decision_note": "not intended", "confirmed": True},
+            headers={"X-QD-CSRF": csrf},
+        )
+        assert decided.status_code == 200
+        assert decided.json()["status"] == "rejected"
 
 
 def test_console_dashboard_contains_schedule_parser_errors(monkeypatch, console_env):

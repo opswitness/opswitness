@@ -6,11 +6,14 @@ import fcntl
 import hashlib
 import json
 import os
+import subprocess
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
+from uuid import UUID
 
 import httpx
 
@@ -25,6 +28,7 @@ from quarterdeck.config import (
 )
 from quarterdeck.console.aionui import AionUiClient, AionUiError
 from quarterdeck.console.schemas import (
+    ApprovalDecisionRequest,
     ConfirmRequest,
     ExecutionState,
     MailAuthorizationJob,
@@ -34,19 +38,23 @@ from quarterdeck.console.schemas import (
     PlanRecord,
     PlanRequest,
     PlanningProgress,
+    ProviderConnectionJob,
     TaskPlan,
     TelegramConfigureRequest,
     utc_now,
 )
+from quarterdeck.console.providers import ProviderName, login_provider, probe_provider
 from quarterdeck.console.store import PlanNotFound, PlanStore
 from quarterdeck.digest import build_digest
 from quarterdeck.ids import new_ulid
 from quarterdeck.index import job_summary, query_runs, rebuild
 from quarterdeck.ledger import Ledger
+from quarterdeck.gate import fold_gate_states
 from quarterdeck.mail import authorize_mail, check_mail, mail_status, save_oauth_client
 from quarterdeck.notify import alert
 from quarterdeck.notify.telegram import send_telegram
 from quarterdeck.paperclip import PaperclipClient, PaperclipError
+from quarterdeck.redact import redact_text
 from quarterdeck.workflows import start_workflow, workflow_catalog, workflow_status
 from quarterdeck.watchdog import check as watchdog_check
 
@@ -60,6 +68,8 @@ class ConsoleUnavailable(RuntimeError):
 
 
 PaperclipFactory = Callable[[], PaperclipClient]
+ProviderProbe = Callable[[ProviderName], dict[str, object]]
+ProviderLogin = Callable[[ProviderName], bool]
 MAIL_SUMMARY_FAILURE = "mail summary failed; run qd mail status locally"
 MAIL_AUTHORIZATION_FAILURE = (
     "Gmail readonly authorization failed; inspect qd mail status locally."
@@ -69,14 +79,14 @@ TELEGRAM_CONFIGURATION_REJECTED = "Telegram credentials were rejected or already
 TELEGRAM_ENVIRONMENT_CONTROLLED = "Telegram credentials are controlled outside the console."
 TELEGRAM_TEST_FAILED = "Telegram test delivery failed; inspect local diagnostics."
 PLAN_GENERATION_FAILED = "plan_generation_failed"
-PLAN_GENERATION_FAILED_DETAIL = "Planning failed; inspect AionUi locally and create a new plan."
+PLAN_GENERATION_FAILED_DETAIL = "Planning failed; check the AI connection and create a new plan."
 EXECUTION_PLAN_INVALID = "execution_plan_invalid"
 EXECUTION_PLAN_INVALID_DETAIL = "Confirmed plan integrity failed; replan before dispatch."
 EXECUTION_DISPATCH_FAILED = "execution_dispatch_failed"
 EXECUTION_DISPATCH_FAILED_DETAIL = (
-    "Execution dispatch failed; inspect Paperclip and AionUi before replanning."
+    "Execution dispatch failed; inspect Quarterdeck system diagnostics before replanning."
 )
-EXECUTION_REMOTE_FAILED_DETAIL = "Execution reported failure; inspect AionUi or workflow evidence."
+EXECUTION_REMOTE_FAILED_DETAIL = "Execution reported failure; inspect the task evidence."
 EXECUTION_STATUS_UNAVAILABLE_DETAIL = (
     "Execution status is temporarily unavailable; retry from the console."
 )
@@ -90,11 +100,13 @@ PLANNING_INTERRUPTED = "planning_interrupted_by_restart"
 DISPATCH_INTERRUPTED = "execution_dispatch_interrupted"
 PLANNING_INTERRUPTED_DETAIL = "Planning was interrupted by a console restart; create a new plan."
 DISPATCH_INTERRUPTED_DETAIL = (
-    "Execution dispatch was interrupted; inspect Paperclip and AionUi before replanning."
+    "Execution dispatch was interrupted; inspect system diagnostics before replanning."
 )
 EPHEMERAL_RECOVERY_UNAVAILABLE = (
-    "AionUi ephemeral recovery is unavailable; inspect the local console state before restarting."
+    "AI session recovery is unavailable; inspect system diagnostics before restarting."
 )
+PROVIDER_CONNECTION_FAILED = "AI account connection did not complete; try again."
+APPROVAL_DECISION_FAILED = "Approval decision could not be confirmed; refresh and retry."
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -177,13 +189,23 @@ class ConsoleService:
         *,
         aion: AionUiClient | None = None,
         paperclip_factory: PaperclipFactory | None = None,
+        provider_probe: ProviderProbe | None = None,
+        provider_login: ProviderLogin | None = None,
         background: bool = True,
     ) -> None:
         self.settings = settings or Settings()
         self.ledger = Ledger(self.settings.ledger_dir)
         self.store = PlanStore(self.settings.console.state_dir)
         self.aion = aion or AionUiClient(self.settings.console)
+        self._owns_aion_runtime = aion is None
+        self._owns_paperclip_runtime = paperclip_factory is None
         self._paperclip_factory = paperclip_factory or self._paperclip
+        self._provider_probe = provider_probe or (
+            lambda provider: probe_provider(self.settings, provider)
+        )
+        self._provider_login = provider_login or (
+            lambda provider: login_provider(self.settings, provider)
+        )
         self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="qd-console")
         self._background = background
         self._mail_jobs: dict[str, MailSummaryJob] = {}
@@ -191,6 +213,8 @@ class ConsoleService:
         self._mail_auth_jobs: dict[str, MailAuthorizationJob] = {}
         self._mail_auth_lock = threading.Lock()
         self._telegram_lock = threading.Lock()
+        self._provider_jobs: dict[str, ProviderConnectionJob] = {}
+        self._provider_lock = threading.Lock()
         self._lease_guard = threading.Lock()
         self._lease_fd: int | None = None
 
@@ -271,6 +295,355 @@ class ConsoleService:
         expected_seconds = min(timeout_budget, max(45, min(150, per_attempt)))
         return expected_seconds, timeout_budget
 
+    def _ensure_ai_runtime(self) -> None:
+        try:
+            self.aion.health()
+            return
+        except (AionUiError, OSError, ValueError):
+            if not self._owns_aion_runtime:
+                raise ConsoleUnavailable("AI runtime is unavailable") from None
+        app = self.settings.console.aionui_app.expanduser()
+        try:
+            resolved = app.resolve(strict=True)
+        except OSError as exc:
+            raise ConsoleUnavailable("AI runtime is not installed") from exc
+        if not resolved.is_dir() or resolved.suffix != ".app":
+            raise ConsoleUnavailable("AI runtime installation is invalid")
+        try:
+            launched = subprocess.run(
+                ["/usr/bin/open", "-gja", str(resolved)],
+                check=False,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ConsoleUnavailable("AI runtime could not be started") from exc
+        if launched.returncode != 0:
+            raise ConsoleUnavailable("AI runtime could not be started")
+        deadline = time.monotonic() + 25
+        while time.monotonic() < deadline:
+            try:
+                self.aion.health()
+                return
+            except (AionUiError, OSError, ValueError):
+                time.sleep(0.5)
+        raise ConsoleUnavailable("AI runtime did not become ready")
+
+    def _ensure_governance_runtime(self) -> None:
+        if not self._owns_paperclip_runtime:
+            return
+        health_url = f"{self.settings.paperclip.api_base.rstrip('/')}/api/health"
+        try:
+            response = httpx.get(health_url, timeout=3.0)
+            response.raise_for_status()
+            return
+        except httpx.HTTPError:
+            pass
+        label = f"gui/{os.getuid()}/com.quarterdeck.paperclip"
+        try:
+            kicked = subprocess.run(
+                ["/bin/launchctl", "kickstart", "-k", label],
+                check=False,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ConsoleUnavailable("governance service could not be started") from exc
+        if kicked.returncode != 0:
+            raise ConsoleUnavailable("governance service could not be started")
+        deadline = time.monotonic() + 25
+        while time.monotonic() < deadline:
+            try:
+                response = httpx.get(health_url, timeout=3.0)
+                response.raise_for_status()
+                return
+            except httpx.HTTPError:
+                time.sleep(0.5)
+        raise ConsoleUnavailable("governance service did not become ready")
+
+    def provider_statuses(self) -> dict[str, dict[str, object]]:
+        probes = {
+            provider: dict(self._provider_probe(provider))
+            for provider in ("openai", "anthropic")
+        }
+        assistants: list[dict[str, Any]] = []
+        runtime_online = False
+        try:
+            self.aion.health()
+            assistants = self.aion.list_assistants()
+            runtime_online = True
+        except (AionUiError, AttributeError, OSError, ValueError):
+            pass
+        assistant_ids = {
+            "openai": self.settings.console.runtime_assistants.get("codex_cli"),
+            "anthropic": self.settings.console.runtime_assistants.get("claude_code"),
+        }
+        for provider, probe in probes.items():
+            expected = assistant_ids[provider]
+            runtime_ready = runtime_online and any(
+                row.get("id") == expected
+                and row.get("enabled") is True
+                and row.get("team_selectable") is True
+                for row in assistants
+            )
+            authenticated = probe.get("authenticated") is True
+            probe["runtime_ready"] = bool(authenticated and runtime_ready)
+            probe["privacy"] = "厂商官方登录；Quarterdeck 不接收账号密码"
+            if authenticated and runtime_ready:
+                mode = str(probe.get("auth_mode") or "")
+                if provider == "openai" and mode == "chatgpt":
+                    detail = "已通过 ChatGPT 登录，可用于任务"
+                elif provider == "openai":
+                    detail = "OpenAI 已连接，可用于任务"
+                elif mode == "console":
+                    detail = "Anthropic Console 已连接，可用于任务"
+                else:
+                    detail = "Claude 账号已登录，可用于本机任务"
+                probe.update(status="online", detail=detail)
+            elif authenticated:
+                probe.update(status="attention", detail="账号已登录，AI 运行服务待就绪")
+        return probes
+
+    def _planner_assistant_id(self) -> str:
+        statuses = self.provider_statuses()
+        for provider, runtime in (("openai", "codex_cli"), ("anthropic", "claude_code")):
+            if statuses[provider].get("runtime_ready") is True:
+                assistant_id = self.settings.console.runtime_assistants.get(runtime)
+                if assistant_id:
+                    return assistant_id
+        return self.settings.console.planner_assistant_id
+
+    def request_provider_connection(self, provider: ProviderName) -> ProviderConnectionJob:
+        if provider not in {"openai", "anthropic"}:
+            raise ConsoleConflict("unsupported AI provider")
+        with self._provider_lock:
+            running = next(
+                (
+                    job
+                    for job in self._provider_jobs.values()
+                    if job.provider == provider and job.status == "running"
+                ),
+                None,
+            )
+            if running is not None:
+                return running
+            job = ProviderConnectionJob(job_id=new_ulid(), provider=provider)
+            self._append(
+                "provider_connection_requested",
+                job.job_id,
+                {"schema_version": 1, "provider": provider, "flow": "vendor_owned"},
+            )
+            self._provider_jobs[job.job_id] = job
+        self._submit(self.run_provider_connection, job.job_id)
+        return job
+
+    def run_provider_connection(self, job_id: str) -> ProviderConnectionJob:
+        with self._provider_lock:
+            try:
+                job = self._provider_jobs[job_id]
+            except KeyError as exc:
+                raise PlanNotFound(f"unknown provider connection: {job_id}") from exc
+        try:
+            completed = self._provider_login(job.provider)
+            authenticated = self._provider_probe(job.provider).get("authenticated") is True
+            if not completed or not authenticated:
+                raise ConsoleUnavailable(PROVIDER_CONNECTION_FAILED)
+            self._append(
+                "provider_connection_finished",
+                job.job_id,
+                {"schema_version": 1, "provider": job.provider, "authenticated": True},
+            )
+            updated = job.model_copy(
+                update={"status": "ready", "updated_at": utc_now(), "error": None}
+            )
+        except Exception:
+            try:
+                self._append(
+                    "provider_connection_failed",
+                    job.job_id,
+                    {"schema_version": 1, "provider": job.provider, "reason": "login_failed"},
+                )
+            except ConsoleUnavailable:
+                alert(f"audit evidence lost after provider connection failure job={job_id}")
+            updated = job.model_copy(
+                update={
+                    "status": "failed",
+                    "updated_at": utc_now(),
+                    "error": PROVIDER_CONNECTION_FAILED,
+                }
+            )
+        with self._provider_lock:
+            self._provider_jobs[job_id] = updated
+        return updated
+
+    def get_provider_connection(self, job_id: str) -> ProviderConnectionJob:
+        with self._provider_lock:
+            try:
+                return self._provider_jobs[job_id]
+            except KeyError as exc:
+                raise PlanNotFound(f"unknown provider connection: {job_id}") from exc
+
+    @staticmethod
+    def _approval_text(value: object, fallback: str, limit: int = 600) -> str:
+        if not isinstance(value, str) or not value.strip():
+            return fallback
+        return redact_text(value.strip())[:limit]
+
+    def approval_cards(
+        self,
+        approvals: list[dict[str, Any]],
+        *,
+        events: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        gate_states = fold_gate_states(events)
+        by_approval_id = {
+            state.approval_id: state
+            for state in gate_states.values()
+            if state.approval_id and state.decided is None and state.terminal is None
+        }
+        cards: list[dict[str, Any]] = []
+        for approval in approvals:
+            approval_id = approval.get("id")
+            if not isinstance(approval_id, str):
+                continue
+            try:
+                UUID(approval_id)
+            except ValueError:
+                continue
+            payload = approval.get("payload")
+            payload = payload if isinstance(payload, dict) else {}
+            state = by_approval_id.get(approval_id)
+            requested = state.requested if state is not None else {}
+            tool_name = requested.get("tool_name") or payload.get("toolName")
+            if not isinstance(tool_name, str):
+                tool_name = None
+            if state is not None:
+                input_summary = json.dumps(
+                    requested.get("tool_input", {}),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )[:1600]
+            else:
+                input_summary = None
+            raw_risks = payload.get("risks")
+            risks = (
+                [self._approval_text(item, "风险信息不可用", 240) for item in raw_risks[:4]]
+                if isinstance(raw_risks, list)
+                else []
+            )
+            title = self._approval_text(
+                payload.get("title"),
+                f"确认 {tool_name}" if tool_name else "治理请求",
+                160,
+            )
+            cards.append(
+                {
+                    "approval_id": approval_id,
+                    "status": "pending",
+                    "kind": "tool_call" if tool_name else "governance",
+                    "title": title,
+                    "summary": self._approval_text(
+                        payload.get("summary"),
+                        "这项操作需要你确认后才能继续。",
+                    ),
+                    "recommended_action": self._approval_text(
+                        payload.get("recommendedAction"),
+                        "确认内容和风险后再决定。",
+                    ),
+                    "tool_name": tool_name,
+                    "tool_input": input_summary,
+                    "risks": risks,
+                    "expires_at": requested.get("expires_at") or payload.get("expiresAt"),
+                    "requested_at": approval.get("createdAt") or approval.get("created_at"),
+                    "can_decide": True,
+                }
+            )
+        return cards
+
+    def list_pending_approvals(self) -> list[dict[str, Any]]:
+        events = self.ledger.read_all()
+        try:
+            pending = self._paperclip_factory().list_approvals("pending")
+        except (ConsoleUnavailable, PaperclipError) as exc:
+            raise ConsoleUnavailable("Approval list is temporarily unavailable.") from exc
+        return self.approval_cards(pending, events=events)
+
+    def decide_approval(
+        self,
+        approval_id: str,
+        request: ApprovalDecisionRequest,
+    ) -> dict[str, Any]:
+        try:
+            UUID(approval_id)
+        except ValueError as exc:
+            raise ConsoleConflict("approval id is invalid") from exc
+        self._ensure_governance_runtime()
+        client = self._paperclip_factory()
+        try:
+            current = client.get_approval(approval_id)
+        except PaperclipError as exc:
+            raise ConsoleUnavailable(APPROVAL_DECISION_FAILED) from exc
+        desired = "approved" if request.decision == "approve" else "rejected"
+        current_status = str(current.get("status") or "").casefold()
+        if current_status == desired:
+            return {"approval_id": approval_id, "status": desired, "reconciled": True}
+        if current_status not in {
+            "pending",
+            "awaiting_decision",
+            "pending_board_decision",
+            "pending_user_decision",
+        }:
+            raise ConsoleConflict("approval is no longer pending")
+        decision_id = new_ulid()
+        note = request.decision_note.strip()
+        self._append(
+            "approval_decision_requested",
+            decision_id,
+            {
+                "schema_version": 1,
+                "approval_id": approval_id,
+                "decision": request.decision,
+                "source": "local_console",
+                "decision_note_sha256": hashlib.sha256(note.encode()).hexdigest() if note else None,
+            },
+        )
+        try:
+            updated = client.resolve_approval(approval_id, request.decision, note or None)
+            remote_status = str(updated.get("status") or "").casefold()
+            if remote_status and remote_status != desired:
+                raise PaperclipError("approval response did not confirm the requested decision")
+        except PaperclipError as exc:
+            try:
+                self._append(
+                    "approval_decision_failed",
+                    decision_id,
+                    {
+                        "schema_version": 1,
+                        "approval_id": approval_id,
+                        "decision": request.decision,
+                        "reason": "remote_unconfirmed",
+                    },
+                )
+            except ConsoleUnavailable:
+                alert(f"audit evidence lost after approval decision failure id={approval_id}")
+            raise ConsoleUnavailable(APPROVAL_DECISION_FAILED) from exc
+        self._append(
+            "approval_decision_finished",
+            decision_id,
+            {
+                "schema_version": 1,
+                "approval_id": approval_id,
+                "status": desired,
+                "source": "local_console",
+            },
+        )
+        return {"approval_id": approval_id, "status": desired, "reconciled": False}
+
     def request_plan(self, request: PlanRequest) -> PlanRecord:
         workspace = self._normalise_requested_workspace(request.workspace)
         request = request.model_copy(update={"workspace": workspace})
@@ -332,6 +705,7 @@ class ConsoleService:
         if record.status != "planning":
             return record
         try:
+            self._ensure_ai_runtime()
             try:
                 catalog = workflow_catalog()
             except (OSError, ValueError):
@@ -362,7 +736,13 @@ class ConsoleService:
 
                 self.store.mutate(plan_id, update)
 
-            plan = self.aion.generate_plan(plan_id, request, catalog, report_progress)
+            plan = self.aion.generate_plan(
+                plan_id,
+                request,
+                catalog,
+                report_progress,
+                assistant_id=self._planner_assistant_id(),
+            )
             plan_sha = _execution_plan_sha(record, plan)
             self._append(
                 "task_plan_drafted",
@@ -469,6 +849,7 @@ class ConsoleService:
             plan = record.plan
             if plan is None:
                 raise ConsoleConflict("plan content disappeared before dispatch")
+            self._ensure_governance_runtime()
             issue = self._create_or_find_issue(record)
             issue_id = str(issue.get("id", ""))
             if not issue_id:
@@ -1179,13 +1560,14 @@ class ConsoleService:
             pending_projection=int(info["pending_projection"]),
             coverage_error=coverage_error,
         )
+        providers = self.provider_statuses()
         integrations: dict[str, Any] = {}
         try:
             self.aion.health()
             integrations["aionui"] = {
                 "status": "online",
                 "label": "AionUi",
-                "url": self.settings.console.aionui_base,
+                "detail": "内部 Agent 运行适配器在线",
             }
         except (AionUiError, ValueError):
             integrations["aionui"] = {
@@ -1201,7 +1583,7 @@ class ConsoleService:
             integrations["paperclip"] = {
                 "status": "online",
                 "label": "Paperclip",
-                "url": self.settings.paperclip.api_base,
+                "detail": "内部治理记录服务在线",
             }
         except httpx.HTTPError:
             integrations["paperclip"] = {
@@ -1240,8 +1622,11 @@ class ConsoleService:
         }
         pending_approvals: int | None = None
         approvals_available = False
+        approval_cards: list[dict[str, Any]] = []
         try:
-            pending_approvals = len(self._paperclip_factory().list_approvals("pending"))
+            pending = self._paperclip_factory().list_approvals("pending")
+            pending_approvals = len(pending)
+            approval_cards = self.approval_cards(pending, events=events)
             approvals_available = True
         except (ConsoleUnavailable, PaperclipError):
             if integrations["paperclip"]["status"] == "online":
@@ -1254,9 +1639,30 @@ class ConsoleService:
             workflows = workflow_catalog()
         except (OSError, ValueError):
             workflows = []
+        ai_ready = any(row.get("runtime_ready") is True for row in providers.values())
+        governance_status = integrations["paperclip"]["status"]
+        evidence_status = integrations["ledger"]["status"]
         return {
             "generated_at": utc_now(),
             "integrations": integrations,
+            "providers": providers,
+            "system": {
+                "ai": {
+                    "status": "online" if ai_ready else "attention",
+                    "label": "AI 服务",
+                    "detail": "可用于任务" if ai_ready else "需要连接或恢复",
+                },
+                "governance": {
+                    "status": governance_status,
+                    "label": "审批与治理",
+                    "detail": integrations["paperclip"].get("detail"),
+                },
+                "evidence": {
+                    "status": evidence_status,
+                    "label": "证据",
+                    "detail": integrations["ledger"].get("detail"),
+                },
+            },
             "fleet": {
                 **info,
                 "jobs": len(jobs),
@@ -1264,6 +1670,7 @@ class ConsoleService:
             },
             "pending_approvals": pending_approvals,
             "approvals_available": approvals_available,
+            "approvals": approval_cards,
             "workflows": workflows,
             "plans": [row.model_dump(mode="json") for row in self.list_plans(12)],
             "recent_runs": recent_runs,

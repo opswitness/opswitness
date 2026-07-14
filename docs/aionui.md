@@ -1,16 +1,17 @@
-# AionUi 与 Quarterdeck 总控制台
+# Quarterdeck 总控制台与内部 AionUi 适配器
 
-界面策略：**不 fork AionUi/Paperclip，也不自建第二套控制面**。Quarterdeck 现在提供一个
-薄的本地总入口，把现成界面与证据层组合起来：
+界面策略：**不 fork AionUi/Paperclip，也不自建第二套控制面**。Quarterdeck 是用户唯一
+需要接触的本地入口，内部服务只通过窄适配器协作：
 
-1. **Quarterdeck 总控制台**（http://127.0.0.1:8765）— 舰队健康、证据、连接、邮箱摘要，
-   以及“先规划、确认后运行”的新任务入口。它不保存审批身份，也不实现 Agent runtime。
-2. **Paperclip Web UI**（http://127.0.0.1:3100）— 舰队 issue（`[qd] <job>`）、run 评论、
-   审批队列、成本看板，投影后自动出现，零配置。
-3. **AionUi 对话式控制台** — 只挂 Quarterdeck MCP，自然语言查询外部舰队
-   ledger、watchdog、artifact 和投影状态，也可通过本地白名单启动完整工作流。
-   Paperclip 的审批决策继续只在 Paperclip Web UI 完成。
-4. `qd` CLI — 终端兜底，与 MCP 共用同一套函数，永不打架。
+1. **Quarterdeck 总控制台**（http://127.0.0.1:8765）— AI 连接、舰队健康、任务规划与运行、
+   审批、证据、邮箱摘要和日常设置。
+2. **AionUi** — 隐藏的规划/Agent session 适配器；正常界面不展示其 Team、Assistant ID 或 URL。
+3. **Paperclip** — 隐藏的治理记录与审批状态机；正常界面不展示其 issue URL 或 Web UI 入口。
+4. `qd` CLI — 管理员与故障恢复兜底，与总控制台共用同一套服务函数。
+
+用户在“连接”页直接连接 ChatGPT/OpenAI 或 Claude。Quarterdeck 只运行固定的官方 CLI
+登录流程并读取脱敏状态，不接收密码、OAuth token 或模型 API key。内部服务名称只在默认
+折叠的“系统诊断”中显示。
 
 ## 总控制台
 
@@ -36,7 +37,7 @@ Plan Mode 临时 Team 在成功或失败后删除；若删除无法确认，规�
 消费者的维护窗口内先升级稳定 uv tool；当前生产 canary 通过前不得为了安装总控制台而
 中断连续证据。
 
-## AionUi 配置
+## AionUi 管理员配置（正常用户无需操作）
 
 用户级工具必须包含 MCP extra：
 
@@ -64,9 +65,9 @@ uv tool install --force --with mcp /path/to/distribution.whl
 Quarterdeck 从权限为 0700/0600 的本机配置目录读取凭据；不要把 key 复制进 AionUi
 的 env/SQLite。若只需读工具，`qd_project_now` 和 `qd_workflow_start` 都不应由模型调用。
 
-## 主界面的“每日工作台”图标
+## AionUi 兼容入口（仅高级诊断/验收）
 
-不 fork AionUi。使用它原生的 Custom Assistant 在主界面得到一个独立入口：
+不 fork AionUi。以下 Custom Assistant 仅保留给适配器验收和故障诊断，不再作为产品主入口：
 
 - 名称：`每日工作台`
 - 图标：`📬`
@@ -233,8 +234,8 @@ AionUi 2.1.33 会把内置 Claude Code 的 Scheduled Task 自动模式规范化�
   0.327 秒、`degraded=false`，随后 `qd project` 返回 `pending=0`。因此按钮、MCP、后台
   supervisor、权威账本与 Paperclip 投影这五段均已在同一次点击中闭环。
 
-这是启动意图，不是 M3 审批。工具调用中的高风险副作用仍由 Quarterdeck gate →
-Paperclip Web UI 审批；流程退出码也只证明 execution，业务完成必须看 artifact
+这是启动意图，不是 M3 审批。工具调用中的高风险副作用仍由 Quarterdeck gate 拦截，
+并在 Quarterdeck 总控制台的“审批”页决策；流程退出码也只证明 execution，业务完成必须看 artifact
 eval/signoff。完整契约见 [ADR-0004](adr/0004-allowlisted-workflow-launch.md)。
 
 ## 为什么不把 Paperclip 官方 MCP 直接挂入 AionUi
@@ -248,8 +249,8 @@ JSON 端点的 `paperclipApiRequest` escape hatch。写面包括 issue 修改、
 发布包 README 少列了源码中真实注册的 `paperclipRequestCheckboxConfirmation`；这里的
 数量以 `dist/tools.js` 的注册表为准。
 
-因此直接接入会让 AionUi 中的模型获得治理写权限，并破坏“Paperclip Web UI 是唯一
-人工审批源”的 M3 边界。除非上游提供服务端强制的只读 token/tool allowlist，或者
+因此直接接入会让 AionUi 中的模型获得治理写权限，并绕过 Quarterdeck 的固定审批门。
+除非上游提供服务端强制的只读 token/tool allowlist，或者
 另有经过审计的只读代理，否则该 MCP 保持未安装、未配置。不能靠提示词要求模型
 “只读”。
 

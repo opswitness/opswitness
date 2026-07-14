@@ -93,6 +93,8 @@ class ConsoleConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = Field(default=8765, ge=1024, le=65535)
     aionui_base: str = "http://127.0.0.1:63021"
+    aionui_app: Path = Path("/Applications/AionUi.app")
+    codex_bin: Path = Path("/Applications/Codex.app/Contents/Resources/codex")
     state_dir: Path = Path.home() / ".local" / "state" / "quarterdeck" / "console"
     planner_timeout_seconds: float = Field(default=180.0, ge=30.0, le=600.0)
     planner_assistant_id: str = "bare:2d23ff1c"

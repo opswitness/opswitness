@@ -1,12 +1,12 @@
-# ADR-0007: A local operator console composes AionUi and Paperclip
+# ADR-0007: Quarterdeck is the sole local operator surface
 
 Status: accepted
 
 ## Context
 
-Paperclip is the governance system of record and AionUi is the planning/conversation/agent
-runtime surface. Their specialist interfaces are useful, but daily operators still need one
-quiet local entry for fleet health, evidence, integrations, mail summary, and new work. New work
+Paperclip is the governance system of record and AionUi is a replaceable planning/agent adapter.
+They remain internal implementation components. Daily operators need one quiet Quarterdeck entry
+for fleet health, evidence, approvals, AI connections, mail summary, and new work. New work
 must not jump directly from a sentence into execution: the operator needs to review the objective,
 agent architecture, stages, cadence, checkpoints, artifacts, and risks first.
 
@@ -21,6 +21,18 @@ Quarterdeck ships a thin FastAPI + React operator console, started with:
 ```bash
 qd console serve --open
 ```
+
+This console is the sole ordinary product door. Users connect ChatGPT/OpenAI or Claude, plan and
+run tasks, review approvals, and inspect evidence without opening AionUi or Paperclip. Those names
+appear only inside a closed advanced-diagnostics disclosure. Quarterdeck still delegates to their
+versioned local APIs and does not absorb their planner, agent runtime, governance state machine, or
+database.
+
+Provider connection is real, local, and credential-minimizing. Quarterdeck probes the installed
+vendor CLIs with fixed argv (`codex login status`, `claude auth status --json`) and exposes only a
+sanitized readiness result. Connect actions launch the vendors' own fixed login flows (`codex
+login`, `claude auth login --console`) in the background. Quarterdeck never asks for, receives,
+stores, logs, or echoes an OpenAI/Anthropic password, browser cookie, OAuth token, or API key.
 
 The default left-navigation destination is **Workspace**, a deliberately small chat-first entry.
 The operator describes one outcome in plain language; the same existing planning contract renders
@@ -41,8 +53,8 @@ repair attempt and then fails closed.
 
 It binds only to `127.0.0.1` and delegates through narrow local adapters:
 
-1. Read-only dashboard data comes from the local ledger/index, Paperclip health/approvals, AionUi
-   health, and the metadata-only mail readiness check.
+1. Read-only dashboard data comes from the local ledger/index, provider readiness, governance
+   approvals, internal adapter health, and the metadata-only mail readiness check.
 2. A new task first creates an ephemeral AionUi Team in Plan Mode inside a unique per-request
    `0700` workspace. The planner receives no tools and must return a versioned strict JSON plan
    with at most five agents and exactly one lead. Returning a result requires confirmed deletion
@@ -54,7 +66,8 @@ It binds only to `127.0.0.1` and delegates through narrow local adapters:
 5. Quarterdeck recomputes that execution-envelope hash at confirmation and immediately before
    dispatch, then fsyncs `task_plan_confirmed` before creating external side effects. It then creates
    or reconciles a Paperclip issue and either starts a registered allowlisted workflow or creates
-   an AionUi execution Team from the confirmed agent architecture.
+   an AionUi execution Team from the confirmed agent architecture. These are hidden adapter calls;
+   the operator remains in Quarterdeck.
 6. Runtime completion is `completed_unverified`. Artifact, eval, or human sign-off is required to
    prove a business outcome.
 
@@ -121,7 +134,9 @@ The ledger records `task_plan_requested`, `task_plan_drafted`, `task_plan_failed
 `aion_ephemeral_recovery_failed`, `aion_ephemeral_recovery_finished`,
 `mail_authorization_requested`, `mail_authorization_finished`, `mail_authorization_failed`, and
 `mail_consent_revoked`; Telegram setup records fixed `telegram_configuration_requested/finished/
-failed`, `telegram_test_requested/finished/failed`, and `telegram_disabled` transitions. Objective,
+failed`, `telegram_test_requested/finished/failed`, and `telegram_disabled` transitions. Provider
+setup records `provider_connection_requested/finished/failed`; local approval actions record
+`approval_decision_requested/finished/failed`. Objective,
 constraints, full plan text, workspace path, mail metadata, account identity, OAuth output,
 Telegram token/chat ID, and generated mail summaries are not copied into ledger events; recovery
 stores only purpose, path hash, ID-presence booleans, fixed outcomes, and a fixed failure reason.
@@ -134,7 +149,7 @@ control. If the fixed gws Desktop OAuth client is absent, invalid, or permission
 shows an explicit first step and does not render an actionable Gmail login button. A selected
 Desktop client JSON is accepted only with a private-storage acknowledgement, then validated and
 atomically published without exposing its values. Two separate checkboxes then bind Gmail readonly
-OAuth and the exact metadata fields sent to the configured AionUi model; the OAuth action remains
+OAuth and the exact metadata fields sent to the currently selected AI provider; the OAuth action remains
 disabled until both are checked. The backend accepts only literal true acknowledgements and the
 fixed readonly Gmail login command.
 Successful re-verification atomically activates the adapter without rewriting user `config.yaml`;
@@ -163,8 +178,15 @@ deleted by the console.
 - unique `0700` AionUi workspaces per planning or mail request, removed together with the Team;
 - no credentials in frontend state, plan prompts, Paperclip metadata, or ledger payloads.
 - no third-party exception text in plan records, dashboard state, or ledger payloads.
+- fixed vendor login argv only; provider subprocess output is discarded and never becomes API data;
+- approval mutation requires loopback Origin, CSRF, JSON, an explicit review acknowledgement, and
+  an exact pending UUID.
 
-Paperclip Web UI remains the sole approval-decision surface. The standalone Paperclip MCP remains
+Quarterdeck is the approval-decision surface. Before calling Paperclip's fixed approve/reject API,
+it fsyncs `approval_decision_requested`; afterward it records a fixed outcome. The optional note is
+sent to the governance record but only its SHA-256 is written to the local ledger. The authoritative
+local actor in version 1 is `local_console`: this is a single-user loopback boundary, not a claim of
+multi-user identity or Paperclip-authenticated human identity. The standalone Paperclip MCP remains
 unmounted in AionUi. Existing Quarterdeck gate and allowlist rules remain authoritative.
 
 ## Rejected alternatives
@@ -177,12 +199,16 @@ unmounted in AionUi. Existing Quarterdeck gate and allowlist rules remain author
 - **A long-lived universal planner team:** retains unnecessary conversation state and increases
   cross-task data leakage.
 - **Treating agent completion as outcome success:** contradicts the execution/outcome evidence law.
+- **Embedding AionUi or Paperclip as user-facing pages:** leaks implementation topology and turns
+  replaceable adapters into product navigation.
+- **A generic API-key editor:** expands secret custody and confuses consumer login with API billing;
+  vendor-owned login flows preserve the intended authentication boundary.
 
 ## Consequences
 
-The operator gets one concise daily surface while Paperclip, AionUi, launchd, and Quarterdeck keep
-their existing ownership boundaries. The default Workspace reduces task creation to one clear
+The operator gets one concise Quarterdeck surface while Paperclip, AionUi, launchd, and provider
+CLIs keep their existing ownership boundaries behind it. The default Workspace reduces task creation to one clear
 description-and-confirm flow while the dashboard, task, evidence, and integration views remain
-separate. The frontend adds a packaging and responsive-layout test surface, but no new orchestration
-authority. Vertical practitioner UI remains a separate private product and is still blocked by the
-paid-design-partner gate.
+separate; approvals are available in the same shell. The frontend adds a packaging and
+responsive-layout test surface, but no new orchestration authority. Vertical practitioner UI
+remains a separate private product and is still blocked by the paid-design-partner gate.
