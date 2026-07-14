@@ -8,12 +8,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from quarterdeck.config import Settings
-from quarterdeck.console.aionui import AionUiClient, AionUiError
+from quarterdeck.console.aionui import AionUiClient, AionUiError, EphemeralSession
 from quarterdeck.console.app import create_app
 from quarterdeck.console.schemas import ConfirmRequest, ExecutionState, PlanRequest, TaskPlan
 from quarterdeck.console.service import (
     DISPATCH_INTERRUPTED,
     DISPATCH_INTERRUPTED_DETAIL,
+    EPHEMERAL_RECOVERY_UNAVAILABLE,
     EXECUTION_DISPATCH_FAILED,
     EXECUTION_DISPATCH_FAILED_DETAIL,
     EXECUTION_PLAN_INVALID,
@@ -95,9 +96,18 @@ class FakeAion:
         self.generated = 0
         self.dispatched = 0
         self.summarized = 0
+        self.stale_sessions: list[EphemeralSession] = []
+        self.recovered_sessions: list[EphemeralSession] = []
 
     def health(self):
         return {"platform": "darwin"}
+
+    def stale_ephemeral_sessions(self):
+        return list(self.stale_sessions)
+
+    def recover_ephemeral_session(self, session):
+        self.recovered_sessions.append(session)
+        return {"team_deleted": session.team_id is not None, "workspace_removed": True}
 
     def generate_plan(self, plan_id, request, catalog):
         del plan_id, request, catalog
@@ -366,6 +376,83 @@ def test_startup_recovery_rejects_corrupt_plan_records(console_env):
         service.recover_plans()
 
 
+def test_console_startup_recovery_requires_instance_lease(console_env):
+    _, service, _, _ = console_env
+    with pytest.raises(ConsoleUnavailable, match="instance lease is required"):
+        service.recover_startup()
+
+
+def test_console_startup_recovery_records_ephemeral_cleanup_evidence(
+    monkeypatch, console_env
+):
+    settings, service, aion, _ = console_env
+    session = EphemeralSession(
+        purpose="planning",
+        owner_id="PLAN5",
+        workspace=settings.console.state_dir / "ephemeral" / "planning-PLAN5-crashed",
+        team_id="team-crashed",
+    )
+    aion.stale_sessions = [session]
+
+    original_recover = aion.recover_ephemeral_session
+
+    def ordered_recovery(current):
+        assert [event["kind"] for event in service.ledger.read_all()] == [
+            "aion_ephemeral_recovery_started"
+        ]
+        return original_recover(current)
+
+    monkeypatch.setattr(aion, "recover_ephemeral_session", ordered_recovery)
+    assert service.acquire_instance_lease() is True
+    try:
+        result = service.recover_startup()
+    finally:
+        service.release_instance_lease()
+
+    assert result["ephemeral_recovered"] == 1
+    assert result["ephemeral_teams_deleted"] == 1
+    assert aion.recovered_sessions == [session]
+    events = service.ledger.read_all()
+    assert [event["kind"] for event in events] == [
+        "aion_ephemeral_recovery_started",
+        "aion_ephemeral_recovery_finished",
+    ]
+    encoded = json.dumps(events)
+    assert str(session.workspace) not in encoded
+    assert events[1]["payload"]["team_deleted"] is True
+    assert events[1]["payload"]["workspace_removed"] is True
+
+
+def test_console_startup_recovery_failure_is_fixed_and_audited(monkeypatch, console_env):
+    settings, service, aion, _ = console_env
+    private_detail = f"private recovery path {settings.console.state_dir}"
+    session = EphemeralSession(
+        purpose="mail",
+        owner_id="MAIL5",
+        workspace=settings.console.state_dir / "ephemeral" / "mail-MAIL5-crashed",
+    )
+    aion.stale_sessions = [session]
+
+    def recovery_failed(_session):
+        raise AionUiError(private_detail)
+
+    monkeypatch.setattr(aion, "recover_ephemeral_session", recovery_failed)
+    assert service.acquire_instance_lease() is True
+    try:
+        with pytest.raises(ConsoleUnavailable, match=EPHEMERAL_RECOVERY_UNAVAILABLE):
+            service.recover_startup()
+    finally:
+        service.release_instance_lease()
+
+    events = service.ledger.read_all()
+    assert [event["kind"] for event in events] == [
+        "aion_ephemeral_recovery_started",
+        "aion_ephemeral_recovery_failed",
+    ]
+    assert private_detail not in json.dumps(events)
+    assert events[1]["payload"]["reason"] == "identity_or_cleanup_unconfirmed"
+
+
 def test_console_instance_lease_is_exclusive_and_reusable(console_env):
     settings, service, aion, paperclip = console_env
     contender = ConsoleService(
@@ -613,7 +700,18 @@ def test_aionui_mail_summary_fails_when_ephemeral_team_cleanup_is_unconfirmed(
         "id": "team-private",
         "assistants": [{"role": "lead", "conversation_id": "conversation-private"}],
     }
-    monkeypatch.setattr(client, "create_team", lambda **kwargs: team)
+    remote = {}
+
+    def create_team(**kwargs):
+        remote[team["id"]] = {
+            "id": team["id"],
+            "name": kwargs["name"],
+            "workspace": str(kwargs["workspace"]),
+        }
+        return team
+
+    monkeypatch.setattr(client, "create_team", create_team)
+    monkeypatch.setattr(client, "list_teams", lambda: list(remote.values()))
     monkeypatch.setattr(client, "ensure_team", lambda team_id: None)
     monkeypatch.setattr(client, "set_team_mode", lambda team_id, mode: None)
     monkeypatch.setattr(client, "_run_and_wait", lambda *args, **kwargs: "摘要")
@@ -622,7 +720,7 @@ def test_aionui_mail_summary_fails_when_ephemeral_team_cleanup_is_unconfirmed(
         raise AionUiError("private subject leaked by upstream")
 
     monkeypatch.setattr(client, "delete_team", cleanup_failed)
-    with pytest.raises(AionUiError, match="cleanup could not be confirmed") as exc:
+    with pytest.raises(AionUiError, match="mail session cleanup could not be confirmed") as exc:
         client.summarize_mail(
             "MAIL1",
             [
@@ -655,7 +753,6 @@ def test_aionui_planning_fails_when_ephemeral_team_cleanup_is_unconfirmed(monkey
             }
         ],
     )
-    monkeypatch.setattr(client, "create_team", lambda **kwargs: team)
     monkeypatch.setattr(client, "ensure_team", lambda team_id: None)
     monkeypatch.setattr(client, "set_team_mode", lambda team_id, mode: None)
     monkeypatch.setattr(
@@ -663,13 +760,25 @@ def test_aionui_planning_fails_when_ephemeral_team_cleanup_is_unconfirmed(monkey
         "_run_and_wait",
         lambda *args, **kwargs: _plan().model_dump_json(),
     )
+    remote = {}
+
+    def create_team(**kwargs):
+        remote[team["id"]] = {
+            "id": team["id"],
+            "name": kwargs["name"],
+            "workspace": str(kwargs["workspace"]),
+        }
+        return team
+
+    monkeypatch.setattr(client, "create_team", create_team)
+    monkeypatch.setattr(client, "list_teams", lambda: list(remote.values()))
 
     def planning_cleanup_failed(team_id):
         del team_id
         raise AionUiError("delete failed")
 
     monkeypatch.setattr(client, "delete_team", planning_cleanup_failed)
-    with pytest.raises(AionUiError, match="planning team cleanup could not be confirmed"):
+    with pytest.raises(AionUiError, match="planning session cleanup could not be confirmed"):
         client.generate_plan("PLAN1", PlanRequest(objective="生成摘要"), [])
 
 
@@ -678,6 +787,7 @@ def test_aionui_ephemeral_workspaces_are_unique_private_and_removed(monkeypatch,
     client = AionUiClient(settings.console)
     workspaces = []
     deleted = []
+    remote = {}
     monkeypatch.setattr(
         client,
         "list_assistants",
@@ -697,13 +807,40 @@ def test_aionui_ephemeral_workspaces_are_unique_private_and_removed(monkeypatch,
         (workspace / "private-residue.txt").write_text("private", encoding="utf-8")
         workspaces.append(workspace)
         index = len(workspaces)
-        return {
+        team = {
             "id": f"team-{index}",
             "assistants": [{"role": "lead", "conversation_id": f"conversation-{index}"}],
         }
+        remote[team["id"]] = {
+            "id": team["id"],
+            "name": kwargs["name"],
+            "workspace": str(workspace),
+        }
+        marker = workspace / ".quarterdeck-session.json"
+        assert marker.stat().st_mode & 0o777 == 0o600
+        marker_payload = json.loads(marker.read_text())
+        assert marker_payload == {
+            "owner_id": "PLAN1" if index == 1 else "MAIL1",
+            "purpose": "planning" if index == 1 else "mail",
+            "schema_version": 1,
+            "team_id": None,
+            "workspace": str(workspace),
+        }
+        return team
+
+    def ensure_team(team_id):
+        workspace = workspaces[int(team_id.rsplit("-", 1)[1]) - 1]
+        assert (
+            json.loads((workspace / ".quarterdeck-session.json").read_text())["team_id"] == team_id
+        )
+
+    def delete_team(team_id):
+        deleted.append(team_id)
+        remote.pop(team_id)
 
     monkeypatch.setattr(client, "create_team", create_team)
-    monkeypatch.setattr(client, "ensure_team", lambda team_id: None)
+    monkeypatch.setattr(client, "list_teams", lambda: list(remote.values()))
+    monkeypatch.setattr(client, "ensure_team", ensure_team)
     monkeypatch.setattr(client, "set_team_mode", lambda team_id, mode: None)
     monkeypatch.setattr(
         client,
@@ -712,7 +849,7 @@ def test_aionui_ephemeral_workspaces_are_unique_private_and_removed(monkeypatch,
             _plan().model_dump_json() if team["id"] == "team-1" else "摘要"
         ),
     )
-    monkeypatch.setattr(client, "delete_team", lambda team_id: deleted.append(team_id))
+    monkeypatch.setattr(client, "delete_team", delete_team)
 
     client.generate_plan("PLAN1", PlanRequest(objective="生成摘要"), [])
     assert client.summarize_mail("MAIL1", []) == "摘要"
@@ -749,6 +886,7 @@ def test_aionui_team_creation_failure_removes_its_private_workspace(monkeypatch,
         raise AionUiError("team creation failed")
 
     monkeypatch.setattr(client, "create_team", creation_failed)
+    monkeypatch.setattr(client, "list_teams", lambda: [])
     with pytest.raises(AionUiError, match="team creation failed"):
         client.generate_plan("PLAN2", PlanRequest(objective="生成摘要"), [])
     assert len(workspaces) == 1
@@ -765,21 +903,132 @@ def test_aionui_workspace_cleanup_failure_rejects_result_after_team_delete(
         "assistants": [{"role": "lead", "conversation_id": "conversation-mail"}],
     }
     deleted = []
-    monkeypatch.setattr(client, "create_team", lambda **kwargs: team)
+    remote = {}
+
+    def create_team(**kwargs):
+        remote[team["id"]] = {
+            "id": team["id"],
+            "name": kwargs["name"],
+            "workspace": str(kwargs["workspace"]),
+        }
+        return team
+
+    def delete_team(team_id):
+        deleted.append(team_id)
+        remote.pop(team_id)
+
+    monkeypatch.setattr(client, "create_team", create_team)
+    monkeypatch.setattr(client, "list_teams", lambda: list(remote.values()))
     monkeypatch.setattr(client, "ensure_team", lambda team_id: None)
     monkeypatch.setattr(client, "set_team_mode", lambda team_id, mode: None)
     monkeypatch.setattr(client, "_run_and_wait", lambda *args, **kwargs: "摘要")
-    monkeypatch.setattr(client, "delete_team", lambda team_id: deleted.append(team_id))
+    monkeypatch.setattr(client, "delete_team", delete_team)
 
     def cleanup_failed(path):
         del path
         raise OSError("private workspace path")
 
     monkeypatch.setattr("quarterdeck.console.aionui.shutil.rmtree", cleanup_failed)
-    with pytest.raises(AionUiError, match="mail workspace cleanup could not be confirmed") as exc:
+    with pytest.raises(AionUiError, match="mail session cleanup could not be confirmed") as exc:
         client.summarize_mail("MAIL2", [])
     assert "private workspace path" not in str(exc.value)
     assert deleted == ["team-mail"]
+
+
+def test_aionui_recovers_crashed_team_by_exact_private_workspace(monkeypatch, console_env):
+    settings, _, _, _ = console_env
+    client = AionUiClient(settings.console)
+    session = client._ephemeral_workspace("planning", "PLAN3")
+    remote = {
+        "team-crashed": {
+            "id": "team-crashed",
+            "name": session.team_name,
+            "workspace": str(session.workspace),
+        }
+    }
+    deleted = []
+    monkeypatch.setattr(client, "list_teams", lambda: list(remote.values()))
+
+    def delete_team(team_id):
+        deleted.append(team_id)
+        remote.pop(team_id)
+
+    monkeypatch.setattr(client, "delete_team", delete_team)
+    assert client.stale_ephemeral_sessions() == [session]
+    result = client.recover_ephemeral_session(session)
+
+    assert result == {"team_deleted": True, "workspace_removed": True}
+    assert deleted == ["team-crashed"]
+    assert not session.workspace.exists()
+
+
+@pytest.mark.parametrize(
+    ("rows", "message"),
+    [
+        (
+            [
+                {
+                    "id": "team-wrong-name",
+                    "name": "User team",
+                    "workspace": "WORKSPACE",
+                }
+            ],
+            "identity did not match",
+        ),
+        (
+            [
+                {"id": "team-1", "name": "TEAM_NAME", "workspace": "WORKSPACE"},
+                {"id": "team-2", "name": "TEAM_NAME", "workspace": "WORKSPACE"},
+            ],
+            "multiple candidate teams",
+        ),
+    ],
+)
+def test_aionui_ephemeral_recovery_rejects_ambiguous_identity(
+    monkeypatch, console_env, rows, message
+):
+    settings, _, _, _ = console_env
+    client = AionUiClient(settings.console)
+    session = client._ephemeral_workspace("mail", "MAIL3")
+    rendered = [
+        {
+            **row,
+            "name": session.team_name if row["name"] == "TEAM_NAME" else row["name"],
+            "workspace": str(session.workspace),
+        }
+        for row in rows
+    ]
+    deleted = []
+    monkeypatch.setattr(client, "list_teams", lambda: rendered)
+    monkeypatch.setattr(client, "delete_team", lambda team_id: deleted.append(team_id))
+
+    with pytest.raises(AionUiError, match=message):
+        client.recover_ephemeral_session(session)
+    assert deleted == []
+    assert session.workspace.exists()
+
+
+def test_aionui_ephemeral_recovery_rejects_insecure_marker(console_env):
+    settings, _, _, _ = console_env
+    client = AionUiClient(settings.console)
+    session = client._ephemeral_workspace("planning", "PLAN4")
+    marker = session.workspace / ".quarterdeck-session.json"
+    marker.chmod(0o644)
+
+    with pytest.raises(ValueError, match="marker permissions are insecure"):
+        client.stale_ephemeral_sessions()
+
+
+def test_aionui_ephemeral_recovery_rejects_workspace_outside_private_root(tmp_path, console_env):
+    settings, _, _, _ = console_env
+    client = AionUiClient(settings.console)
+    workspace = tmp_path / "outside"
+    workspace.mkdir(mode=0o700)
+    session = EphemeralSession(purpose="mail", owner_id="MAIL4", workspace=workspace)
+    client._write_ephemeral_session(session)
+
+    with pytest.raises(ValueError, match="not a private directory"):
+        client.recover_ephemeral_session(session)
 
 
 def _successful_run(job: str, run_id: str, started: datetime) -> list[dict]:
@@ -937,7 +1186,7 @@ def test_console_requires_csrf_and_serves_built_frontend(console_env, monkeypatc
     )
     monkeypatch.setattr(
         service,
-        "recover_plans",
+        "recover_startup",
         lambda: lifecycle.append("recovery") or {},
     )
     monkeypatch.setattr(
@@ -1017,7 +1266,7 @@ def test_console_lifespan_releases_lease_when_recovery_fails(console_env, monkey
         lifecycle.append("recovery")
         raise ConsoleUnavailable("recovery failed closed")
 
-    monkeypatch.setattr(service, "recover_plans", recovery_failed)
+    monkeypatch.setattr(service, "recover_startup", recovery_failed)
     monkeypatch.setattr(
         service,
         "release_instance_lease",

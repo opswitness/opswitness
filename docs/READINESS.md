@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 244 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
+- Full suite: 252 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
   gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -113,9 +113,12 @@ blocked by the current open gates below.
   unchanged; real directory/lease permissions are `0700`/`0600`.
 - Every AionUi planning or mail request now gets a unique private `0700` workspace. Successful
   output requires confirmed cleanup of both the temporary Team and workspace; Team-creation and
-  workspace-cleanup failures are covered explicitly. Hard process crashes can still leave a local
-  workspace and an orphaned remote Team, so interrupted planning remains a fail-closed
-  operator-inspection state rather than an unproven automatic reconciliation claim.
+  workspace-cleanup failures are covered explicitly. A `0600` marker is fsynced before Team
+  creation; startup under the exclusive lease records intent, reconciles only an exact AionUi
+  workspace/name/optional-ID match, proves remote absence, removes the workspace, and records
+  completion. Missing/corrupt markers, insecure modes, ambiguous identity, API failure, or audit
+  failure stop startup. A crash before marker publication can leave only an unmarked local
+  directory, which remains an explicit manual-inspection state rather than an inferred deletion.
 - A fifth secret-free launchd template now makes that console an optional loopback KeepAlive
   service. `qd service exec console` reads the private configuration then `execve`s the fixed
   `qd console serve --port <configured>` argv. Doctor treats it like Paperclip: installed plist,

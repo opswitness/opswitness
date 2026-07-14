@@ -6,8 +6,10 @@ import json
 import os
 import re
 import shutil
+import stat
 import tempfile
 import time
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -17,10 +19,29 @@ from pydantic import ValidationError
 
 from quarterdeck.config import ConsoleConfig
 from quarterdeck.console.schemas import PlanRequest, TaskPlan
+from quarterdeck.fsutil import atomic_write
 
 
 class AionUiError(RuntimeError):
     pass
+
+
+_EPHEMERAL_MARKER = ".quarterdeck-session.json"
+_EPHEMERAL_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+_TEAM_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
+
+
+@dataclass(frozen=True)
+class EphemeralSession:
+    purpose: str
+    owner_id: str
+    workspace: Path
+    team_id: str | None = None
+
+    @property
+    def team_name(self) -> str:
+        label = "Plan" if self.purpose == "planning" else "Mail"
+        return f"QD {label} {self.owner_id[-6:]}"
 
 
 def _loopback_base(value: str) -> str:
@@ -87,6 +108,19 @@ class AionUiClient:
         data = self._request("GET", "/api/assistants", timeout=5.0)
         return data if isinstance(data, list) else []
 
+    def list_teams(self) -> list[dict[str, Any]]:
+        data = self._request("GET", "/api/teams", timeout=5.0)
+        if not isinstance(data, list):
+            raise AionUiError("AionUi team list returned an invalid object")
+        teams: list[dict[str, Any]] = []
+        for row in data:
+            if not isinstance(row, dict) or not all(
+                isinstance(row.get(key), str) for key in ("id", "name", "workspace")
+            ):
+                raise AionUiError("AionUi team list returned an invalid row")
+            teams.append(row)
+        return teams
+
     def create_team(
         self,
         *,
@@ -109,12 +143,6 @@ class AionUiClient:
 
     def delete_team(self, team_id: str) -> None:
         self._request("DELETE", f"/api/teams/{team_id}", timeout=5.0)
-
-    def _delete_ephemeral_team(self, team_id: str, purpose: str) -> None:
-        try:
-            self.delete_team(team_id)
-        except (AionUiError, ValueError) as exc:
-            raise AionUiError(f"AionUi {purpose} team cleanup could not be confirmed") from exc
 
     def ensure_team(self, team_id: str) -> None:
         self._request("POST", f"/api/teams/{team_id}/session", timeout=45.0, json={})
@@ -201,11 +229,12 @@ class AionUiClient:
             time.sleep(1.0)
         raise AionUiError(f"AionUi team response timed out after {timeout_seconds:g}s")
 
-    def _ephemeral_workspace(self, purpose: str, owner_id: str) -> Path:
-        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", purpose) or not re.fullmatch(
-            r"[A-Za-z0-9_-]{1,64}", owner_id
-        ):
+    @staticmethod
+    def _validate_ephemeral_identity(purpose: str, owner_id: str) -> None:
+        if purpose not in {"planning", "mail"} or not _EPHEMERAL_ID.fullmatch(owner_id):
             raise ValueError("invalid ephemeral workspace identity")
+
+    def _ephemeral_root(self) -> Path:
         root = self.config.state_dir.expanduser()
         if root.is_symlink():
             raise ValueError("console state directory must not be a symlink")
@@ -215,9 +244,105 @@ class AionUiClient:
         ephemeral.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(root, 0o700)
         os.chmod(ephemeral, 0o700)
+        return ephemeral
+
+    def _write_ephemeral_session(self, session: EphemeralSession) -> None:
+        self._validate_ephemeral_identity(session.purpose, session.owner_id)
+        if session.team_id is not None and not _TEAM_ID.fullmatch(session.team_id):
+            raise ValueError("invalid ephemeral team identity")
+        marker = session.workspace / _EPHEMERAL_MARKER
+        payload = {
+            "schema_version": 1,
+            "purpose": session.purpose,
+            "owner_id": session.owner_id,
+            "workspace": str(session.workspace),
+            "team_id": session.team_id,
+        }
+        atomic_write(
+            marker,
+            (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+            mode=0o600,
+        )
+
+    def _read_ephemeral_session(self, workspace: Path) -> EphemeralSession:
+        expected_parent = self.config.state_dir.expanduser() / "ephemeral"
+        marker = workspace / _EPHEMERAL_MARKER
+        try:
+            if (
+                workspace.parent != expected_parent
+                or workspace.is_symlink()
+                or not workspace.is_dir()
+            ):
+                raise ValueError("ephemeral workspace is not a private directory")
+            if stat.S_IMODE(workspace.stat().st_mode) != 0o700:
+                raise ValueError("ephemeral workspace permissions are insecure")
+            if marker.is_symlink():
+                raise ValueError("ephemeral workspace marker must not be a symlink")
+            marker_stat = marker.stat()
+            if not stat.S_ISREG(marker_stat.st_mode) or stat.S_IMODE(marker_stat.st_mode) != 0o600:
+                raise ValueError("ephemeral workspace marker permissions are insecure")
+            if marker_stat.st_size > 4096:
+                raise ValueError("ephemeral workspace marker is too large")
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+        except FileNotFoundError as exc:
+            raise ValueError("ephemeral workspace marker is missing") from exc
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("ephemeral workspace marker is unreadable") from exc
+        expected_keys = {"schema_version", "purpose", "owner_id", "workspace", "team_id"}
+        if not isinstance(payload, dict) or set(payload) != expected_keys:
+            raise ValueError("ephemeral workspace marker has an invalid schema")
+        purpose = payload.get("purpose")
+        owner_id = payload.get("owner_id")
+        team_id = payload.get("team_id")
+        if not isinstance(purpose, str) or not isinstance(owner_id, str):
+            raise ValueError("ephemeral workspace marker has an invalid identity")
+        self._validate_ephemeral_identity(purpose, owner_id)
+        if payload.get("schema_version") != 1 or payload.get("workspace") != str(workspace):
+            raise ValueError("ephemeral workspace marker does not match its directory")
+        if team_id is not None and (
+            not isinstance(team_id, str) or not _TEAM_ID.fullmatch(team_id)
+        ):
+            raise ValueError("ephemeral workspace marker has an invalid team identity")
+        return EphemeralSession(
+            purpose=purpose,
+            owner_id=owner_id,
+            workspace=workspace,
+            team_id=team_id,
+        )
+
+    def _ephemeral_workspace(self, purpose: str, owner_id: str) -> EphemeralSession:
+        self._validate_ephemeral_identity(purpose, owner_id)
+        ephemeral = self._ephemeral_root()
         workspace = Path(tempfile.mkdtemp(prefix=f"{purpose}-{owner_id}-", dir=ephemeral))
         os.chmod(workspace, 0o700)
-        return workspace
+        session = EphemeralSession(purpose=purpose, owner_id=owner_id, workspace=workspace)
+        try:
+            self._write_ephemeral_session(session)
+        except BaseException:
+            shutil.rmtree(workspace, ignore_errors=True)
+            raise
+        return session
+
+    def _bind_ephemeral_team(self, session: EphemeralSession, team_id: str) -> EphemeralSession:
+        if not _TEAM_ID.fullmatch(team_id):
+            raise ValueError("invalid ephemeral team identity")
+        current = self._read_ephemeral_session(session.workspace)
+        if current != session or current.team_id not in {None, team_id}:
+            raise AionUiError("ephemeral workspace identity changed before team binding")
+        bound = replace(session, team_id=team_id)
+        self._write_ephemeral_session(bound)
+        return bound
+
+    def stale_ephemeral_sessions(self) -> list[EphemeralSession]:
+        root = self.config.state_dir.expanduser()
+        ephemeral = root / "ephemeral"
+        if root.is_symlink() or ephemeral.is_symlink():
+            raise ValueError("ephemeral workspace directory must not be a symlink")
+        if not ephemeral.exists():
+            return []
+        if not ephemeral.is_dir() or stat.S_IMODE(ephemeral.stat().st_mode) != 0o700:
+            raise ValueError("ephemeral workspace directory permissions are insecure")
+        return [self._read_ephemeral_session(path) for path in sorted(ephemeral.iterdir())]
 
     def _remove_ephemeral_workspace(self, workspace: Path, purpose: str) -> None:
         expected_parent = self.config.state_dir.expanduser() / "ephemeral"
@@ -230,27 +355,65 @@ class AionUiClient:
         except (OSError, ValueError) as exc:
             raise AionUiError(f"AionUi {purpose} workspace cleanup could not be confirmed") from exc
 
+    def recover_ephemeral_session(self, session: EphemeralSession) -> dict[str, bool]:
+        current = self._read_ephemeral_session(session.workspace)
+        if (
+            current.purpose != session.purpose
+            or current.owner_id != session.owner_id
+            or current.workspace != session.workspace
+            or current.team_id not in {None, session.team_id}
+        ):
+            raise AionUiError("ephemeral workspace marker identity changed")
+        teams = self.list_teams()
+        candidates = {
+            str(row["id"]): row
+            for row in teams
+            if row["workspace"] == str(session.workspace)
+            or (session.team_id is not None and row["id"] == session.team_id)
+        }
+        if len(candidates) > 1:
+            raise AionUiError("AionUi ephemeral recovery found multiple candidate teams")
+        team_deleted = False
+        if candidates:
+            team_id, team = next(iter(candidates.items()))
+            if (
+                team["workspace"] != str(session.workspace)
+                or team["name"] != session.team_name
+                or (session.team_id is not None and team_id != session.team_id)
+            ):
+                raise AionUiError("AionUi ephemeral recovery identity did not match")
+            self.delete_team(team_id)
+            remaining = self.list_teams()
+            if any(
+                row["workspace"] == str(session.workspace) or row["id"] == team_id
+                for row in remaining
+            ):
+                raise AionUiError("AionUi ephemeral team cleanup could not be confirmed")
+            team_deleted = True
+        self._remove_ephemeral_workspace(session.workspace, session.purpose)
+        return {"team_deleted": team_deleted, "workspace_removed": True}
+
     def _cleanup_ephemeral_session(
         self,
+        session: EphemeralSession,
         team_id: str | None,
-        workspace: Path,
-        purpose: str,
     ) -> None:
-        team_failure: AionUiError | None = None
-        workspace_failure: AionUiError | None = None
+        bound = session
         if team_id is not None:
-            try:
-                self._delete_ephemeral_team(team_id, purpose)
-            except AionUiError as exc:
-                team_failure = exc
+            if session.team_id not in {None, team_id}:
+                raise AionUiError("ephemeral workspace team identity changed")
+            bound = replace(session, team_id=team_id)
+            if session.team_id is None:
+                try:
+                    self._write_ephemeral_session(bound)
+                except (OSError, ValueError):
+                    pass
         try:
-            self._remove_ephemeral_workspace(workspace, purpose)
-        except AionUiError as exc:
-            workspace_failure = exc
-        if team_failure is not None:
-            raise team_failure
-        if workspace_failure is not None:
-            raise workspace_failure
+            self.recover_ephemeral_session(bound)
+        except (AionUiError, OSError, ValueError) as exc:
+            raise AionUiError(
+                f"AionUi {session.purpose} session cleanup could not be confirmed"
+            ) from exc
 
     def generate_plan(
         self,
@@ -267,12 +430,12 @@ class AionUiClient:
             for row in assistants
         ):
             raise AionUiError("configured planning assistant is not enabled and team-selectable")
-        workspace = self._ephemeral_workspace("planning", plan_id)
+        session = self._ephemeral_workspace("planning", plan_id)
         team: dict[str, Any] | None = None
         try:
             team = self.create_team(
-                name=f"QD Plan {plan_id[-6:]}",
-                workspace=workspace,
+                name=session.team_name,
+                workspace=session.workspace,
                 agents=[
                     {
                         "name": "Planner",
@@ -282,6 +445,7 @@ class AionUiClient:
                     }
                 ],
             )
+            session = self._bind_ephemeral_team(session, str(team["id"]))
             self.ensure_team(str(team["id"]))
             self.set_team_mode(str(team["id"]), "plan")
             prompt = _planning_prompt(request, workflow_catalog)
@@ -305,18 +469,17 @@ class AionUiClient:
                 return plan
         finally:
             self._cleanup_ephemeral_session(
+                session,
                 str(team["id"]) if team is not None else None,
-                workspace,
-                "planning",
             )
 
     def summarize_mail(self, job_id: str, messages: list[dict[str, str]]) -> str:
-        workspace = self._ephemeral_workspace("mail", job_id)
+        session = self._ephemeral_workspace("mail", job_id)
         team: dict[str, Any] | None = None
         try:
             team = self.create_team(
-                name=f"QD Mail {job_id[-6:]}",
-                workspace=workspace,
+                name=session.team_name,
+                workspace=session.workspace,
                 agents=[
                     {
                         "name": "Mail summarizer",
@@ -326,6 +489,7 @@ class AionUiClient:
                     }
                 ],
             )
+            session = self._bind_ephemeral_team(session, str(team["id"]))
             self.ensure_team(str(team["id"]))
             self.set_team_mode(str(team["id"]), "plan")
             prompt = (
@@ -343,9 +507,8 @@ class AionUiClient:
             return summary
         finally:
             self._cleanup_ephemeral_session(
+                session,
                 str(team["id"]) if team is not None else None,
-                workspace,
-                "mail",
             )
 
     def dispatch_plan(

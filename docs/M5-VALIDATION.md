@@ -86,9 +86,15 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   a failed Team deletion is rejected before it can enter the user-confirmable `ready` state.
 - Planning and mail summarization now use distinct per-request `0700` workspaces instead of shared
   directories. Focused tests prove unique paths, cleanup after success, cleanup when Team creation
-  fails, and fail-closed behavior when workspace removal cannot be confirmed. A hard process crash
-  may still leave a local workspace and an orphaned remote Team; startup rejects the ambiguous
-  planning record and does not claim crash-residue reconciliation.
+  fails, and fail-closed behavior when workspace removal cannot be confirmed. A local no-run probe
+  confirmed that AionUi's Team list returns the exact persisted workspace; the probe Team and
+  workspace were removed and the Team count returned to zero. A second no-run probe confirmed that
+  a real AionUi 2.1.33 Team ID can be atomically bound, reconciled, and removed without exposing the
+  ID. Quarterdeck now fsyncs a `0600` marker before Team creation and, under the startup lease,
+  reconciles only an exact
+  workspace/name/optional-ID match with started/finished ledger evidence. Corrupt, ambiguous, or
+  unconfirmed residue blocks startup. A pre-marker crash can leave only an unmarked local directory,
+  which also blocks for manual inspection instead of being deleted by inference.
 - Startup recovery atomically resumes only durable `confirmed` plans and refreshes active runs.
   Stranded `planning` and `dispatching` plans fail closed with fixed evidence because their AionUi,
   Paperclip, or workflow side effects cannot be proven absent. Concurrent confirmation and dispatch

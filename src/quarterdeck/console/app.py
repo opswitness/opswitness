@@ -38,7 +38,7 @@ def create_app(
         acquired_here = False
         try:
             acquired_here = await run_in_threadpool(service.acquire_instance_lease)
-            await run_in_threadpool(service.recover_plans)
+            await run_in_threadpool(service.recover_startup)
             yield
         finally:
             if owned_service:

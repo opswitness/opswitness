@@ -72,6 +72,9 @@ PLANNING_INTERRUPTED_DETAIL = "Planning was interrupted by a console restart; cr
 DISPATCH_INTERRUPTED_DETAIL = (
     "Execution dispatch was interrupted; inspect Paperclip and AionUi before replanning."
 )
+EPHEMERAL_RECOVERY_UNAVAILABLE = (
+    "AionUi ephemeral recovery is unavailable; inspect the local console state before restarting."
+)
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -528,6 +531,53 @@ class ConsoleService:
                 self._submit(self.refresh_execution, snapshot.plan_id)
                 recovered["active_refresh_scheduled"] += 1
         return recovered
+
+    def recover_startup(self) -> dict[str, int]:
+        """Reconcile private AionUi residue under the instance lease, then recover plans."""
+        if self._lease_fd is None:
+            raise ConsoleUnavailable("console instance lease is required before recovery")
+        try:
+            sessions = self.aion.stale_ephemeral_sessions()
+        except (AionUiError, OSError, ValueError) as exc:
+            raise ConsoleUnavailable(EPHEMERAL_RECOVERY_UNAVAILABLE) from exc
+        stats = {
+            "ephemeral_recovered": 0,
+            "ephemeral_teams_deleted": 0,
+        }
+        for session in sessions:
+            workspace_sha256 = hashlib.sha256(str(session.workspace).encode()).hexdigest()
+            evidence = {
+                "schema_version": 1,
+                "purpose": session.purpose,
+                "workspace_sha256": workspace_sha256,
+                "team_id_present": session.team_id is not None,
+            }
+            self._append("aion_ephemeral_recovery_started", session.owner_id, evidence)
+            try:
+                result = self.aion.recover_ephemeral_session(session)
+            except (AionUiError, OSError, ValueError) as exc:
+                try:
+                    self._append(
+                        "aion_ephemeral_recovery_failed",
+                        session.owner_id,
+                        {**evidence, "reason": "identity_or_cleanup_unconfirmed"},
+                    )
+                except ConsoleUnavailable:
+                    alert("audit evidence lost during AionUi ephemeral recovery failure")
+                raise ConsoleUnavailable(EPHEMERAL_RECOVERY_UNAVAILABLE) from exc
+            self._append(
+                "aion_ephemeral_recovery_finished",
+                session.owner_id,
+                {
+                    **evidence,
+                    "team_deleted": result["team_deleted"],
+                    "workspace_removed": result["workspace_removed"],
+                },
+            )
+            stats["ephemeral_recovered"] += 1
+            stats["ephemeral_teams_deleted"] += int(result["team_deleted"])
+        stats.update(self.recover_plans())
+        return stats
 
     def _fail_interrupted_plan(
         self,

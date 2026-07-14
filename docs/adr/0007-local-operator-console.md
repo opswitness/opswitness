@@ -70,19 +70,29 @@ Before recovery starts, the process holds a non-blocking exclusive `console.leas
 state directory. A second port or process therefore cannot inspect or mutate the same plan state;
 graceful shutdown waits for background work before releasing the lease.
 
-Per-request workspace cleanup covers normal completion and in-process exceptions, including a
-failure while creating the AionUi Team. A hard process or machine crash can still leave a local
-workspace and an orphaned remote Team because there is no completed cleanup transaction and the
-pinned AionUi API provides no durable idempotency/reconciliation contract for this lifecycle.
-Startup therefore treats interrupted planning as ambiguous and fails closed; it does not claim
-that crash-residue cleanup has been proven.
+Before the Team POST, Quarterdeck fsyncs a `0600` marker containing only the request owner,
+purpose, exact workspace, and optional Team ID. Team creation is then bound atomically to that
+marker. On startup, while holding the exclusive console lease, Quarterdeck records recovery intent,
+lists AionUi Teams, requires one exact workspace + expected-name + optional-ID match, deletes only
+that Team, lists again to prove absence, removes the local workspace, and records completion. A
+missing or malformed marker, insecure permissions, multiple matches, identity drift, unavailable
+AionUi, unconfirmed deletion, or unavailable audit ledger refuses startup. There is no prefix-based
+or bulk Team deletion.
+
+A machine crash before the initial marker is published can leave an unmarked local directory, but
+cannot follow the later Team POST in Quarterdeck's program order. That directory is not deleted by
+guesswork: startup stops for operator inspection. Interrupted planning remains failed separately;
+cleanup recovery does not replay planning or execution.
 
 ## Evidence and privacy
 
 The ledger records `task_plan_requested`, `task_plan_drafted`, `task_plan_failed`,
 `task_plan_confirmed`, `task_execution_requested`, `task_execution_dispatched`,
-`task_execution_failed`, and `task_execution_finished`. Objective, constraints, full plan text,
-mail metadata, and generated mail summaries are not copied into ledger events.
+`task_execution_failed`, `task_execution_finished`, `aion_ephemeral_recovery_started`,
+`aion_ephemeral_recovery_failed`, and `aion_ephemeral_recovery_finished`. Objective, constraints,
+full plan text, workspace path, mail metadata, and generated mail summaries are not copied into
+ledger events; recovery stores only purpose, path hash, ID-presence booleans, fixed outcomes, and a
+fixed failure reason.
 Planning and dispatch failures persist only fixed versioned reason codes; arbitrary AionUi,
 Paperclip, workflow, parser, path, or model exception text is neither returned by the API nor
 written to the ledger. Runtime failure and status-unavailable messages are fixed local guidance.

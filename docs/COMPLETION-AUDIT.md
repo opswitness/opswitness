@@ -1,6 +1,6 @@
 # Quarterdeck Completion Audit
 
-Snapshot: 2026-07-13 19:31 PDT. This document maps the approved M0-M6 plan to evidence and
+Snapshot: 2026-07-13 19:50 PDT. This document maps the approved M0-M6 plan to evidence and
 remaining gates. [READINESS.md](READINESS.md) remains the single operational snapshot.
 
 ## Requirement matrix
@@ -19,7 +19,7 @@ remaining gates. [READINESS.md](READINESS.md) remains the single operational sna
 ## Live evidence at this snapshot
 
 - Current-HEAD `qd soak status m2-canary --json`: `pending`; only blocker is
-  `minimum_duration`, with 71,540 seconds remaining at 19:31 PDT. The tracked job has one start,
+  `minimum_duration`, with 70,406 seconds remaining at 19:50 PDT. The tracked job has one start,
   one success, zero failures, and zero projection backlog since the reset contract.
 - Current-HEAD `qd status`: 13 total runs and zero pending projections. The third independently
   clicked AionUi one-click workflow run (`01KXF2VC2NGNK7NFKEXWEBWZEY`) exited 0 without degraded
@@ -43,14 +43,19 @@ remaining gates. [READINESS.md](READINESS.md) remains the single operational sna
   approvals.”
 - Plan startup recovery resumes only safe `confirmed` work through one atomic dispatch claim,
   refreshes active work without replay, and fails ambiguous `planning`/`dispatching` states closed.
-  Concurrent confirmation/dispatch and corrupt-record tests pass within the 244-test suite.
+  Concurrent confirmation/dispatch and corrupt-record tests pass within the 252-test suite.
 - Commit `93c8bbb` gives every AionUi planning or mail request a unique `0700` workspace and makes
   confirmed Team plus workspace cleanup part of successful return. The source console restarted
   cleanly on port 8765; its only plan remained `ready` with the same timestamp, the confirmation
   checkbox was false, the run button was disabled, and the browser logged no warnings or errors.
-  No planning request, mail access, or execution was triggered during this acceptance. Hard process
-  crashes remain an explicit local-workspace/remote-Team residue limitation rather than a claimed
-  automatic reconciliation path.
+  No planning request, mail access, or execution was triggered during this acceptance.
+- Crash recovery now fsyncs a private marker before Team creation and reconciles only an exact
+  AionUi workspace/name/optional-ID match under the console lease, with append-only started/failed/
+  finished evidence. A real isolated probe deliberately left its Team ID unbound to simulate the
+  POST-response crash window; startup recovery deleted exactly one matching Team and its workspace,
+  confirmed zero remote Teams, and recorded `started -> finished`. Missing/corrupt/insecure markers,
+  ambiguous candidates, identity drift, API failure, cleanup failure, or evidence failure stop
+  startup. A pre-marker crash can leave only an unmarked local directory and requires inspection.
 - Arbitrary planning, Paperclip, workflow, runtime, and schedule-parser errors no longer cross into
   plan API responses or ledger records. Hostile private-path echoes are covered by regressions.
 - A real primary console on port 8765 held the `0700` state directory's `0600` lease. A second
