@@ -4,8 +4,9 @@
 
 Quarterdeck is the **trust / evidence bridge** in a five-layer stack. It is not the
 control plane (that's [Paperclip](https://github.com/paperclipai/paperclip), bought not
-built), not an executor (your launchd jobs and coding agents stay untouched), and not a
-UI (three doors already exist). It is the one layer nothing else can replace: the place
+built), and not an executor (your launchd jobs and coding agents stay untouched). It also
+ships a thin local operator console, but that console delegates rather than becoming a
+second control plane. The bridge remains the one layer nothing else can replace: the place
 where ungoverned reality gets connected to governance, with the evidence held locally.
 
 ## The stack
@@ -29,9 +30,10 @@ flowchart BT
     subgraph P["Governance layer — Paperclip (73.4k★ MIT, off the shelf)"]
         P1["issues · approvals · budgets · audit · Postgres"]
     end
-    subgraph C["Console layer (three replaceable doors)"]
+    subgraph C["Console layer (replaceable doors)"]
+        C0["Quarterdeck local operator console<br/>(planning + confirmation shell)"]
         C1["Paperclip Web UI"]
-        C2["AionUi (evidence + allowlisted launch; no approval writes)"]
+        C2["AionUi (planning + agent sessions + allowlisted launch)"]
         C3["qd CLI + Telegram"]
     end
     subgraph V["Vertical case layer (P5, paid)"]
@@ -94,6 +96,12 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
    terminal/degraded evidence, schedule drift, torn lines, and projection backlog. A hard
    failure remains failed until a reasoned append-only reset; checkpoints never become a
    second truth source. See [ADR-0006](adr/0006-append-only-soak-gates.md).
+10. **Planning and execution are separate state transitions.** New general work is drafted
+    by an ephemeral AionUi team in Plan Mode, without tools. Quarterdeck validates the strict
+    plan schema and records only request/plan hashes in the ledger. A Paperclip issue and an
+    AionUi execution team or allowlisted workflow can be created only after a human confirms
+    the exact plan hash. Completion remains `completed_unverified` until outcome evidence
+    exists. See [ADR-0007](adr/0007-local-operator-console.md).
 
 ## Necessity and shrinkability
 
@@ -125,11 +133,12 @@ outcome) stays in the local ledger — law 1 admits no exception: if Paperclip l
 database, pending calls stay denied and every past decision remains locally auditable;
 sessions stay with the agent CLIs.
 
-AionUi's native Manual Scheduled Task already owns the button, history, and **Run now** action.
-Quarterdeck therefore builds no workflow UI and no DAG runtime. It contributes only the missing
-security/evidence adapter: fixed local definitions become asynchronous MCP launches whose
-requested/dispatched/run events share one run id. Internal workflow orchestration stays with the
-registered command (for example LangGraph).
+AionUi's native Manual Scheduled Task still owns fixed recurring buttons, history, and its
+**Run now** action. Quarterdeck builds no DAG editor or workflow runtime. Its local console adds
+one composition surface for daily operations and new-task plan review; confirmed execution is
+delegated to AionUi teams or to fixed asynchronous MCP launches whose requested/dispatched/run
+events share one run id. Internal workflow orchestration stays with the registered command (for
+example LangGraph).
 
 The standalone Paperclip MCP is deliberately not mounted in AionUi. Its pinned
 v2026.707.0 surface includes approval decisions, other mutations, and a general `/api`
@@ -141,12 +150,12 @@ only approval-decision door; AionUi receives Quarterdeck's evidence-oriented MCP
 
 Two kinds of doors, two opposite rules:
 
-**Platform layer (open source, power users): spine, not door.** Quarterdeck is the
-operational entry (`qd` is the only command; the MCP server is what consoles talk to)
-and never grows its own GUI. Doors are replaceable — Paperclip's board for governance,
-AionUi for conversation, Telegram for the daily pulse — and any of them can be swapped
-without touching the spine. Product value concentrates in the irreplaceable layer
-precisely because it doesn't compete for this doorway.
+**Platform layer (open source, power users): spine plus a thin local door.** `qd` and the
+ledger remain the operational spine. The local console provides one concise daily entry, but
+owns no approval identity, scheduler, agent runtime, or DAG: Paperclip's board remains the
+governance door, AionUi remains the planning/conversation/runtime door, and Telegram remains
+the daily pulse. Each dependency stays replaceable because the console calls versioned local
+adapters instead of absorbing their state machines.
 
 **Commercial layer (paid verticals): the door IS the product.** Entry equals
 relationship ownership — whoever's surface opens every morning owns the brand memory,
@@ -159,10 +168,10 @@ layers' APIs and Paperclip stays as invisible as Postgres. It stays thin (weeks,
 months) precisely because every piece of logic lives below: the deterministic engine,
 Paperclip-native agents, the gate, the corpus MCP.
 
-Sequencing: not one line of UI code until a paying pilot exists. Interim for pilots:
-Paperclip's per-company `branding:update` carries our/practitioner branding without a
-fork, and the first touch is already ours (`qd init`, signed corpus bundles). Paid
-users still never see Quarterdeck itself — they see the workbench it makes trustworthy.
+Sequencing: the generic local operator console may evolve with the open platform. The
+purpose-built practitioner workbench remains blocked until a paying pilot exists.
+Paperclip's per-company `branding:update` can carry practitioner branding without a fork;
+paid users ultimately see the vertical workbench, not the generic operations surface.
 
 ## Module map
 
@@ -180,6 +189,7 @@ users still never see Quarterdeck itself — they see the workbench it makes tru
 | MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ 11-tool ops + isolated 2-tool mail profile |
 | allowlisted workflow launcher | `src/quarterdeck/workflows.py`, `workflow_worker.py` | ✅ code + tests; live AionUi task pending |
 | metadata-only mail monitor | `src/quarterdeck/mail.py` | ✅ code + tests; OAuth and AionUi schedule pending |
+| local operator console | `src/quarterdeck/console/`, `console-ui/` | ✅ dashboard + plan/confirm/dispatch + responsive UI; mail OAuth pending |
 | install doctor / secure services / disaster recovery | `src/quarterdeck/doctor.py`, `service.py`, `backup.py` | ✅ M1 + M2 live validation; soak pending |
 | gate (PreToolUse `defer` → Paperclip approval → resume) | `gate.py`, `gated_claude.py` | M3 code complete; live auth/acceptance pending |
 | artifacts (ledger events + content-addressed projection) | `artifacts.py`, `index.py` | ✅ M4 code + live projection |

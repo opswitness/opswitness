@@ -14,7 +14,7 @@ import stat
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -82,6 +82,50 @@ class MailConfig(BaseModel):
     timeout_seconds: float = Field(default=30.0, ge=1.0, le=120.0)
 
 
+class ConsoleConfig(BaseModel):
+    """Loopback-only total console and local AionUi adapter settings."""
+
+    model_config = ConfigDict(extra="forbid")
+    host: str = "127.0.0.1"
+    port: int = Field(default=8765, ge=1024, le=65535)
+    aionui_base: str = "http://127.0.0.1:63021"
+    state_dir: Path = Path.home() / ".local" / "state" / "quarterdeck" / "console"
+    planner_timeout_seconds: float = Field(default=180.0, ge=30.0, le=600.0)
+    planner_assistant_id: str = "bare:2d23ff1c"
+    runtime_assistants: dict[str, str] = Field(
+        default_factory=lambda: {
+            "claude_code": "bare:2d23ff1c",
+            "codex_cli": "bare:8e1acf31",
+            "aion_cli": "bare:632f31d2",
+        }
+    )
+
+    @field_validator("host")
+    @classmethod
+    def loopback_only(cls, value: str) -> str:
+        if value != "127.0.0.1":
+            raise ValueError("console.host must be 127.0.0.1")
+        return value
+
+    @field_validator("aionui_base")
+    @classmethod
+    def local_aionui_only(cls, value: str) -> str:
+        from urllib.parse import urlsplit
+
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme != "http"
+            or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("console.aionui_base must be an unauthenticated loopback HTTP URL")
+        return value.rstrip("/")
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="QD_", env_nested_delimiter="__", extra="forbid")
 
@@ -91,6 +135,7 @@ class Settings(BaseSettings):
     backup: BackupConfig = BackupConfig()
     gate: GateConfig = GateConfig()
     mail: MailConfig = MailConfig()
+    console: ConsoleConfig = ConsoleConfig()
     database_url: str = ""  # secrets.yaml or QD_DATABASE_URL only
     ledger_dir: Path = Path.home() / ".local" / "state" / "quarterdeck" / "ledger"
     log_tail_bytes: int = 8192

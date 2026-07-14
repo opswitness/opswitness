@@ -33,6 +33,8 @@ mail_app = typer.Typer(no_args_is_help=True)
 app.add_typer(mail_app, name="mail", help="Audit metadata-only Gmail reply checks")
 soak_app = typer.Typer(no_args_is_help=True)
 app.add_typer(soak_app, name="soak", help="Append-only canary and production soak gates")
+console_app = typer.Typer(no_args_is_help=True)
+app.add_typer(console_app, name="console", help="Run the loopback total console")
 
 
 def _load_settings_cli() -> "Settings":
@@ -225,6 +227,36 @@ def backup_restore(
 def version() -> None:
     """Print the Quarterdeck version."""
     typer.echo(__version__)
+
+
+@console_app.command("serve")
+def console_serve(
+    port: int = typer.Option(0, "--port", min=1024, max=65535),
+    open_browser: bool = typer.Option(False, "--open", help="Open the console after startup"),
+) -> None:
+    """Serve the total console on 127.0.0.1 only."""
+    import threading
+    import webbrowser
+
+    import uvicorn
+
+    from quarterdeck.console.app import create_app
+
+    settings = _load_settings_cli()
+    selected_port = port or settings.console.port
+    console = settings.console.model_copy(update={"host": "127.0.0.1", "port": selected_port})
+    settings = settings.model_copy(update={"console": console})
+    if open_browser:
+        threading.Timer(
+            0.8, lambda: webbrowser.open(f"http://127.0.0.1:{selected_port}")
+        ).start()
+    uvicorn.run(
+        create_app(settings),
+        host="127.0.0.1",
+        port=selected_port,
+        log_level="info",
+        access_log=False,
+    )
 
 
 @telegram_app.command("configure")

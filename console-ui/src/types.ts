@@ -1,0 +1,130 @@
+export type IntegrationStatus = 'online' | 'offline' | 'setup' | 'attention';
+
+export type Integration = {
+  status: IntegrationStatus;
+  label: string;
+  detail?: string;
+  url?: string;
+  privacy?: string;
+};
+
+export type PlannedAgent = {
+  name: string;
+  role: 'lead' | 'researcher' | 'operator' | 'reviewer' | 'reporter' | 'specialist';
+  responsibility: string;
+  runtime: 'claude_code' | 'codex_cli' | 'aion_cli';
+};
+
+export type TaskPlan = {
+  schema_version: 1;
+  title: string;
+  summary: string;
+  execution_mode: 'aion_team' | 'workflow';
+  workflow_id: string | null;
+  agents: PlannedAgent[];
+  stages: Array<{
+    order: number;
+    title: string;
+    owner: string;
+    outcome: string;
+    checkpoint: boolean;
+  }>;
+  cadence: {
+    kind: 'once' | 'daily' | 'weekdays' | 'weekly' | 'manual';
+    timezone: string;
+    local_time: string | null;
+    update_interval: string;
+  };
+  tools: string[];
+  approvals: string[];
+  artifacts: string[];
+  risks: string[];
+  estimated_duration_minutes: number;
+  update_policy: string;
+};
+
+export type ExecutionState = {
+  kind: 'aion_team' | 'workflow';
+  status: 'dispatching' | 'queued' | 'running' | 'awaiting_approval' | 'completed_unverified' | 'failed';
+  paperclip_issue_id?: string | null;
+  aion_team_id?: string | null;
+  aion_team_run_id?: string | null;
+  aion_conversation_ids: string[];
+  workflow_run_id?: string | null;
+  error?: string | null;
+  dispatched_at?: string | null;
+  finished_at?: string | null;
+  outcome_verified: boolean;
+};
+
+export type PlanRecord = {
+  schema_version: 1;
+  plan_id: string;
+  status:
+    | 'planning'
+    | 'ready'
+    | 'confirmed'
+    | 'dispatching'
+    | 'running'
+    | 'awaiting_approval'
+    | 'completed_unverified'
+    | 'failed';
+  objective: string;
+  constraints: string;
+  workspace: string;
+  preferred_cadence: string;
+  created_at: string;
+  updated_at: string;
+  confirmed_at?: string | null;
+  plan?: TaskPlan | null;
+  plan_sha256?: string | null;
+  error?: string | null;
+  execution?: ExecutionState | null;
+};
+
+export type RunRecord = {
+  run_id: string;
+  job: string;
+  started_ts?: string | null;
+  finished_ts?: string | null;
+  status: string;
+  exit_code?: number | null;
+  duration_s?: number | null;
+  degraded?: number;
+};
+
+export type Workflow = {
+  workflow_id: string;
+  title: string;
+  description: string;
+  ready: boolean;
+};
+
+export type Bootstrap = {
+  csrf_token: string;
+  generated_at: string;
+  integrations: Record<string, Integration>;
+  fleet: {
+    runs: number;
+    artifacts: number;
+    pending_projection: number;
+    jobs: number;
+    healthy_jobs: number;
+    problem_jobs: number;
+  };
+  pending_approvals: number;
+  workflows: Workflow[];
+  plans: PlanRecord[];
+  recent_runs: RunRecord[];
+  mail_ready: boolean;
+};
+
+export type MailSummaryJob = {
+  job_id: string;
+  status: 'running' | 'ready' | 'failed';
+  created_at: string;
+  updated_at: string;
+  summary?: string | null;
+  message_count: number;
+  error?: string | null;
+};

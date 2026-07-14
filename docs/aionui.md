@@ -1,13 +1,34 @@
-# AionUi 作为 Quarterdeck 控制台
+# AionUi 与 Quarterdeck 总控制台
 
-界面策略（研究结论）：**不自研前端**。三层现成界面：
+界面策略：**不 fork AionUi/Paperclip，也不自建第二套控制面**。Quarterdeck 现在提供一个
+薄的本地总入口，把现成界面与证据层组合起来：
 
-1. **Paperclip Web UI**（http://127.0.0.1:3100）— 舰队 issue（`[qd] <job>`）、run 评论、
+1. **Quarterdeck 总控制台**（http://127.0.0.1:8765）— 舰队健康、证据、连接、邮箱摘要，
+   以及“先规划、确认后运行”的新任务入口。它不保存审批身份，也不实现 Agent runtime。
+2. **Paperclip Web UI**（http://127.0.0.1:3100）— 舰队 issue（`[qd] <job>`）、run 评论、
    审批队列、成本看板，投影后自动出现，零配置。
-2. **AionUi 对话式控制台** — 只挂 Quarterdeck MCP，自然语言查询外部舰队
+3. **AionUi 对话式控制台** — 只挂 Quarterdeck MCP，自然语言查询外部舰队
    ledger、watchdog、artifact 和投影状态，也可通过本地白名单启动完整工作流。
    Paperclip 的审批决策继续只在 Paperclip Web UI 完成。
-3. `qd` CLI — 终端兜底，与 MCP 共用同一套函数，永不打架。
+4. `qd` CLI — 终端兜底，与 MCP 共用同一套函数，永不打架。
+
+## 总控制台
+
+```bash
+qd console serve --open
+```
+
+只监听 `127.0.0.1`，默认端口 `8765`。创建新任务时，后端先创建临时 AionUi Team 并把
+会话固定在 Plan Mode；模型只能返回严格 JSON 方案（目标摘要、Agent 数量/角色/runtime、
+执行阶段、节奏、审批点、artifact 与风险）。规划阶段不创建 Paperclip issue，也不启动
+工具。用户确认展示的 `plan_sha256` 后，Quarterdeck 先 fsync `task_plan_confirmed`，再：
+
+- 对已登记流程调用本地白名单 workflow；或
+- 在 Paperclip 创建治理 issue，并按已确认架构创建 AionUi execution Team。
+
+Plan Mode 临时 Team 在成功或失败后删除。AionUi 执行结束只记为
+`completed_unverified`；业务完成必须继续看 artifact/eval/审签。详见
+[ADR-0007](adr/0007-local-operator-console.md)。
 
 ## AionUi 配置
 

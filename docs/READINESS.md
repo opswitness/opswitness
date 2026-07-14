@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 201 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
+- Full suite: 214 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
   gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -74,6 +74,15 @@ blocked by the current open gates below.
   adapter is fixed-query, metadata-only, pinned to `gws 0.22.5`, and disabled by default. The
   separate `quarterdeck-mail` connection is tested at exactly two tools but remains disabled;
   Gmail OAuth is absent and no mailbox access has occurred.
+- The local operator console is code-complete at `qd console serve`: FastAPI serves the packaged
+  React UI on loopback only; CSRF/origin/content-type/CSP controls protect writes; planning uses an
+  ephemeral tool-free AionUi Plan Mode Team; confirmation is bound to the exact plan SHA-256; only
+  then can Paperclip issue creation and AionUi Team/allowlisted-workflow dispatch occur. A real
+  synthetic request returned a four-Agent/four-stage review plan and stopped at the unchecked,
+  disabled confirmation action, so no execution side effect occurred. Desktop and 390px mobile
+  layouts have zero horizontal overflow, and the built wheel contains the versioned static assets.
+  Mail stays visibly `未启用` until the existing consent/OAuth gate closes. Design authority:
+  [ADR-0007](adr/0007-local-operator-console.md).
 - M6 is recruitment-ready but intentionally has no product code. The paid-design-partner
   gate, data boundary, implementation order, and success evidence are fixed in
   [M6-PILOT-GATE.md](M6-PILOT-GATE.md).

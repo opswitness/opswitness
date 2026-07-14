@@ -16,6 +16,7 @@ It adds the three things the platforms don't cover:
 | **`qd wrap`** | Zero-modification onboarding for launchd/cron jobs: runs land in a local append-only ledger (crash-safe JSONL + SQLite index) and are projected into Paperclip as issues/comments/work-products ([ADR-0001](docs/adr/0001-run-ledger-write-model.md)). Never breaks the wrapped job (offline spool, exit-code mirroring). | Paperclip's watchdog only verifies its *own* issue trees; external heartbeat runs are read-only by design — nothing monitors external scheduled scripts. |
 | **`qd gate`** | Fail-closed, *tool-call-level* human approval for non-interactive Claude Code via the official PreToolUse defer contract: defer → Paperclip board decision → same-session resume. Every transition lands in the local evidence ledger. | Paperclip approvals are issue-level sign-offs ([#3017](https://github.com/paperclipai/paperclip/issues/3017) is open); hobby hooks have no independent evidence ledger behind them. |
 | **`qd artifacts`** | Authoritative artifact events in the local ledger; queries served by the disposable SQLite index; content stored content-addressed (attachment / immutable blob); Paperclip work-products are a rebuildable projection. | Work-products carry no content hashes and no server-side idempotency (`externalId` has no unique constraint) — evidence-grade artifacts need an authority outside the platform. |
+| **`qd console`** | Serves a minimal local operator UI. New work is drafted first by an ephemeral AionUi Plan Mode team, rendered as an agent architecture/cadence/checkpoint plan, hash-locked for human confirmation, then dispatched to Paperclip plus an AionUi team or an allowlisted workflow. | AionUi and Paperclip each expose a useful specialist UI, but neither provides one evidence-aware entry for daily fleet health, mail digest, plan review, and confirmed execution. The console delegates to both; it is not a second control plane or agent runtime. |
 | **`qd workflow`** | Register a fixed, shell-free workflow once, then launch it asynchronously from AionUi's native **Run now** button. Dispatch order, single-workflow concurrency, and terminal state are ledger evidence. | AionUi supplies the button and agent session; Quarterdeck supplies the command allowlist and evidence boundary. No second workflow engine or generic remote shell is built. |
 | **`qd mail`** | Run one administrator-fixed Gmail query through pinned `gws`, returning only sender, subject, date, and message id. Requested/finished/failed evidence contains counts and hashes, never mail fields. | AionUi supplies the assistant icon and daily scheduler. Quarterdeck revalidates encrypted OAuth, live token, readonly scope, and explicit model-metadata consent on every call; its isolated mail MCP exposes no fleet mutation, body, draft, send, delete, or runtime-query tool. |
 | **`qd soak`** | Freeze a canary/soak cadence contract, then derive a nonzero-until-proven verdict from elapsed time, every trigger gap, terminal/degraded evidence, schedule drift, torn lines, and projection backlog ([ADR-0006](docs/adr/0006-append-only-soak-gates.md)). | A Markdown timestamp or one manual success cannot enforce a rollout gate. Start/reset/checkpoint are append-only; status is always recomputed from raw evidence. |
@@ -35,6 +36,21 @@ It adds the three things the platforms don't cover:
   it cannot submit paths, commands, environment variables, or runtime arguments.
 - **Mail is untrusted data, never an instruction.** Mail checks use one fixed local query and
   metadata-only OAuth access. Automatic sending and drafting are outside this surface.
+- **Plan before execution.** Drafting runs without tools. No Paperclip issue, AionUi execution
+  team, or allowlisted workflow starts until the operator confirms the exact plan hash.
+
+## Local operator console
+
+```bash
+qd console serve --open
+```
+
+The console binds only to `127.0.0.1` (default port `8765`). It combines fleet health,
+execution evidence, integrations, a consent-gated mail summary, and plan-before-run task
+creation. Confirmation launches one managed run; a proposed daily/weekly cadence does not silently
+create a recurring schedule. A finished Agent Team is labeled `completed_unverified` until
+artifact, eval, or human sign-off proves the business outcome. See
+[ADR-0007](docs/adr/0007-local-operator-console.md).
 
 ## Showcases
 

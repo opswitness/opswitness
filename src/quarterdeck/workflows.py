@@ -228,7 +228,7 @@ def _worker_environment(settings: Settings) -> dict[str, str]:
 def start_workflow(
     workflow_id: str,
     *,
-    source: Literal["cli", "mcp"] = "cli",
+    source: Literal["cli", "mcp", "console"] = "cli",
     settings: Settings | None = None,
 ) -> dict[str, Any]:
     """Dispatch one fixed workflow and return immediately with its ledger run id."""

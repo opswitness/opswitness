@@ -289,7 +289,7 @@ def _normalise_messages(raw: Any, maximum: int) -> tuple[list[dict[str, str]], i
 def _record_failure(
     ledger: Ledger,
     run_id: str,
-    source: Literal["cli", "mcp"],
+    source: Literal["cli", "mcp", "console"],
     reason: str,
 ) -> None:
     failed = ledger.append(
@@ -309,7 +309,7 @@ def _record_failure(
 
 def check_mail(
     *,
-    source: Literal["cli", "mcp"] = "cli",
+    source: Literal["cli", "mcp", "console"] = "cli",
     settings: Settings | None = None,
     runner: Runner = _subprocess_runner,
 ) -> dict[str, Any]:
@@ -346,7 +346,7 @@ def check_mail(
         alert(message)
         return {"ok": False, "run_id": run_id, "error": message, "privacy": "metadata_only"}
 
-    if source == "mcp" and not settings.mail.model_metadata_consent:
+    if source != "cli" and not settings.mail.model_metadata_consent:
         _record_failure(ledger, run_id, source, "model_metadata_consent_missing")
         return {
             "ok": False,
