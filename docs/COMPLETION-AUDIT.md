@@ -73,6 +73,11 @@ remaining gates. [READINESS.md](READINESS.md) remains the single operational sna
   send before requested evidence is durable. Desktop and 390x844 acceptance passed with empty
   fields and a disabled save action. No credential was entered, no Telegram event exists, and no
   message was sent. The full suite passes 269 tests in three consecutive runs.
+- Current commit `428deef` also passes a fresh isolated uv-tool rehearsal: packaged `soak` and
+  `console` commands are present, an isolated wrap exits 0 without degradation, and the packaged
+  loopback console health/JS/CSS endpoints return HTTP 200. Real-user-domain doctor still fails
+  only the intentionally deferred stable-tool command-surface check. Feed/SOX production hashes
+  remain locked and their dry-run wrapper diffs have not drifted.
 - Arbitrary planning, Paperclip, workflow, runtime, and schedule-parser errors no longer cross into
   plan API responses or ledger records. Hostile private-path echoes are covered by regressions.
 - A real primary console on port 8765 held the `0700` state directory's `0600` lease. A second

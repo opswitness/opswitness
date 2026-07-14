@@ -201,3 +201,23 @@ that elapsed time.
 The machine gate cannot pass before 2026-07-14 15:23:32 PDT. At that time it is still only the
 elapsed canary gate: doctor, digest, watchdog, projector, backup, and the remaining M2 acceptance
 checks must pass independently before adopting feed-monitor or sox-monitor.
+
+### Post-canary upgrade rehearsal: 2026-07-13 20:59 PDT
+
+- Current commit `428deef` was built and installed into isolated uv tool/bin directories under
+  `/private/tmp`; the production uv tool, launchd services, canary, configuration, and ledger were
+  unchanged. The isolated binary exposes both `qd soak` and `qd console` and completed
+  `qd wrap --job current-wheel-first-run -- /usr/bin/true` with exit 0, no degraded event, and a
+  0.123-second ledger run.
+- A deliberately shared console state directory was rejected by the single-instance lease. With
+  an isolated `QD_CONSOLE__STATE_DIR`, the wheel served `127.0.0.1:18765`; `/api/health` returned
+  `status=ok, exposure=loopback`, and the packaged JS/CSS assets both returned HTTP 200. The
+  isolated server was then shut down cleanly.
+- Real-user-domain `qd doctor --json` has exactly one failing check:
+  `qd_command_surface`, because the intentionally stale production uv tool lacks `soak` and
+  `console`. All dependencies, permissions, templates, installed services, runtime states, ports,
+  credential boundaries, backup target, and Paperclip single-instance checks pass.
+- Feed/SOX source hashes still exactly match the locked preflight values above, both plists pass
+  `plutil -lint`, and both current dry-run diffs remain limited to prepending the stable wrapper.
+  SOX was idle with last exit 0. Feed was in a normal interval invocation with last exit 0, proving
+  again that the real adoption must wait for an idle-PID window rather than interrupting it.

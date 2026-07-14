@@ -51,6 +51,11 @@ Status: name-independent release engineering is ready; public release is **NO-GO
 - First isolated `qd wrap --job first-run -- /usr/bin/true`: 0.94 seconds.
 - The local-only core therefore clears the under-ten-minute first-run target without
   counting Paperclip/Postgres installation.
+- The current `428deef` wheel was independently installed with the MCP dependency into a fresh
+  `/private/tmp` uv tool root. It exposes the post-canary `soak` and `console` command surfaces,
+  completed an isolated `/usr/bin/true` wrap in 0.123 seconds, and served its packaged console on
+  loopback: health, JavaScript, and CSS each returned HTTP 200. This rehearsal did not replace the
+  production uv tool or touch the canary.
 - Existing AionUi 2.1.33 is notarized and arm64. The local MCP entry was added without an
   env block. The first handshake exposed a missing MCP extra; the user-level tool was then
   reinstalled with `--with mcp`. A direct MCP client handshake against that stable binary
