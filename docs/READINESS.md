@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 221 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
+- Full suite: 222 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
   gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -72,6 +72,9 @@ blocked by the current open gates below.
 - Tagged release approval is now a dependency-level preflight rather than a late build step.
   Without `PUBLIC_RELEASE_APPROVED=true`, no tagged archive, SBOM, attestation, workflow artifact,
   or GitHub release step can run; a workflow-structure regression test enforces that ordering.
+- All external workflow actions use immutable full-length commit SHAs. Dependabot will maintain
+  GitHub Actions, uv, and console npm dependencies weekly once the remote exists, while CI rejects
+  mutable action tags before they can become release inputs.
 - The AionUi launch adapter is code-complete: a strict `0600` workflow allowlist, fixed absolute
   argv, no runtime parameters or shell, per-workflow concurrency lock, detached supervisor, and
   fsync dispatch barrier. The isolated complete showcase passed and the real manifest contains

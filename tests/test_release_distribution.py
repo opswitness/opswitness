@@ -1,5 +1,6 @@
 import io
 import importlib.util
+import re
 import tarfile
 from pathlib import Path
 
@@ -76,6 +77,26 @@ def test_release_tag_gate_precedes_build_and_attestation():
     assert gate["name"] == "Reject unapproved public tag"
     assert "PUBLIC_RELEASE_APPROVED" in gate["if"]
     assert preflight["permissions"] == {}
-    attest = next(step for step in build["steps"] if step.get("uses") == "actions/attest@v4")
+    attest = next(
+        step for step in build["steps"] if step.get("uses", "").startswith("actions/attest@")
+    )
     assert "refs/tags/" in attest["if"]
     assert not any("public-release gate" in step.get("name", "").casefold() for step in build["steps"])
+
+
+def test_every_external_action_is_pinned_and_dependabot_covers_dependencies():
+    root = Path(__file__).parents[1]
+    for path in sorted((root / ".github" / "workflows").glob("*.yml")):
+        workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+        for job in workflow["jobs"].values():
+            for step in job.get("steps", []):
+                uses = step.get("uses")
+                if uses and not uses.startswith("./"):
+                    assert re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", uses), (path, uses)
+
+    config = yaml.load(
+        (root / ".github" / "dependabot.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    ecosystems = {item["package-ecosystem"]: item["directory"] for item in config["updates"]}
+    assert ecosystems == {"github-actions": "/", "uv": "/", "npm": "/console-ui"}

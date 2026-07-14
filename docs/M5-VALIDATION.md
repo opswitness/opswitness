@@ -19,6 +19,10 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   upload, or release creation. Preflight has no token permissions; write/OIDC permissions belong
   only to the build job. Workflow-dispatch rehearsals build and upload an Actions artifact for
   inspection but neither attest nor create a release.
+- Every external GitHub Action is pinned to a full 40-character commit from its official
+  repository. Checkout, setup-python, setup-node, and upload-artifact were advanced to their
+  current supported majors before pinning. Dependabot is configured weekly for GitHub Actions,
+  the root uv project, and the console npm lockfile; CI rejects any future mutable `uses:` ref.
 - A local release audit found that Hatch's default sdist discovery could include an untracked
   `.claude/settings.local.json` and local skill files. No archive was published. The build now
   uses an explicit source allowlist, and both CI and release run `verify_distribution.py` before
