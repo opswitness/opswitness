@@ -101,7 +101,10 @@ blocked by the current open gates below.
 - The local operator console is code-complete at `qd console serve`: FastAPI serves the packaged
   React UI on loopback only. Its default left-navigation Workspace is a chat-first task entry:
   one plain-language description opens the existing ephemeral tool-free AionUi Plan Mode contract,
-  then renders the Agent architecture, stages, cadence, checkpoints, artifacts, and risks inline.
+  expands terse intent into a validated six-section execution brief, then renders the Agent
+  architecture, stages, cadence, checkpoints, artifacts, and risks inline. Persisted backend phases
+  drive the progress bar and step list; elapsed time and the conservative typical/worst-case range
+  stay visible without exposing or inventing chain-of-thought.
   CSRF/origin/content-type/CSP controls protect writes; confirmation remains bound to the exact
   plan SHA-256; only then can Paperclip issue creation and AionUi Team/allowlisted-workflow dispatch
   occur. A real
@@ -113,6 +116,14 @@ blocked by the current open gates below.
   Mail stays visibly `未启用` until the existing consent/OAuth gate closes, but its setup button now
   opens the exact readonly and model-metadata consent contract instead of a dead control. Design authority:
   [ADR-0007](adr/0007-local-operator-console.md).
+- A real source-console acceptance submitted only the synthetic terse intent `算命师`. The first
+  AionUi result failed the new brief contract, visibly moved into the repair phase, then returned a
+  six-section Bazi demo brief with `DEMO-001`, deterministic `lunar-python`, knowledge-only AI
+  interpretation, exactly three named Agents, human signoff, traceable JSON/citation/eval/PDF
+  artifacts, no real personal information, and no sending. The confirmation checkbox remained
+  clear and the run button disabled, so no execution, dependency install, or customer-data action
+  occurred. The observed repair path also corrected the displayed maximum budget to cover two
+  planner attempts plus cleanup rather than one model timeout.
 - Console startup now scans every private plan record strictly. Durable `confirmed` work is
   resubmitted through an atomic per-plan dispatch claim, active work is refreshed, and ambiguous
   `planning`/`dispatching` interruptions fail closed with fixed ledger evidence. Corrupt records

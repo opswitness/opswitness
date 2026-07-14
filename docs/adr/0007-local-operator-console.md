@@ -24,10 +24,20 @@ qd console serve --open
 
 The default left-navigation destination is **Workspace**, a deliberately small chat-first entry.
 The operator describes one outcome in plain language; the same existing planning contract renders
-the proposed Agent architecture, stages, cadence, checkpoints, artifacts, and risks inline. The
+an AI-expanded six-section execution brief plus the proposed Agent architecture, stages, cadence,
+checkpoints, artifacts, and risks inline. The brief must state the goal, inputs and boundaries,
+method and roles, checkpoints, deliverables, and exclusions. The
 operator can replan or confirm the hash-bound proposal without moving through a separate task
 drawer. This is a presentation layer over the existing plan state machine, not a direct chat-to-run
 path and not a second conversation or orchestration backend.
+
+Terse, well-known intents may select a versioned planning profile. The initial `算命师`/Bazi demo
+profile is deliberately synthetic: `DEMO-001`, deterministic `lunar-python` chart construction,
+knowledge-grounded interpretation only, three named review roles, mandatory human signoff,
+traceable JSON/citation/eval/PDF artifacts, no real personal data, and no report sending. The
+profile constrains and validates the AI-generated plan; it does not install the dependency or create
+a practitioner data-entry product. A missing term, agent, approval, tool, or artifact triggers one
+repair attempt and then fails closed.
 
 It binds only to `127.0.0.1` and delegates through narrow local adapters:
 
@@ -65,6 +75,13 @@ planning -> ready -> confirmed -> dispatching -> running
 ```
 
 There is no auto-confirm path. Replanning creates a new request and hash.
+
+Planning progress is durable presentation state, not model reasoning. The backend reports only
+observable phases: queued/preparing, generating the brief and architecture, validating or repairing,
+and cleaning the ephemeral session. The UI combines those phases with elapsed time, a conservative
+typical range, and a worst-case budget covering the first model call, one repair call, and cleanup.
+Progress persistence is advisory and can never block ephemeral-Team cleanup. No chain-of-thought,
+partial model text, prompt, or hidden tool trace is streamed to the browser.
 
 The Workspace composer may infer only the plan's proposed cadence from explicit phrases such as
 "daily" or "weekly". That deterministic hint never installs a schedule and never bypasses plan

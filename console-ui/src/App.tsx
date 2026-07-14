@@ -198,7 +198,10 @@ function App() {
         // The next dashboard refresh keeps the system state visible.
       }
     };
-    const timer = window.setInterval(() => void poll(), 2500);
+    const timer = window.setInterval(
+      () => void poll(),
+      activePlan.status === 'planning' ? 1000 : 2500,
+    );
     void poll();
     return () => {
       cancelled = true;
@@ -522,15 +525,7 @@ function WorkspaceView({
                   <StatusBadge status={record.status} />
                 </div>
                 {record.status === 'planning' && (
-                  <div className="planning-state">
-                    <div className="planning-orbit">
-                      <LoaderCircle size={34} className="spin" />
-                      <Sparkles size={17} />
-                    </div>
-                    <strong>AionUi 正在规划</strong>
-                    <span>正在生成 Agent 架构、执行阶段与更新节奏</span>
-                    <div className="planning-lines"><i /><i /><i /></div>
-                  </div>
+                  <PlanningProgressView progress={record.planning_progress} />
                 )}
                 {record.status === 'ready' && record.plan && (
                   <PlanReview
@@ -1589,12 +1584,7 @@ function TaskDrawer({
           )}
 
           {record?.status === 'planning' && (
-            <div className="planning-state">
-              <div className="planning-orbit"><LoaderCircle size={34} className="spin" /><Sparkles size={17} /></div>
-              <strong>AionUi 正在规划</strong>
-              <span>正在生成 Agent 架构与更新节奏</span>
-              <div className="planning-lines"><i /><i /><i /></div>
-            </div>
+            <PlanningProgressView progress={record.planning_progress} />
           )}
 
           {record?.status === 'ready' && record.plan && (
@@ -1643,6 +1633,92 @@ function StepTrack({ phase }: { phase: number }) {
   );
 }
 
+function PlanningProgressView({ progress }: { progress: PlanRecord['planning_progress'] }) {
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const phase = progress?.phase ?? 'generating_plan';
+  const percent = progress?.percent ?? 30;
+  const started = progress?.started_at ? Date.parse(progress.started_at) : now;
+  const elapsed = Math.max(0, Math.floor((now - started) / 1000));
+  const expected = progress?.expected_seconds ?? 150;
+  const timeout = progress?.timeout_seconds ?? 390;
+  const phaseIndex = {
+    queued: 0,
+    preparing: 0,
+    generating_plan: 1,
+    validating: 2,
+    repairing: 2,
+    cleaning_up: 3,
+    complete: 4,
+    failed: 4,
+  }[phase];
+  const stages = [
+    '准备安全规划环境',
+    'AI 补全任务摘要与 Agent 方案',
+    phase === 'repairing' ? '修正并重新校验方案' : '严格校验方案契约',
+    '清理临时规划会话',
+  ];
+  const phaseLabel = {
+    queued: '规划任务已进入队列',
+    preparing: '正在准备安全规划环境',
+    generating_plan: '正在补全任务摘要与 Agent 方案',
+    validating: '正在校验 Agent、检查点与交付物',
+    repairing: '方案未通过首轮校验，正在自动修正',
+    cleaning_up: '方案已生成，正在清理临时会话',
+    complete: '规划完成',
+    failed: '规划未完成',
+  }[phase];
+  const expectedRange = expected < 60
+    ? `${Math.max(10, expected - 15)}–${expected + 15} 秒`
+    : `${Math.max(1, Math.floor(expected / 60))}–${Math.max(
+      Math.max(1, Math.floor(expected / 60)) + 1,
+      Math.ceil(expected / 60),
+    )} 分钟`;
+  const timeoutLabel = timeout < 60 ? `${timeout} 秒` : `${Math.ceil(timeout / 60)} 分钟`;
+  const timing = elapsed < expected
+    ? `已等待 ${elapsed} 秒 · 通常总耗时约 ${expectedRange}`
+    : `已等待 ${elapsed} 秒 · 已超过通常耗时，仍在处理（最久约 ${timeoutLabel}）`;
+
+  return (
+    <div className="planning-state">
+      <div className="planning-orbit">
+        <LoaderCircle size={34} className="spin" />
+        <Sparkles size={17} />
+      </div>
+      <strong>AionUi 正在规划</strong>
+      <span>{phaseLabel}</span>
+      <div
+        className="planning-progress-track"
+        role="progressbar"
+        aria-label="规划进度"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent}
+      >
+        <i style={{ width: `${percent}%` }} />
+      </div>
+      <div className="planning-timing">{timing}</div>
+      <ol className="planning-steps">
+        {stages.map((stage, index) => {
+          const done = index < phaseIndex;
+          const active = index === phaseIndex && phase !== 'complete' && phase !== 'failed';
+          return (
+            <li className={done ? 'done' : active ? 'active' : ''} key={stage}>
+              <span>{done ? <Check size={13} /> : index + 1}</span>
+              <p>{stage}</p>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 function PlanReview({
   plan,
   hash,
@@ -1655,7 +1731,10 @@ function PlanReview({
   return (
     <div className="plan-review">
       <div className="plan-summary">
-        {showStatus && <StatusBadge status="ready" />}
+        <div className="plan-summary-heading">
+          <span><Sparkles size={15} />AI 生成的任务摘要</span>
+          {showStatus && <StatusBadge status="ready" />}
+        </div>
         <p>{plan.summary}</p>
         <div className="plan-facts">
           <span><Users size={15} />{plan.agents.length} Agent</span>

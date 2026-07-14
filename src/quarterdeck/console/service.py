@@ -33,6 +33,7 @@ from quarterdeck.console.schemas import (
     MailSummaryJob,
     PlanRecord,
     PlanRequest,
+    PlanningProgress,
     TaskPlan,
     TelegramConfigureRequest,
     utc_now,
@@ -264,6 +265,12 @@ class ConsoleService:
             raise ConsoleUnavailable(f"audit evidence unavailable for {kind}")
         return event
 
+    def _planning_time_budget(self) -> tuple[int, int]:
+        per_attempt = int(self.settings.console.planner_timeout_seconds)
+        timeout_budget = min(1300, per_attempt * 2 + 30)
+        expected_seconds = min(timeout_budget, max(45, min(150, per_attempt)))
+        return expected_seconds, timeout_budget
+
     def request_plan(self, request: PlanRequest) -> PlanRecord:
         workspace = self._normalise_requested_workspace(request.workspace)
         request = request.model_copy(update={"workspace": workspace})
@@ -280,6 +287,8 @@ class ConsoleService:
                 "has_workspace": bool(request.workspace),
             },
         )
+        started_at = utc_now()
+        expected_seconds, timeout_seconds = self._planning_time_budget()
         record = PlanRecord(
             plan_id=plan_id,
             status="planning",
@@ -287,6 +296,15 @@ class ConsoleService:
             constraints=request.constraints,
             workspace=request.workspace,
             preferred_cadence=request.preferred_cadence,
+            created_at=started_at,
+            updated_at=started_at,
+            planning_progress=PlanningProgress(
+                phase="queued",
+                percent=5,
+                started_at=started_at,
+                expected_seconds=expected_seconds,
+                timeout_seconds=timeout_seconds,
+            ),
         )
         self.store.create(record)
         self._submit(self.draft_plan, plan_id)
@@ -324,7 +342,27 @@ class ConsoleService:
                 workspace=record.workspace,
                 preferred_cadence=record.preferred_cadence,
             )
-            plan = self.aion.generate_plan(plan_id, request, catalog)
+
+            def report_progress(phase: str, percent: int) -> None:
+                def update(current: PlanRecord) -> PlanRecord:
+                    if current.status != "planning":
+                        return current
+                    existing = current.planning_progress
+                    if existing is None:
+                        expected, timeout = self._planning_time_budget()
+                        existing = PlanningProgress(
+                            started_at=current.created_at,
+                            expected_seconds=expected,
+                            timeout_seconds=timeout,
+                        )
+                    current.planning_progress = existing.model_copy(
+                        update={"phase": phase, "percent": percent}
+                    )
+                    return current
+
+                self.store.mutate(plan_id, update)
+
+            plan = self.aion.generate_plan(plan_id, request, catalog, report_progress)
             plan_sha = _execution_plan_sha(record, plan)
             self._append(
                 "task_plan_drafted",
@@ -346,6 +384,10 @@ class ConsoleService:
                 current.plan = plan
                 current.plan_sha256 = plan_sha
                 current.error = None
+                if current.planning_progress is not None:
+                    current.planning_progress = current.planning_progress.model_copy(
+                        update={"phase": "complete", "percent": 100}
+                    )
                 return current
 
             return self.store.mutate(plan_id, ready)
@@ -362,6 +404,10 @@ class ConsoleService:
             def failed(current: PlanRecord) -> PlanRecord:
                 current.status = "failed"
                 current.error = PLAN_GENERATION_FAILED_DETAIL
+                if current.planning_progress is not None:
+                    current.planning_progress = current.planning_progress.model_copy(
+                        update={"phase": "failed"}
+                    )
                 return current
 
             return self.store.mutate(plan_id, failed)

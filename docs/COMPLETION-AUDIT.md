@@ -1,7 +1,7 @@
 # Quarterdeck Completion Audit
 
-Operational snapshot: 2026-07-13 21:24 PDT. The source-only Workspace update below was recorded
-2026-07-14 00:53 PDT without changing production state. This document maps the approved M0-M6
+Operational snapshot: 2026-07-13 21:24 PDT. The source-only Workspace updates below were recorded
+through 2026-07-14 08:21 PDT without changing production state. This document maps the approved M0-M6
 plan to evidence and remaining gates. [READINESS.md](READINESS.md) remains the single operational
 snapshot.
 
@@ -16,7 +16,7 @@ snapshot.
 | M4 artifact/eval/signoff | Atomic CAS, ledger authority, live projection/reconciliation and restore evidence | Complete |
 | M5 open-source v0.1 | CI/release/SBOM/provenance code, tracked-only distribution verification, showcase, wheel and first-run evidence exist | Blocked by brand decision and real Git remote/Actions |
 | M6 paid practitioner Pilot | Offer, privacy contract, technical boundary and success criteria exist | Blocked by written paid commitment/deposit; product code intentionally absent |
-| Local total console | Default chat-first Workspace, inline Plan Mode architecture review, hash-bound confirmation, dashboard/tasks/evidence/integrations, atomic dispatch/recovery, fixed-error privacy boundary, single-instance lease, per-request private AionUi workspaces, responsive UI and packaged assets | Complete in source; stable install/KeepAlive service waits for canary maintenance window |
+| Local total console | Default chat-first Workspace, AI-expanded execution brief, persisted planning stages and time range, inline Plan Mode architecture review, hash-bound confirmation, dashboard/tasks/evidence/integrations, atomic dispatch/recovery, fixed-error privacy boundary, single-instance lease, per-request private AionUi workspaces, responsive UI and packaged assets | Complete in source; stable install/KeepAlive service waits for canary maintenance window |
 
 ## Live evidence at this snapshot
 
@@ -43,6 +43,12 @@ snapshot.
   destinations, quick-prompt input, New conversation reset, zero desktop/mobile horizontal
   overflow, no composer/navigation overlap at 390x844, and no browser warnings. The acceptance did
   not submit a planning request or create an execution side effect.
+- A later source-only acceptance intentionally submitted the synthetic terse intent `算命师` to
+  exercise the new AI brief contract. Persisted progress showed preparation, generation, repair,
+  and cleanup with elapsed-time feedback. The repaired result contained all required deterministic,
+  privacy, three-Agent, signoff, and artifact defaults. Confirmation remained unchecked and no
+  execution was dispatched. The timing budget now covers two bounded planner calls plus cleanup;
+  progress reporting cannot interrupt ephemeral-session cleanup.
 - Total-console health now uses the same fail-closed coverage/watchdog/outcome rules as the digest
   over one ledger snapshot. The live metric is `1/1 完整覆盖`; successful historical or on-demand
   runs no longer inflate the number of actively monitored jobs.

@@ -76,6 +76,22 @@ export type PlanRecord = {
   created_at: string;
   updated_at: string;
   confirmed_at?: string | null;
+  planning_progress?: {
+    schema_version: 1;
+    phase:
+      | 'queued'
+      | 'preparing'
+      | 'generating_plan'
+      | 'validating'
+      | 'repairing'
+      | 'cleaning_up'
+      | 'complete'
+      | 'failed';
+    percent: number;
+    started_at: string;
+    expected_seconds: number;
+    timeout_seconds: number;
+  } | null;
   plan?: TaskPlan | null;
   plan_sha256?: string | null;
   error?: string | null;

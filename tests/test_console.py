@@ -9,7 +9,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from quarterdeck.config import Settings
-from quarterdeck.console.aionui import AionUiClient, AionUiError, EphemeralSession
+from quarterdeck.console.aionui import (
+    AionUiClient,
+    AionUiError,
+    EphemeralSession,
+    _planning_prompt,
+    _validate_plan_brief,
+)
 from quarterdeck.console.app import create_app
 from quarterdeck.console.schemas import (
     ConfirmRequest,
@@ -56,7 +62,14 @@ def _plan(execution_mode: str = "aion_team", workflow_id: str | None = None) -> 
         {
             "schema_version": 1,
             "title": "每日研究摘要",
-            "summary": "收集、复核并汇报当天研究结果。",
+            "summary": (
+                "目标：收集、复核并汇报当天研究结果。\n"
+                "输入与边界：只处理任务明确提供的研究材料，不读取未授权目录。\n"
+                "方法与分工：总控负责收集和组织，复核负责检查证据、矛盾和遗漏。\n"
+                "检查点：候选摘要形成后必须完成证据复核，异常时停止交付。\n"
+                "交付物：生成一份带来源说明、问题清单和状态结论的摘要报告。\n"
+                "不包含：不自动发布、不修改原始材料，也不把进程完成当作业务结果成功。"
+            ),
             "execution_mode": execution_mode,
             "workflow_id": workflow_id,
             "agents": [
@@ -105,6 +118,81 @@ def _plan(execution_mode: str = "aion_team", workflow_id: str | None = None) -> 
     )
 
 
+def _fortune_plan() -> TaskPlan:
+    return TaskPlan.model_validate(
+        {
+            "schema_version": 1,
+            "title": "八字命理报告演示",
+            "summary": (
+                "目标：创建一个八字命理报告演示任务。\n"
+                "输入与边界：只使用合成客户 DEMO-001，不使用真人个人信息。\n"
+                "方法与分工：lunar-python 负责确定性排盘；AI 仅基于知识库解释，由解读 Agent、"
+                "引用核验 Agent 和报告编辑 Agent 协作。\n"
+                "检查点：排盘依赖验证后才能起草，最终交付前必须完成人工审签。\n"
+                "交付物：输出可追溯的命盘 JSON、引用清单、审核结果和 PDF 报告。\n"
+                "不包含：不发送报告，不使用真人个人信息，也不承诺预测结果。"
+            ),
+            "execution_mode": "aion_team",
+            "workflow_id": None,
+            "agents": [
+                {
+                    "name": "解读 Agent",
+                    "role": "lead",
+                    "responsibility": "根据确定性命盘和知识库片段起草解释",
+                    "runtime": "claude_code",
+                },
+                {
+                    "name": "引用核验 Agent",
+                    "role": "reviewer",
+                    "responsibility": "核验引用、矛盾和禁忌表述",
+                    "runtime": "codex_cli",
+                },
+                {
+                    "name": "报告编辑 Agent",
+                    "role": "reporter",
+                    "responsibility": "整理经审核的内容与交付格式",
+                    "runtime": "aion_cli",
+                },
+            ],
+            "stages": [
+                {
+                    "order": 1,
+                    "title": "确定性排盘",
+                    "owner": "解读 Agent",
+                    "outcome": "生成并验证合成客户命盘",
+                    "checkpoint": True,
+                },
+                {
+                    "order": 2,
+                    "title": "解释与核验",
+                    "owner": "引用核验 Agent",
+                    "outcome": "形成带引用和审核结果的草稿",
+                    "checkpoint": True,
+                },
+                {
+                    "order": 3,
+                    "title": "编辑与审签",
+                    "owner": "报告编辑 Agent",
+                    "outcome": "形成人工审签候选报告",
+                    "checkpoint": True,
+                },
+            ],
+            "cadence": {
+                "kind": "once",
+                "timezone": "America/Los_Angeles",
+                "local_time": None,
+                "update_interval": "每个案例单次运行",
+            },
+            "tools": ["lunar-python（执行前验证）", "签名知识库"],
+            "approvals": ["最终报告人工审签"],
+            "artifacts": ["命盘 JSON", "引用清单", "审核结果", "PDF 报告"],
+            "risks": ["lunar-python 尚未验证可用", "知识来源可能不完整"],
+            "estimated_duration_minutes": 30,
+            "update_policy": "每个检查点更新一次，依赖或审签不可用时立即停止。",
+        }
+    )
+
+
 class FakeAion:
     def __init__(self) -> None:
         self.generated = 0
@@ -123,9 +211,13 @@ class FakeAion:
         self.recovered_sessions.append(session)
         return {"team_deleted": session.team_id is not None, "workspace_removed": True}
 
-    def generate_plan(self, plan_id, request, catalog):
+    def generate_plan(self, plan_id, request, catalog, progress=None):
         del plan_id, request, catalog
         self.generated += 1
+        if progress is not None:
+            progress("generating_plan", 30)
+            progress("validating", 78)
+            progress("cleaning_up", 94)
         return _plan()
 
     def dispatch_plan(self, **kwargs):
@@ -195,6 +287,24 @@ def test_plan_schema_requires_one_lead_and_exact_stage_owners():
     with pytest.raises(ValueError, match="exactly one lead"):
         TaskPlan.model_validate(raw)
 
+
+def test_planner_turns_terse_fortune_intent_into_a_validated_execution_brief():
+    request = PlanRequest(objective="算命师")
+    prompt = _planning_prompt(request, [])
+    assert "AI-expanded execution brief" in prompt
+    assert "DEMO-001" in prompt
+    assert "lunar-python" in prompt
+    assert "解读 Agent" in prompt
+    assert "never send the report" in prompt
+
+    plan = _fortune_plan()
+    _validate_plan_brief(plan, request)
+
+    invalid = plan.model_copy(deep=True)
+    invalid.summary = invalid.summary.replace("人工审签", "自动通过")
+    with pytest.raises(ValueError, match="required defaults"):
+        _validate_plan_brief(invalid, request)
+
     raw = _plan().model_dump(mode="json")
     raw["stages"][0]["owner"] = "不存在"
     with pytest.raises(ValueError, match="stage owner"):
@@ -207,6 +317,11 @@ def test_planning_has_no_execution_side_effect_before_confirmation(console_env):
         PlanRequest(objective="每天生成研究摘要", preferred_cadence="daily")
     )
     assert record.status == "planning"
+    assert record.planning_progress is not None
+    assert record.planning_progress.phase == "queued"
+    assert record.planning_progress.percent == 5
+    assert record.planning_progress.expected_seconds == 150
+    assert record.planning_progress.timeout_seconds == 390
     assert aion.generated == 0
     assert aion.dispatched == 0
     assert paperclip.created == 0
@@ -216,6 +331,9 @@ def test_planning_has_no_execution_side_effect_before_confirmation(console_env):
     assert aion.generated == 1
     assert aion.dispatched == 0
     assert paperclip.created == 0
+    assert ready.planning_progress is not None
+    assert ready.planning_progress.phase == "complete"
+    assert ready.planning_progress.percent == 100
     assert [event["kind"] for event in service.ledger.read_all()] == [
         "task_plan_requested",
         "task_plan_drafted",
@@ -1179,7 +1297,16 @@ def test_aionui_ephemeral_workspaces_are_unique_private_and_removed(monkeypatch,
     )
     monkeypatch.setattr(client, "delete_team", delete_team)
 
-    client.generate_plan("PLAN1", PlanRequest(objective="生成摘要"), [])
+    def progress_unavailable(phase, percent):
+        del phase, percent
+        raise OSError("progress store unavailable")
+
+    client.generate_plan(
+        "PLAN1",
+        PlanRequest(objective="生成摘要"),
+        [],
+        progress_unavailable,
+    )
     assert client.summarize_mail("MAIL1", []) == "摘要"
 
     assert len(workspaces) == 2

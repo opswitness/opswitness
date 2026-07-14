@@ -111,6 +111,26 @@ class ConfirmRequest(BaseModel):
     confirmed: Literal[True]
 
 
+class PlanningProgress(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    phase: Literal[
+        "queued",
+        "preparing",
+        "generating_plan",
+        "validating",
+        "repairing",
+        "cleaning_up",
+        "complete",
+        "failed",
+    ] = "queued"
+    percent: int = Field(default=5, ge=0, le=100)
+    started_at: str = Field(default_factory=utc_now)
+    expected_seconds: int = Field(default=150, ge=1, le=600)
+    timeout_seconds: int = Field(default=390, ge=1, le=1300)
+
+
 class ExecutionState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -157,6 +177,7 @@ class PlanRecord(BaseModel):
     created_at: str = Field(default_factory=utc_now)
     updated_at: str = Field(default_factory=utc_now)
     confirmed_at: str | None = None
+    planning_progress: PlanningProgress | None = None
     plan: TaskPlan | None = None
     plan_sha256: str | None = None
     error: str | None = Field(default=None, max_length=500)

@@ -11,7 +11,7 @@ import tempfile
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlsplit
 
 import httpx
@@ -29,6 +29,20 @@ class AionUiError(RuntimeError):
 _EPHEMERAL_MARKER = ".quarterdeck-session.json"
 _EPHEMERAL_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _TEAM_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
+
+
+def _emit_progress(
+    callback: Callable[[str, int], None] | None,
+    phase: str,
+    percent: int,
+) -> None:
+    if callback is None:
+        return
+    try:
+        callback(phase, percent)
+    except Exception:
+        # Progress is advisory and must never prevent ephemeral-team cleanup.
+        pass
 
 
 @dataclass(frozen=True)
@@ -420,7 +434,9 @@ class AionUiClient:
         plan_id: str,
         request: PlanRequest,
         workflow_catalog: list[dict[str, Any]],
+        progress: Callable[[str, int], None] | None = None,
     ) -> TaskPlan:
+        _emit_progress(progress, "preparing", 10)
         planner_id = self.config.planner_assistant_id
         assistants = self.list_assistants()
         if not any(
@@ -449,14 +465,18 @@ class AionUiClient:
             self.ensure_team(str(team["id"]))
             self.set_team_mode(str(team["id"]), "plan")
             prompt = _planning_prompt(request, workflow_catalog)
+            _emit_progress(progress, "generating_plan", 30)
             text = self._run_and_wait(
                 team, prompt, timeout_seconds=self.config.planner_timeout_seconds
             )
+            _emit_progress(progress, "validating", 78)
             try:
                 plan = _parse_plan(text)
                 _validate_workflow_choice(plan, workflow_catalog)
+                _validate_plan_brief(plan, request)
                 return plan
             except (ValueError, ValidationError) as first_error:
+                _emit_progress(progress, "repairing", 84)
                 repair = (
                     "Your previous response failed strict validation. Do not execute or use tools. "
                     f"Validation error: {str(first_error)[:600]}. Return one corrected JSON object only."
@@ -466,8 +486,10 @@ class AionUiClient:
                 )
                 plan = _parse_plan(repaired)
                 _validate_workflow_choice(plan, workflow_catalog)
+                _validate_plan_brief(plan, request)
                 return plan
         finally:
+            _emit_progress(progress, "cleaning_up", 94)
             self._cleanup_ephemeral_session(
                 session,
                 str(team["id"]) if team is not None else None,
@@ -602,6 +624,111 @@ class AionUiClient:
         return {"status": "completed_unverified" if has_response else "queued"}
 
 
+_ZH_BRIEF_LABELS = (
+    "目标：",
+    "输入与边界：",
+    "方法与分工：",
+    "检查点：",
+    "交付物：",
+    "不包含：",
+)
+_EN_BRIEF_LABELS = (
+    "Goal:",
+    "Inputs and boundaries:",
+    "Method and roles:",
+    "Checkpoints:",
+    "Deliverables:",
+    "Excluded:",
+)
+_FORTUNE_TELLING_INTENTS = {
+    "八字",
+    "八字命理",
+    "八字算命",
+    "命理师",
+    "命理报告",
+    "算命",
+    "算命师",
+}
+
+
+def _is_chinese_objective(value: str) -> bool:
+    return re.search(r"[\u3400-\u9fff]", value) is not None
+
+
+def _normalized_intent(value: str) -> str:
+    return re.sub(r"[\s，。！？、：；,.!?:;_-]+", "", value).casefold()
+
+
+def _uses_fortune_telling_profile(request: PlanRequest) -> bool:
+    return _normalized_intent(request.objective) in _FORTUNE_TELLING_INTENTS
+
+
+def _planning_profile(request: PlanRequest) -> str:
+    if not _uses_fortune_telling_profile(request):
+        return (
+            "No domain profile applies. Make conservative, reversible assumptions and expose them "
+            "in the task brief instead of asking the operator to pre-design the agent team."
+        )
+    return (
+        "The terse objective selects the built-in Bazi report demo profile. Expand it into a safe "
+        "execution-level brief with these exact defaults; INPUT may add stricter limits but cannot "
+        "remove them: use "
+        "only synthetic client DEMO-001 and no real personal information; require lunar-python for "
+        "deterministic chart construction; AI may only interpret deterministic derived features "
+        "using approved knowledge excerpts; use exactly three agents named 解读 Agent, 引用核验 Agent, "
+        "and 报告编辑 Agent; require a human signoff checkpoint; deliver a traceable 命盘 JSON, 引用清单, "
+        "审核结果, and PDF 报告; never send the report. Put every one of those defaults in summary, "
+        "and mirror them in agents, stages, tools, approvals, artifacts, and risks. Treat lunar-python "
+        "as a required dependency to verify, never as already installed."
+    )
+
+
+def _validate_plan_brief(plan: TaskPlan, request: PlanRequest) -> None:
+    labels = _ZH_BRIEF_LABELS if _is_chinese_objective(request.objective) else _EN_BRIEF_LABELS
+    missing_labels = [label for label in labels if label not in plan.summary]
+    if missing_labels:
+        raise ValueError(f"summary is missing execution-brief sections: {missing_labels}")
+    if len(plan.summary) < 120:
+        raise ValueError("summary must be an execution-level brief of at least 120 characters")
+    if not _uses_fortune_telling_profile(request):
+        return
+
+    required_summary_terms = (
+        "DEMO-001",
+        "lunar-python",
+        "知识库",
+        "人工审签",
+        "命盘 JSON",
+        "引用清单",
+        "审核结果",
+        "PDF 报告",
+        "不发送",
+        "不使用真人个人信息",
+    )
+    missing_terms = [term for term in required_summary_terms if term not in plan.summary]
+    if missing_terms:
+        raise ValueError(f"fortune-telling brief is missing required defaults: {missing_terms}")
+    if len(plan.agents) != 3:
+        raise ValueError("fortune-telling demo requires exactly three agents")
+    agent_names = {_normalized_intent(agent.name) for agent in plan.agents}
+    expected_agents = {
+        _normalized_intent(name)
+        for name in ("解读 Agent", "引用核验 Agent", "报告编辑 Agent")
+    }
+    if agent_names != expected_agents:
+        raise ValueError("fortune-telling demo requires the three named agent roles")
+    if "lunar-python" not in " ".join(plan.tools).casefold():
+        raise ValueError("fortune-telling demo tools must require lunar-python")
+    if "人工审签" not in " ".join(plan.approvals):
+        raise ValueError("fortune-telling demo approvals must require human signoff")
+    artifact_text = " ".join(plan.artifacts)
+    missing_artifacts = [
+        item for item in ("命盘 JSON", "引用清单", "审核结果", "PDF 报告") if item not in artifact_text
+    ]
+    if missing_artifacts:
+        raise ValueError(f"fortune-telling demo artifacts are incomplete: {missing_artifacts}")
+
+
 def _planning_prompt(request: PlanRequest, workflow_catalog: list[dict[str, Any]]) -> str:
     catalog = [
         {
@@ -632,8 +759,17 @@ def _planning_prompt(request: PlanRequest, workflow_catalog: list[dict[str, Any]
         '"local_time":null,"update_interval":"..."},"tools":[],"approvals":[],"artifacts":[],"risks":[],'
         '"estimated_duration_minutes":30,"update_policy":"..."}. '
         "Use 1-5 agents, exactly one lead, unique names, contiguous stage order, and exact owner names. "
+        "The summary is an AI-expanded execution brief, not a slogan or restatement. For a Chinese "
+        "objective, write at least 120 characters as six newline-separated sections using these exact "
+        "labels: 目标：, 输入与边界：, 方法与分工：, 检查点：, 交付物：, 不包含：. For a non-Chinese "
+        "objective use: Goal:, Inputs and boundaries:, Method and roles:, Checkpoints:, Deliverables:, "
+        "Excluded:. Fill in safe defaults for underspecified work, including inputs, data boundaries, "
+        "deterministic versus AI responsibilities, agent roles, approvals, evidence artifacts, delivery "
+        "behavior, and explicit exclusions. Do not claim a required dependency is installed. "
         "Choose workflow only when one ready catalog entry exactly matches; otherwise choose aion_team "
-        "with workflow_id null. INPUT="
+        "with workflow_id null. DOMAIN_PROFILE="
+        + _planning_profile(request)
+        + " INPUT="
         + json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
     )
 

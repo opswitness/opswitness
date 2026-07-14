@@ -1521,26 +1521,76 @@ input::placeholder {
   color: var(--amber);
 }
 
-.planning-lines {
-  display: grid;
-  width: min(300px, 72%);
-  gap: 7px;
-  margin-top: 22px;
-}
-
-.planning-lines i {
-  display: block;
+.planning-progress-track {
+  width: min(520px, 84%);
   height: 7px;
+  margin-top: 18px;
+  overflow: hidden;
   border-radius: 3px;
-  background: #e8ece9;
+  background: #e5eae7;
 }
 
-.planning-lines i:nth-child(2) {
-  width: 82%;
+.planning-progress-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--teal);
+  transition: width 280ms ease;
 }
 
-.planning-lines i:nth-child(3) {
-  width: 62%;
+.planning-timing {
+  color: #66736c;
+  font-size: 11px;
+}
+
+.planning-steps {
+  display: grid;
+  width: min(520px, 92%);
+  gap: 0;
+  margin: 14px 0 0;
+  padding: 0;
+  text-align: left;
+}
+
+.planning-steps li {
+  display: grid;
+  min-height: 34px;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: #8a948f;
+  list-style: none;
+}
+
+.planning-steps li > span {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid #d3dad6;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.planning-steps li p {
+  margin: 0;
+  font-size: 11px;
+}
+
+.planning-steps li.done,
+.planning-steps li.active {
+  color: #315d56;
+}
+
+.planning-steps li.done > span {
+  border-color: #9bbfb7;
+  background: #e3f0ec;
+}
+
+.planning-steps li.active > span {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px rgba(23, 111, 103, 0.1);
 }
 
 .plan-review {
@@ -1555,12 +1605,31 @@ input::placeholder {
   padding-bottom: 20px;
 }
 
+.plan-summary-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.plan-summary-heading > span:first-child {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  color: var(--teal);
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .plan-summary p {
   margin: 0;
   color: #414b46;
   font-size: 13px;
   line-height: 1.65;
   overflow-wrap: anywhere;
+  white-space: pre-line;
 }
 
 .plan-facts {
