@@ -54,8 +54,10 @@ planning, the page shows persisted external stages, elapsed time, and a conserva
 it never exposes or fabricates model chain-of-thought. The operator must accept the exact plan before
 anything runs. The **Team** view renders each current task team as a reporting hierarchy. Changing a
 direct manager creates a new hash-bound child plan; confirmed or active organizations remain read-only.
-Separate views expose fleet health, task history, execution
-evidence, integrations, and consent-gated mail and Telegram setup. Confirmation launches one
+Separate views expose fleet health, tasks, integrations, and consent-gated mail and Telegram setup.
+The **History** view folds every confirmed Agent execution from append-only ledger commit order,
+keeps tombstoned-task history visible, and separates those runs from wrapped system automation.
+Confirmation launches one
 managed run; a proposed daily/weekly cadence does not silently create a recurring schedule. A
 finished Agent Team is labeled `completed_unverified` until artifact, eval, or human sign-off
 proves the business outcome. See

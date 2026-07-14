@@ -35,7 +35,7 @@ flowchart BT
         A2["OpenAI / Anthropic vendor login CLIs"]
     end
     subgraph C["Operator surface"]
-        C0["Quarterdeck console<br/>(workspace · tasks · approvals · evidence · connections)"]
+        C0["Quarterdeck console<br/>(workspace · tasks · approvals · history · connections)"]
         C1["qd CLI + Telegram fallback"]
     end
     subgraph V["Vertical case layer (P5, paid)"]
@@ -215,7 +215,7 @@ paid users ultimately see the vertical workbench, not the generic operations sur
 | MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ 11-tool ops + isolated 2-tool mail profile |
 | allowlisted workflow launcher | `src/quarterdeck/workflows.py`, `workflow_worker.py` | ✅ code + tests + live AionUi one-click acceptance |
 | metadata-only mail monitor | `src/quarterdeck/mail.py`, `console/`, `console-ui/` | ✅ adapter + setup/revoke UI; live OAuth and AionUi schedule pending |
-| local operator console | `src/quarterdeck/console/`, `console-ui/` | ✅ sole operator surface + provider login/status + plan/confirm/dispatch + graphical team hierarchy + approval facade + Gmail/Telegram + responsive UI; production install pending canary |
+| local operator console | `src/quarterdeck/console/`, `console-ui/` | ✅ sole operator surface + provider login/status + plan/confirm/dispatch + graphical team hierarchy + ledger-folded run history + approval facade + Gmail/Telegram + responsive UI; production install pending canary |
 | install doctor / secure services / disaster recovery | `src/quarterdeck/doctor.py`, `service.py`, `backup.py` | ✅ five secret-free templates + installed-command drift check; soak pending |
 | gate (PreToolUse `defer` → Paperclip approval → resume) | `gate.py`, `gated_claude.py` | ✅ M3 code + two live approval/resume drills |
 | artifacts (ledger events + content-addressed projection) | `artifacts.py`, `index.py` | ✅ M4 code + live projection |

@@ -12,7 +12,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal, cast
 from uuid import UUID
 
 import httpx
@@ -42,6 +42,8 @@ from quarterdeck.console.schemas import (
     PlanningProgress,
     ProviderConnectionJob,
     RevisePlanRequest,
+    TaskRunEvidence,
+    TaskRunHistory,
     TaskPlan,
     TelegramConfigureRequest,
     utc_now,
@@ -111,6 +113,15 @@ EPHEMERAL_RECOVERY_UNAVAILABLE = (
 PROVIDER_CONNECTION_FAILED = "AI account connection did not complete; try again."
 APPROVAL_DECISION_FAILED = "Approval decision could not be confirmed; refresh and retry."
 DELETABLE_PLAN_STATUSES = frozenset({"ready", "failed", "completed_unverified"})
+TASK_RUN_EVENT_KINDS = frozenset(
+    {
+        "task_plan_confirmed",
+        "task_execution_requested",
+        "task_execution_dispatched",
+        "task_execution_failed",
+        "task_execution_finished",
+    }
+)
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -141,6 +152,160 @@ def _deleted_plan_events(events: list[dict[str, Any]]) -> dict[str, dict[str, An
         ):
             deleted[plan_id] = event
     return deleted
+
+
+def _parse_event_time(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _task_run_history(
+    events: list[dict[str, Any]],
+    plans: list[PlanRecord],
+    *,
+    deleted: dict[str, dict[str, Any]],
+    limit: int = 50,
+) -> list[TaskRunHistory]:
+    """Fold confirmed executions in ledger commit order without creating a second history store."""
+    records = {record.plan_id: record for record in plans}
+    grouped: dict[str, list[TaskRunEvidence]] = {}
+    terminal_payloads: dict[str, dict[str, Any]] = {}
+    execution_modes: dict[str, Literal["aion_team", "workflow"]] = {}
+    last_commit: dict[str, int] = {}
+
+    for commit_index, raw_event in enumerate(events):
+        kind = raw_event.get("kind")
+        plan_id = raw_event.get("run_id")
+        event_id = raw_event.get("event_id")
+        ts = raw_event.get("ts")
+        payload = raw_event.get("payload")
+        if (
+            kind not in TASK_RUN_EVENT_KINDS
+            or not isinstance(plan_id, str)
+            or not isinstance(event_id, str)
+            or not isinstance(ts, str)
+            or not isinstance(payload, dict)
+            or payload.get("schema_version") != 1
+        ):
+            continue
+        evidence = TaskRunEvidence(event_id=event_id, kind=kind, ts=ts)
+        grouped.setdefault(plan_id, []).append(evidence)
+        last_commit[plan_id] = commit_index
+        mode = payload.get("execution_mode")
+        if mode in {"aion_team", "workflow"}:
+            execution_modes[plan_id] = cast(Literal["aion_team", "workflow"], mode)
+        if kind in {"task_execution_failed", "task_execution_finished"}:
+            terminal_payloads[plan_id] = payload
+
+    rows: list[TaskRunHistory] = []
+    for plan_id, evidence_events in grouped.items():
+        if not any(event.kind == "task_plan_confirmed" for event in evidence_events):
+            continue
+        record = records.get(plan_id)
+        status: Literal[
+            "confirmed",
+            "dispatching",
+            "running",
+            "awaiting_approval",
+            "completed_unverified",
+            "failed",
+        ] = "confirmed"
+        for evidence in evidence_events:
+            if evidence.kind == "task_execution_requested":
+                status = "dispatching"
+            elif evidence.kind == "task_execution_dispatched":
+                status = "running"
+            elif evidence.kind == "task_execution_failed":
+                status = "failed"
+            elif evidence.kind == "task_execution_finished":
+                terminal_status = terminal_payloads.get(plan_id, {}).get("status")
+                status = (
+                    cast(Literal["completed_unverified", "failed"], terminal_status)
+                    if terminal_status in {"completed_unverified", "failed"}
+                    else "failed"
+                )
+
+        expected_event = {
+            "confirmed": "task_plan_confirmed",
+            "dispatching": "task_execution_requested",
+            "running": "task_execution_dispatched",
+            "awaiting_approval": "task_execution_dispatched",
+            "completed_unverified": "task_execution_finished",
+            "failed": None,
+        }
+        if record is not None and record.status in expected_event:
+            status = cast(
+                Literal[
+                    "confirmed",
+                    "dispatching",
+                    "running",
+                    "awaiting_approval",
+                    "completed_unverified",
+                    "failed",
+                ],
+                record.status,
+            )
+        event_kinds = {event.kind for event in evidence_events}
+        expected = expected_event[status]
+        evidence_gap = expected is not None and expected not in event_kinds
+        if status == "failed" and not {
+            "task_execution_failed",
+            "task_execution_finished",
+        }.intersection(event_kinds):
+            evidence_gap = True
+
+        terminal = terminal_payloads.get(plan_id, {})
+        started_at = evidence_events[0].ts
+        updated_at = evidence_events[-1].ts
+        finished_at: str | None = None
+        if status in {"completed_unverified", "failed"}:
+            terminal_event = next(
+                (
+                    event
+                    for event in reversed(evidence_events)
+                    if event.kind in {"task_execution_failed", "task_execution_finished"}
+                ),
+                None,
+            )
+            finished_at = terminal_event.ts if terminal_event is not None else None
+            if finished_at is None and record is not None and record.execution is not None:
+                finished_at = record.execution.finished_at
+        started_dt = _parse_event_time(started_at)
+        finished_dt = _parse_event_time(finished_at) if finished_at else None
+        duration_s = (
+            max(0.0, (finished_dt - started_dt).total_seconds())
+            if started_dt is not None and finished_dt is not None
+            else None
+        )
+        plan = record.plan if record is not None else None
+        rows.append(
+            TaskRunHistory(
+                run_id=plan_id,
+                plan_id=plan_id,
+                title=plan.title if plan is not None else "已归档任务",
+                status=status,
+                execution_mode=(
+                    plan.execution_mode if plan is not None else execution_modes.get(plan_id)
+                ),
+                agent_count=len(plan.agents) if plan is not None else 0,
+                revision_number=record.revision_number if record is not None else 1,
+                started_at=started_at,
+                updated_at=updated_at,
+                finished_at=finished_at,
+                duration_s=duration_s,
+                outcome_verified=terminal.get("outcome_verified") is True,
+                evidence_gap=evidence_gap,
+                deleted=plan_id in deleted,
+                events=evidence_events,
+            )
+        )
+    rows.sort(key=lambda row: last_commit[row.plan_id], reverse=True)
+    return rows[:limit]
 
 
 def _mail_setup_detail(status: dict[str, Any]) -> str:
@@ -1842,6 +2007,13 @@ class ConsoleService:
         info = rebuild(index_db, self.ledger, events=events)
         jobs = job_summary(index_db)
         recent_runs = query_runs(index_db, limit=8)
+        all_plans = list(self.store.list_all())
+        deleted_plans = _deleted_plan_events(events)
+        task_runs = _task_run_history(
+            events,
+            all_plans,
+            deleted=deleted_plans,
+        )
         schedules: list[dict[str, Any]] = []
         coverage_error: str | None = None
         try:
@@ -1970,6 +2142,7 @@ class ConsoleService:
             "plans": [
                 row.model_dump(mode="json") for row in self.list_plans(12, events=events)
             ],
+            "task_runs": [row.model_dump(mode="json") for row in task_runs],
             "recent_runs": recent_runs,
             "mail_ready": bool(mail.get("mcp_ready")),
         }

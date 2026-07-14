@@ -18,6 +18,7 @@ import {
   FileCheck2,
   FolderOpen,
   GitCompareArrows,
+  History as HistoryIcon,
   Inbox,
   LayoutDashboard,
   ListTodo,
@@ -76,11 +77,12 @@ import type {
   ProviderConnectionJob,
   ReportingLine,
   RunRecord,
+  TaskRunHistory,
   TaskPlan,
   TelegramSetupStatus,
 } from './types';
 
-type View = 'workspace' | 'dashboard' | 'tasks' | 'team' | 'approvals' | 'evidence' | 'settings';
+type View = 'workspace' | 'dashboard' | 'tasks' | 'team' | 'approvals' | 'history' | 'settings';
 
 const cadenceOptions = [
   { value: 'once', label: '单次' },
@@ -129,6 +131,14 @@ function formatTime(value?: string | null): string {
     minute: '2-digit',
     hour12: false,
   }).format(date);
+}
+
+function formatDuration(value?: number | null): string {
+  if (value == null) return '—';
+  if (value < 60) return `${value.toFixed(1)}s`;
+  const minutes = Math.floor(value / 60);
+  const seconds = Math.round(value % 60);
+  return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
 function shortId(value?: string | null): string {
@@ -280,7 +290,7 @@ function App() {
     tasks: '任务',
     team: '团队',
     approvals: '审批',
-    evidence: '证据',
+    history: '历史',
     settings: '连接',
   }[view];
 
@@ -377,7 +387,13 @@ function App() {
               {view === 'approvals' && (
                 <ApprovalsView data={bootstrap} onChanged={refreshAfterIntegrationChange} />
               )}
-              {view === 'evidence' && <EvidenceView runs={bootstrap.recent_runs} data={bootstrap} />}
+              {view === 'history' && (
+                <HistoryView
+                  taskRuns={bootstrap.task_runs}
+                  automationRuns={bootstrap.recent_runs}
+                  data={bootstrap}
+                />
+              )}
               {view === 'settings' && (
                 <ConnectionsView
                   data={bootstrap}
@@ -451,7 +467,7 @@ function Sidebar({ view, onChange }: { view: View; onChange: (view: View) => voi
     { id: 'tasks' as const, label: '任务', icon: ListTodo },
     { id: 'team' as const, label: '团队', icon: Network },
     { id: 'approvals' as const, label: '审批', icon: ClipboardCheck },
-    { id: 'evidence' as const, label: '证据', icon: FileCheck2 },
+    { id: 'history' as const, label: '历史', icon: HistoryIcon },
     { id: 'settings' as const, label: '连接', icon: Settings },
   ];
   return (
@@ -1143,30 +1159,119 @@ function planDeleteBlockReason(record: PlanRecord, plans: PlanRecord[]): string 
   return '';
 }
 
-function EvidenceView({ runs, data }: { runs: RunRecord[]; data: Bootstrap }) {
+const taskRunEventLabel: Record<TaskRunHistory['events'][number]['kind'], string> = {
+  task_plan_confirmed: '方案已确认',
+  task_execution_requested: '执行请求已记账',
+  task_execution_dispatched: 'Agent 已启动',
+  task_execution_failed: '执行失败已记账',
+  task_execution_finished: '执行终态已记账',
+};
+
+function HistoryView({
+  taskRuns,
+  automationRuns,
+  data,
+}: {
+  taskRuns: TaskRunHistory[];
+  automationRuns: RunRecord[];
+  data: Bootstrap;
+}) {
+  const [historyKind, setHistoryKind] = useState<'tasks' | 'automation'>('tasks');
   return (
     <div className="evidence-layout">
       <section className="metric-strip compact-metrics">
-        <Metric label="账本运行" value={String(data.fleet.runs)} detail="append-only" icon={Database} tone="success" />
-        <Metric label="Artifact" value={String(data.fleet.artifacts)} detail="content-addressed" icon={FileCheck2} />
+        <Metric label="AI 任务" value={String(taskRuns.length)} detail="最近运行" icon={Bot} tone="success" />
+        <Metric label="自动化运行" value={String(data.fleet.runs)} detail="append-only" icon={Database} tone="success" />
         <Metric label="待同步" value={String(data.fleet.pending_projection)} detail="治理记录" icon={RefreshCw} tone={data.fleet.pending_projection ? 'warning' : 'success'} />
       </section>
       <section className="panel full-panel">
-        <div className="section-heading compact">
-          <div><span className="section-kicker">最近</span><h2>运行证据</h2></div>
+        <div className="section-heading compact history-heading">
+          <div><span className="section-kicker">EVIDENCE LEDGER</span><h2>运行历史</h2></div>
+          <div className="history-switch" role="tablist" aria-label="历史类型">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={historyKind === 'tasks'}
+              className={historyKind === 'tasks' ? 'active' : ''}
+              onClick={() => setHistoryKind('tasks')}
+            >
+              AI 任务
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={historyKind === 'automation'}
+              className={historyKind === 'automation' ? 'active' : ''}
+              onClick={() => setHistoryKind('automation')}
+            >
+              系统自动化
+            </button>
+          </div>
         </div>
-        <div className="data-table run-table" role="table">
-          <div className="table-head" role="row"><span>Job</span><span>Run</span><span>状态</span><span>耗时</span><span>时间</span></div>
-          {runs.map((run) => (
-            <div className="table-row static" role="row" key={run.run_id}>
-              <span className="task-name-cell"><strong>{run.job}</strong><small>exit {run.exit_code ?? '—'}</small></span>
-              <code>{shortId(run.run_id)}</code>
-              <StatusBadge status={run.status} />
-              <span>{run.duration_s == null ? '—' : `${run.duration_s.toFixed(1)}s`}</span>
-              <span>{formatTime(run.finished_ts || run.started_ts)}</span>
+        {historyKind === 'tasks' ? (
+          taskRuns.length ? (
+            <div className="task-history-list">
+              <div className="task-history-head" aria-hidden="true">
+                <span>任务</span><span>状态</span><span>团队</span><span>耗时</span><span>更新时间</span><span />
+              </div>
+              {taskRuns.map((run) => (
+                <details className="task-history-entry" key={run.run_id}>
+                  <summary className="task-history-summary">
+                    <span className="task-name-cell">
+                      <strong>{run.title}</strong>
+                      <small>
+                        {shortId(run.run_id)} · {formatTime(run.updated_at)}
+                        {run.deleted ? ' · 已移除' : ''}
+                      </small>
+                    </span>
+                    <StatusBadge status={run.status} />
+                    <span className="history-team">{run.agent_count} Agent</span>
+                    <span className="history-duration">{formatDuration(run.duration_s)}</span>
+                    <span className="history-time">{formatTime(run.updated_at)}</span>
+                    <ChevronDown className="history-chevron" size={17} />
+                  </summary>
+                  <div className="task-history-detail">
+                    <div className="history-facts">
+                      <span><small>Run</small><code>{run.run_id}</code></span>
+                      <span><small>执行方式</small><strong>{run.execution_mode === 'workflow' ? 'Workflow' : 'Agent 团队'}</strong></span>
+                      <span><small>方案版本</small><strong>v{run.revision_number}</strong></span>
+                      <span><small>结果证据</small><strong>{run.outcome_verified ? '已核验' : '待核验'}</strong></span>
+                    </div>
+                    <ol className="history-timeline">
+                      {run.events.map((event) => (
+                        <li key={event.event_id}>
+                          <span><Check size={12} /></span>
+                          <div><strong>{taskRunEventLabel[event.kind]}</strong><small>{formatTime(event.ts)}</small></div>
+                        </li>
+                      ))}
+                    </ol>
+                    {run.evidence_gap && (
+                      <div className="history-warning"><AlertTriangle size={14} />当前状态缺少对应的 ledger 证据</div>
+                    )}
+                  </div>
+                </details>
+              ))}
             </div>
-          ))}
-        </div>
+          ) : (
+            <div className="table-empty"><HistoryIcon size={28} /><span>还没有已确认任务的运行记录</span></div>
+          )
+        ) : (
+          <div className="data-table run-table" role="table">
+            <div className="table-head" role="row"><span>Job</span><span>Run</span><span>状态</span><span>耗时</span><span>时间</span></div>
+            {automationRuns.map((run) => (
+              <div className="table-row static" role="row" key={run.run_id}>
+                <span className="task-name-cell"><strong>{run.job}</strong><small>exit {run.exit_code ?? '—'}</small></span>
+                <code>{shortId(run.run_id)}</code>
+                <StatusBadge status={run.status} />
+                <span>{formatDuration(run.duration_s)}</span>
+                <span>{formatTime(run.finished_ts || run.started_ts)}</span>
+              </div>
+            ))}
+            {!automationRuns.length && (
+              <div className="table-empty"><Database size={28} /><span>还没有自动化运行记录</span></div>
+            )}
+          </div>
+        )}
       </section>
     </div>
   );

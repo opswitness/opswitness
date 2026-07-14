@@ -267,6 +267,50 @@ class PlanRecord(BaseModel):
     execution: ExecutionState | None = None
 
 
+class TaskRunEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str
+    kind: Literal[
+        "task_plan_confirmed",
+        "task_execution_requested",
+        "task_execution_dispatched",
+        "task_execution_failed",
+        "task_execution_finished",
+    ]
+    ts: str
+
+
+class TaskRunHistory(BaseModel):
+    """Evidence-backed summary for one confirmed console execution."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    run_id: str
+    plan_id: str
+    title: str = Field(min_length=1, max_length=120)
+    status: Literal[
+        "confirmed",
+        "dispatching",
+        "running",
+        "awaiting_approval",
+        "completed_unverified",
+        "failed",
+    ]
+    execution_mode: Literal["aion_team", "workflow"] | None = None
+    agent_count: int = Field(default=0, ge=0, le=5)
+    revision_number: int = Field(default=1, ge=1, le=100)
+    started_at: str
+    updated_at: str
+    finished_at: str | None = None
+    duration_s: float | None = Field(default=None, ge=0)
+    outcome_verified: bool = False
+    evidence_gap: bool = False
+    deleted: bool = False
+    events: list[TaskRunEvidence] = Field(default_factory=list)
+
+
 class MailSummaryJob(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

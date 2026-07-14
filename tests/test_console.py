@@ -2057,6 +2057,61 @@ def test_console_dashboard_uses_one_authoritative_ledger_snapshot(monkeypatch, c
     assert result["pending_approvals"] == 0
 
 
+def test_console_dashboard_folds_task_runs_from_ledger_and_keeps_deleted_history(console_env):
+    _, service, _, _ = console_env
+    requested = service.request_plan(PlanRequest(objective="生成可追溯运行历史"))
+    ready = service.draft_plan(requested.plan_id)
+    service.confirm_plan(
+        ready.plan_id,
+        ConfirmRequest(plan_sha256=str(ready.plan_sha256), confirmed=True),
+    )
+    service.dispatch_plan(ready.plan_id)
+    finished = service.refresh_execution(ready.plan_id)
+    assert finished.status == "completed_unverified"
+
+    result = service.dashboard()
+    assert len(result["task_runs"]) == 1
+    history = result["task_runs"][0]
+    assert history["run_id"] == ready.plan_id
+    assert history["title"] == "每日研究摘要"
+    assert history["status"] == "completed_unverified"
+    assert history["agent_count"] == 2
+    assert history["outcome_verified"] is False
+    assert history["evidence_gap"] is False
+    assert history["deleted"] is False
+    assert history["duration_s"] >= 0
+    assert [event["kind"] for event in history["events"]] == [
+        "task_plan_confirmed",
+        "task_execution_requested",
+        "task_execution_dispatched",
+        "task_execution_finished",
+    ]
+
+    service.delete_plan(ready.plan_id, DeletePlanRequest(confirmed=True))
+    after_delete = service.dashboard()
+    assert after_delete["plans"] == []
+    assert after_delete["task_runs"][0]["run_id"] == ready.plan_id
+    assert after_delete["task_runs"][0]["deleted"] is True
+
+
+def test_console_dashboard_keeps_each_confirmed_run_in_commit_order(console_env):
+    _, service, _, _ = console_env
+    confirmed_ids = []
+    for objective in ["第一次受管执行", "第二次受管执行"]:
+        requested = service.request_plan(PlanRequest(objective=objective))
+        ready = service.draft_plan(requested.plan_id)
+        service.confirm_plan(
+            ready.plan_id,
+            ConfirmRequest(plan_sha256=str(ready.plan_sha256), confirmed=True),
+        )
+        confirmed_ids.append(ready.plan_id)
+
+    history = service.dashboard()["task_runs"]
+    assert [row["run_id"] for row in history] == list(reversed(confirmed_ids))
+    assert all(row["status"] == "confirmed" for row in history)
+    assert all([event["kind"] for event in row["events"]] == ["task_plan_confirmed"] for row in history)
+
+
 def test_console_dashboard_never_reports_zero_when_approvals_are_unavailable(
     monkeypatch, console_env
 ):
@@ -2306,6 +2361,7 @@ def test_console_requires_csrf_and_serves_built_frontend(console_env, monkeypatc
             "approvals_available": True,
             "workflows": [],
             "plans": [],
+            "task_runs": [],
             "recent_runs": [],
             "mail_ready": False,
         },

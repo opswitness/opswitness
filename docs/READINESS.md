@@ -160,6 +160,18 @@ blocked by the current open gates below.
   background refresh. The change was cancelled, so no real plan was revised. At 390x844 the seven-item
   navigation, organization cards, manager controls, and save action remained usable with zero page
   overflow and no browser warnings.
+- The former Evidence navigation is now the unified History view. Confirmed Agent executions are
+  folded deterministically from `task_plan_confirmed`, requested, dispatched, and terminal ledger
+  events; private plan records only supply validated display metadata. Each row expands to the exact
+  evidence timeline, retains a visible tombstone marker after task-list deletion, and keeps
+  `completed_unverified` distinct from outcome proof. Wrapped system jobs remain available in a
+  separate tab. Missing expected ledger evidence is rendered as a warning rather than a healthy
+  state. Backend deletion-retention coverage and the full suite pass at 301 tests across three
+  consecutive runs; ruff, mypy,
+  TypeScript, and the packaged Vite build are green. Rebuilt source-console acceptance showed the
+  honest empty Agent-run state and eight real wrapped-automation rows; 1964px desktop and 390x844
+  mobile had zero document overflow, the wide automation table scrolled only inside its panel, and
+  the browser console remained clean. No real task was confirmed or launched for this acceptance.
 - A real source-console acceptance submitted only the synthetic terse intent `算命师`. The first
   AionUi result failed the new brief contract, visibly moved into the repair phase, then returned a
   six-section Bazi demo brief with `DEMO-001`, deterministic `lunar-python`, knowledge-only AI

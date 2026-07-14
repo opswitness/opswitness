@@ -143,6 +143,34 @@ export type RunRecord = {
   degraded?: number;
 };
 
+export type TaskRunHistory = {
+  schema_version: 1;
+  run_id: string;
+  plan_id: string;
+  title: string;
+  status: 'confirmed' | 'dispatching' | 'running' | 'awaiting_approval' | 'completed_unverified' | 'failed';
+  execution_mode: 'aion_team' | 'workflow' | null;
+  agent_count: number;
+  revision_number: number;
+  started_at: string;
+  updated_at: string;
+  finished_at?: string | null;
+  duration_s?: number | null;
+  outcome_verified: boolean;
+  evidence_gap: boolean;
+  deleted: boolean;
+  events: Array<{
+    event_id: string;
+    kind:
+      | 'task_plan_confirmed'
+      | 'task_execution_requested'
+      | 'task_execution_dispatched'
+      | 'task_execution_failed'
+      | 'task_execution_finished';
+    ts: string;
+  }>;
+};
+
 export type Workflow = {
   workflow_id: string;
   title: string;
@@ -174,6 +202,7 @@ export type Bootstrap = {
   approvals: ApprovalCard[];
   workflows: Workflow[];
   plans: PlanRecord[];
+  task_runs: TaskRunHistory[];
   recent_runs: RunRecord[];
   mail_ready: boolean;
 };
