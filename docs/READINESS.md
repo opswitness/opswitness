@@ -147,13 +147,18 @@ blocked by the current open gates below.
   confirmation dialog. Source-console acceptance opened and cancelled that dialog without deleting
   any real plan; the desktop layout and 390x844 mobile dialog had no horizontal overflow, all
   controls remained visible, and the browser console stayed clean.
-- The new Team view graphically groups every current task team by reporting level. Legacy plans
+- The Team view graphically groups every current task team by reporting level. Legacy plans
   remain hash-compatible and display as a lead-centered organization without file migration.
   For ready plans, each non-lead employee can select one direct manager; self-reporting, missing
   employees, multiple roots, and cycles fail closed. Saving creates a ready append-only child
   version with a new confirmation hash and a hashed `task_plan_organization_revised` event rather
-  than mutating the reviewed plan. Confirmed and active teams are read-only. The effective hierarchy
-  is included in both the Paperclip issue and AionUi execution prompt, while no second employee
+  than mutating the reviewed plan. A separate graphical loop editor allows self-review and cyclic
+  collaboration with an explicit condition and 1-10 iteration cap, while the management tree remains
+  acyclic. The complete loop contract is hash-bound and included in Paperclip and AionUi prompts.
+  Because the current AionUi Team API exposes no verifiable round-limit control, this is plan-level
+  enforcement and the UI does not claim a deterministic runtime cutoff. Confirmed and active teams
+  are read-only. The effective hierarchy is included in both the Paperclip issue and AionUi execution
+  prompt, while no second employee
   database or runtime is introduced. Source-console acceptance used the existing synthetic Bazi
   team: two reporting levels rendered correctly, changing the report editor's manager produced a
   three-level preview, the cycle-causing reverse choice disappeared, and the edit survived a full

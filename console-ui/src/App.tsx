@@ -30,6 +30,7 @@ import {
   Plus,
   PencilLine,
   RefreshCw,
+  Repeat2,
   RotateCcw,
   Save,
   Send,
@@ -68,6 +69,7 @@ import type {
   Bootstrap,
   AIProvider,
   ApprovalCard,
+  CollaborationLoop,
   Integration,
   MailAuthorizationJob,
   MailAuthorizationStatus,
@@ -345,8 +347,8 @@ function App() {
                   onRevise={async (record, instruction) => {
                     mergePlan(await revisePlan(record.plan_id, instruction));
                   }}
-                  onOrganizationSave={async (record, lines) => {
-                    mergePlan(await revisePlanOrganization(record.plan_id, lines));
+                  onOrganizationSave={async (record, lines, loops) => {
+                    mergePlan(await revisePlanOrganization(record.plan_id, lines, loops));
                   }}
                   onConfirm={async (record) => {
                     if (!record.plan_sha256) throw new Error('方案哈希缺失');
@@ -379,8 +381,8 @@ function App() {
                 <TeamView
                   plans={bootstrap.plans}
                   onOpen={openPlan}
-                  onOrganizationSave={async (record, lines) => {
-                    mergePlan(await revisePlanOrganization(record.plan_id, lines));
+                  onOrganizationSave={async (record, lines, loops) => {
+                    mergePlan(await revisePlanOrganization(record.plan_id, lines, loops));
                   }}
                 />
               )}
@@ -420,8 +422,8 @@ function App() {
         onRevise={async (record, instruction) => {
           mergePlan(await revisePlan(record.plan_id, instruction));
         }}
-        onOrganizationSave={async (record, lines) => {
-          mergePlan(await revisePlanOrganization(record.plan_id, lines));
+        onOrganizationSave={async (record, lines, loops) => {
+          mergePlan(await revisePlanOrganization(record.plan_id, lines, loops));
         }}
         onConfirm={async (record) => {
           if (!record.plan_sha256) throw new Error('方案哈希缺失');
@@ -531,7 +533,11 @@ function WorkspaceView({
     preferred_cadence: string;
   }) => Promise<void>;
   onRevise: (record: PlanRecord, instruction: string) => Promise<void>;
-  onOrganizationSave: (record: PlanRecord, lines: ReportingLine[]) => Promise<void>;
+  onOrganizationSave: (
+    record: PlanRecord,
+    lines: ReportingLine[],
+    loops: CollaborationLoop[],
+  ) => Promise<void>;
   onConfirm: (record: PlanRecord) => Promise<void>;
   onRestart: () => void;
 }) {
@@ -652,7 +658,7 @@ function WorkspaceView({
                     showStatus={false}
                     previousPlan={previousPlan}
                     revisionNumber={record.revision_number}
-                    onOrganizationSave={(lines) => onOrganizationSave(record, lines)}
+                    onOrganizationSave={(lines, loops) => onOrganizationSave(record, lines, loops)}
                   />
                 )}
                 {['confirmed', 'dispatching', 'running', 'awaiting_approval', 'completed_unverified', 'failed'].includes(record.status) && (
@@ -1002,7 +1008,11 @@ function TeamView({
 }: {
   plans: PlanRecord[];
   onOpen: (plan: PlanRecord) => void;
-  onOrganizationSave: (record: PlanRecord, lines: ReportingLine[]) => Promise<void>;
+  onOrganizationSave: (
+    record: PlanRecord,
+    lines: ReportingLine[],
+    loops: CollaborationLoop[],
+  ) => Promise<void>;
 }) {
   const teams = useMemo(
     () => plans.filter(
@@ -1071,7 +1081,7 @@ function TeamView({
         <OrganizationChart
           plan={selected.plan}
           editable={selected.status === 'ready'}
-          onSave={(lines) => onOrganizationSave(selected, lines)}
+          onSave={(lines, loops) => onOrganizationSave(selected, lines, loops)}
         />
         {selected.status !== 'ready' && (
           <div className="organization-readonly-note">
@@ -2079,7 +2089,11 @@ function TaskDrawer({
   onClose: () => void;
   onPlan: (body: { objective: string; constraints: string; workspace: string; preferred_cadence: string }) => Promise<void>;
   onRevise: (record: PlanRecord, instruction: string) => Promise<void>;
-  onOrganizationSave: (record: PlanRecord, lines: ReportingLine[]) => Promise<void>;
+  onOrganizationSave: (
+    record: PlanRecord,
+    lines: ReportingLine[],
+    loops: CollaborationLoop[],
+  ) => Promise<void>;
   onConfirm: (record: PlanRecord) => Promise<void>;
   onDelete: (record: PlanRecord) => void;
   onRestart: () => void;
@@ -2211,7 +2225,7 @@ function TaskDrawer({
               hash={record.plan_sha256 || ''}
               previousPlan={previousPlan}
               revisionNumber={record.revision_number}
-              onOrganizationSave={(lines) => onOrganizationSave(record, lines)}
+              onOrganizationSave={(lines, loops) => onOrganizationSave(record, lines, loops)}
             />
           )}
 
@@ -2498,6 +2512,29 @@ function managerWouldCreateCycle(
   return false;
 }
 
+function collaborationLoopError(
+  agents: PlannedAgent[],
+  loops: CollaborationLoop[],
+): string {
+  const agentNames = new Set(agents.map((agent) => agent.name));
+  const pairs = new Set<string>();
+  for (const loop of loops) {
+    if (!agentNames.has(loop.source_agent) || !agentNames.has(loop.target_agent)) {
+      return '循环协作必须选择当前团队中的员工';
+    }
+    if (loop.condition.trim().length < 3) return '请写明循环返回与停止条件';
+    if (!Number.isInteger(loop.max_iterations)
+      || loop.max_iterations < 1
+      || loop.max_iterations > 10) {
+      return '循环次数必须是 1 到 10 的整数';
+    }
+    const pair = `${loop.source_agent}\u0000${loop.target_agent}`;
+    if (pairs.has(pair)) return '同一方向的员工组合只能设置一个循环';
+    pairs.add(pair);
+  }
+  return '';
+}
+
 function OrganizationChart({
   plan,
   editable,
@@ -2506,23 +2543,34 @@ function OrganizationChart({
 }: {
   plan: TaskPlan;
   editable: boolean;
-  onSave?: (lines: ReportingLine[]) => Promise<void>;
+  onSave?: (lines: ReportingLine[], loops: CollaborationLoop[]) => Promise<void>;
   compact?: boolean;
 }) {
-  const organizationKey = JSON.stringify(plan.agents);
+  const organizationKey = JSON.stringify({
+    agents: plan.agents,
+    loops: plan.collaboration_loops || [],
+  });
   const initialLines = useMemo(
     () => effectiveReportingLines(plan),
     // The dashboard refresh replaces equal plan objects; only structural changes reset editing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [organizationKey],
   );
+  const initialLoops = useMemo(
+    () => (plan.collaboration_loops || []).map((loop) => ({ ...loop })),
+    // The plan hash owns this structure; only a new plan version resets the editor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [organizationKey],
+  );
   const [editing, setEditing] = useState(false);
   const [draftLines, setDraftLines] = useState<ReportingLine[]>(initialLines);
+  const [draftLoops, setDraftLoops] = useState<CollaborationLoop[]>(initialLoops);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => {
     setEditing(false);
     setDraftLines(initialLines);
+    setDraftLoops(initialLoops);
     setError('');
   }, [organizationKey]);
   const visibleLines = editing ? draftLines : initialLines;
@@ -2533,7 +2581,9 @@ function OrganizationChart({
   const parentByEmployee = new Map(
     visibleLines.map((line) => [line.employee, line.reports_to]),
   );
-  const changed = JSON.stringify(draftLines) !== JSON.stringify(initialLines);
+  const changed = JSON.stringify({ lines: draftLines, loops: draftLoops })
+    !== JSON.stringify({ lines: initialLines, loops: initialLoops });
+  const loopError = collaborationLoopError(plan.agents, draftLoops);
 
   const changeManager = (employee: string, reportsTo: string) => {
     setDraftLines((current) => current.map((line) => (
@@ -2541,12 +2591,48 @@ function OrganizationChart({
     )));
     setError('');
   };
+  const changeLoop = (index: number, patch: Partial<CollaborationLoop>) => {
+    setDraftLoops((current) => current.map((loop, loopIndex) => (
+      loopIndex === index ? { ...loop, ...patch } : loop
+    )));
+    setError('');
+  };
+  const addLoop = () => {
+    if (draftLoops.length >= 5) return;
+    const preferred = plan.agents.length > 1
+      ? [plan.agents[1], plan.agents[0], ...plan.agents.slice(2)]
+      : plan.agents;
+    for (const source of preferred) {
+      for (const target of plan.agents) {
+        if (!draftLoops.some(
+          (loop) => loop.source_agent === source.name && loop.target_agent === target.name,
+        )) {
+          setDraftLoops((current) => [...current, {
+            source_agent: source.name,
+            target_agent: target.name,
+            condition: '验收未通过时返回修改；通过即停止',
+            max_iterations: 2,
+          }]);
+          setError('');
+          return;
+        }
+      }
+    }
+    setError('没有可添加的唯一循环组合');
+  };
   const save = async () => {
     if (!onSave || !changed || saving) return;
+    if (loopError) {
+      setError(loopError);
+      return;
+    }
     setSaving(true);
     setError('');
     try {
-      await onSave(draftLines);
+      await onSave(
+        draftLines,
+        draftLoops.map((loop) => ({ ...loop, condition: loop.condition.trim() })),
+      );
       setEditing(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : '组织架构保存失败');
@@ -2558,8 +2644,11 @@ function OrganizationChart({
   return (
     <div className={`organization-chart ${compact ? 'compact' : ''}`}>
       <div className="organization-toolbar">
-        <span><Network size={15} />{plan.agents.length} 名员工 · {levels.length} 层汇报关系</span>
-        {editable && plan.agents.length > 1 && (
+        <span>
+          <Network size={15} />
+          {plan.agents.length} 名员工 · {levels.length} 层汇报关系 · {draftLoops.length} 个循环
+        </span>
+        {editable && (
           editing ? (
             <div className="organization-actions">
               <button
@@ -2568,6 +2657,7 @@ function OrganizationChart({
                 disabled={saving}
                 onClick={() => {
                   setDraftLines(initialLines);
+                  setDraftLoops(initialLoops);
                   setEditing(false);
                   setError('');
                 }}
@@ -2577,7 +2667,7 @@ function OrganizationChart({
               <button
                 className="secondary-button"
                 type="button"
-                disabled={!changed || saving}
+                disabled={!changed || Boolean(loopError) || saving}
                 onClick={() => void save()}
               >
                 {saving ? <LoaderCircle size={15} className="spin" /> : <Save size={15} />}
@@ -2586,7 +2676,7 @@ function OrganizationChart({
             </div>
           ) : (
             <button className="text-button" type="button" onClick={() => setEditing(true)}>
-              <PencilLine size={14} />调整上下级
+              <PencilLine size={14} />调整组织与循环
             </button>
           )
         )}
@@ -2643,6 +2733,112 @@ function OrganizationChart({
           </div>
         ))}
       </div>
+
+      <div className="collaboration-loops">
+        <div className="collaboration-loop-heading">
+          <span><Repeat2 size={15} />循环协作</span>
+          {editing && (
+            <button
+              className="text-button"
+              type="button"
+              disabled={draftLoops.length >= 5}
+              onClick={addLoop}
+            >
+              <Plus size={14} />添加循环
+            </button>
+          )}
+        </div>
+        {draftLoops.length ? (
+          <div className="collaboration-loop-list">
+            {draftLoops.map((loop, index) => (
+              <div
+                className={`collaboration-loop-row ${editing ? 'editing' : ''}`}
+                key={`${loop.source_agent}-${loop.target_agent}-${index}`}
+              >
+                {editing ? (
+                  <>
+                    <label>
+                      <span>发起员工</span>
+                      <select
+                        aria-label={`循环 ${index + 1} 发起员工`}
+                        value={loop.source_agent}
+                        onChange={(event) => changeLoop(index, { source_agent: event.target.value })}
+                      >
+                        {plan.agents.map((agent) => (
+                          <option key={agent.name} value={agent.name}>{agent.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <ArrowRight className="collaboration-loop-arrow" size={16} />
+                    <label>
+                      <span>返回员工</span>
+                      <select
+                        aria-label={`循环 ${index + 1} 返回员工`}
+                        value={loop.target_agent}
+                        onChange={(event) => changeLoop(index, { target_agent: event.target.value })}
+                      >
+                        {plan.agents.map((agent) => (
+                          <option key={agent.name} value={agent.name}>{agent.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="collaboration-loop-count">
+                      <span>最多轮次</span>
+                      <input
+                        aria-label={`循环 ${index + 1} 最多轮次`}
+                        type="number"
+                        min={1}
+                        max={10}
+                        step={1}
+                        value={loop.max_iterations}
+                        onChange={(event) => changeLoop(index, {
+                          max_iterations: Number(event.target.value),
+                        })}
+                      />
+                    </label>
+                    <button
+                      className="icon-button collaboration-loop-delete"
+                      type="button"
+                      title="删除循环"
+                      aria-label={`删除循环 ${index + 1}`}
+                      onClick={() => setDraftLoops((current) => current.filter(
+                        (_, loopIndex) => loopIndex !== index,
+                      ))}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                    <label className="collaboration-loop-condition">
+                      <span>返回与停止条件</span>
+                      <input
+                        aria-label={`循环 ${index + 1} 返回与停止条件`}
+                        value={loop.condition}
+                        maxLength={300}
+                        onChange={(event) => changeLoop(index, { condition: event.target.value })}
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <>
+                    <div className="collaboration-loop-route">
+                      <strong>{loop.source_agent}</strong>
+                      <ArrowRight size={15} />
+                      <strong>{loop.target_agent}</strong>
+                      <span>最多 {loop.max_iterations} 轮</span>
+                    </div>
+                    <p>{loop.condition}</p>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="collaboration-loop-empty">无循环协作；各阶段按顺序执行一次。</div>
+        )}
+        <div className="collaboration-loop-boundary">
+          <ShieldCheck size={14} />
+          <span>次数上限会写入并锁定在确认方案；当前属于计划级约束，不冒充运行时硬截断。</span>
+        </div>
+      </div>
       {editing && (
         <div className="organization-edit-note">
           保存会生成新的不可变方案版本；当前版本及其哈希不会被覆盖。
@@ -2666,7 +2862,10 @@ function PlanReview({
   showStatus?: boolean;
   previousPlan?: TaskPlan | null;
   revisionNumber?: number;
-  onOrganizationSave?: (lines: ReportingLine[]) => Promise<void>;
+  onOrganizationSave?: (
+    lines: ReportingLine[],
+    loops: CollaborationLoop[],
+  ) => Promise<void>;
 }) {
   const changedSections = useMemo(
     () => changedPlanSections(previousPlan, plan),
@@ -2695,6 +2894,9 @@ function PlanReview({
         <p>{plan.summary}</p>
         <div className="plan-facts">
           <span><Users size={15} />{plan.agents.length} Agent</span>
+          {(plan.collaboration_loops || []).length > 0 && (
+            <span><Repeat2 size={15} />{plan.collaboration_loops.length} 个有界循环</span>
+          )}
           <span><Clock3 size={15} />约 {plan.estimated_duration_minutes} 分钟</span>
           <span><CalendarClock size={15} />{plan.cadence.update_interval}</span>
         </div>
@@ -2747,6 +2949,7 @@ function changedPlanSections(previous: TaskPlan | null, current: TaskPlan): stri
   const sections: Array<[string, unknown, unknown]> = [
     ['任务摘要', [previous.title, previous.summary, previous.estimated_duration_minutes], [current.title, current.summary, current.estimated_duration_minutes]],
     ['Agent 架构', previous.agents, current.agents],
+    ['循环协作', previous.collaboration_loops || [], current.collaboration_loops || []],
     ['执行阶段', previous.stages, current.stages],
     ['更新节奏', [previous.cadence, previous.update_policy], [current.cadence, current.update_policy]],
     ['工具', previous.tools, current.tools],

@@ -284,6 +284,7 @@ class FakePaperclip:
     def __init__(self) -> None:
         self.created = 0
         self.approvals: list[dict] = []
+        self.descriptions: list[str] = []
 
     def list_issues(self):
         return []
@@ -291,7 +292,9 @@ class FakePaperclip:
     def create_issue(self, title, description):
         assert title.startswith("[qd-plan:")
         assert "outcome proof" in description
-        assert "reports to 总控" in description
+        assert "reports to " in description
+        assert "Bounded collaboration loops:" in description
+        self.descriptions.append(description)
         self.created += 1
         return {"id": "issue-1"}
 
@@ -374,6 +377,56 @@ def test_plan_schema_supports_legacy_star_and_rejects_invalid_reporting_trees():
         TaskPlan.model_validate(cycle)
 
 
+def test_plan_schema_allows_bounded_collaboration_cycles_but_validates_contract():
+    raw = _fortune_plan().model_dump(mode="json")
+    raw["collaboration_loops"] = [
+        {
+            "source_agent": "引用核验 Agent",
+            "target_agent": "报告编辑 Agent",
+            "condition": "引用未通过时返回编辑；通过即停止",
+            "max_iterations": 2,
+        },
+        {
+            "source_agent": "报告编辑 Agent",
+            "target_agent": "报告编辑 Agent",
+            "condition": "版式未通过时自检；通过即停止",
+            "max_iterations": 3,
+        },
+    ]
+    validated = TaskPlan.model_validate(raw)
+    assert validated.collaboration_loops[0].max_iterations == 2
+    assert validated.collaboration_loops[1].source_agent == "报告编辑 Agent"
+
+    unknown = json.loads(json.dumps(raw, ensure_ascii=False))
+    unknown["collaboration_loops"][0]["target_agent"] = "不存在 Agent"
+    with pytest.raises(ValueError, match="exact planned agents"):
+        TaskPlan.model_validate(unknown)
+
+    duplicate = json.loads(json.dumps(raw, ensure_ascii=False))
+    duplicate["collaboration_loops"].append(duplicate["collaboration_loops"][0])
+    with pytest.raises(ValueError, match="pairs must be unique"):
+        TaskPlan.model_validate(duplicate)
+
+    out_of_bounds = json.loads(json.dumps(raw, ensure_ascii=False))
+    out_of_bounds["collaboration_loops"][0]["max_iterations"] = 11
+    with pytest.raises(ValueError):
+        TaskPlan.model_validate(out_of_bounds)
+
+    workflow = _plan(execution_mode="workflow", workflow_id="daily-research").model_dump(
+        mode="json"
+    )
+    workflow["collaboration_loops"] = [
+        {
+            "source_agent": "复核",
+            "target_agent": "总控",
+            "condition": "证据不完整时返回；通过即停止",
+            "max_iterations": 2,
+        }
+    ]
+    with pytest.raises(ValueError, match="runtime with agent loops"):
+        TaskPlan.model_validate(workflow)
+
+
 def test_planner_turns_terse_fortune_intent_into_a_validated_execution_brief():
     request = PlanRequest(objective="算命师")
     prompt = _planning_prompt(request, [])
@@ -382,6 +435,9 @@ def test_planner_turns_terse_fortune_intent_into_a_validated_execution_brief():
     assert "lunar-python" in prompt
     assert "解读 Agent" in prompt
     assert '"reports_to":null' in prompt
+    assert '"collaboration_loops"' in prompt
+    assert "max_iterations from 1 through 10" in prompt
+    assert "may point back to an earlier agent or to the same agent" in prompt
     assert "never send the report" in prompt
 
     plan = _fortune_plan()
@@ -513,6 +569,14 @@ def test_organization_revision_is_hash_bound_append_only_and_blocks_parent(
                 {"employee": "引用核验 Agent", "reports_to": "解读 Agent"},
                 {"employee": "报告编辑 Agent", "reports_to": "引用核验 Agent"},
             ],
+            collaboration_loops=[
+                {
+                    "source_agent": "引用核验 Agent",
+                    "target_agent": "报告编辑 Agent",
+                    "condition": "引用未通过时返回编辑；通过即停止",
+                    "max_iterations": 2,
+                }
+            ],
         ),
     )
     assert revised.status == "ready"
@@ -521,6 +585,7 @@ def test_organization_revision_is_hash_bound_append_only_and_blocks_parent(
     assert revised.plan_sha256 != parent.plan_sha256
     assert revised.plan is not None
     assert revised.plan.effective_reporting_lines()["报告编辑 Agent"] == "引用核验 Agent"
+    assert revised.plan.collaboration_loops[0].max_iterations == 2
     with pytest.raises(ConsoleConflict, match="newer revision"):
         service.confirm_plan(
             parent.plan_id,
@@ -537,6 +602,7 @@ def test_organization_revision_is_hash_bound_append_only_and_blocks_parent(
     assert organization_event["parent_plan_id"] == parent.plan_id
     assert organization_event["plan_sha256"] == revised.plan_sha256
     assert organization_event["agent_count"] == 3
+    assert organization_event["loop_count"] == 1
     assert "解读 Agent" not in json.dumps(organization_event, ensure_ascii=False)
 
 
@@ -571,7 +637,7 @@ def test_organization_revision_rejects_unchanged_incomplete_and_cyclic_trees(
                 ],
             ),
         )
-    with pytest.raises(ConsoleConflict, match="valid hierarchy"):
+    with pytest.raises(ConsoleConflict, match="valid team plan"):
         service.revise_plan_organization(
             parent.plan_id,
             OrganizationRevisionRequest(
@@ -583,6 +649,40 @@ def test_organization_revision_rejects_unchanged_incomplete_and_cyclic_trees(
                 ],
             ),
         )
+
+
+def test_organization_revision_can_change_only_bounded_loops(console_env, monkeypatch):
+    _, service, aion, paperclip = console_env
+    monkeypatch.setattr(aion, "generate_plan", lambda *args, **kwargs: _fortune_plan())
+    requested = service.request_plan(PlanRequest(objective="循环协作调整"))
+    parent = service.draft_plan(requested.plan_id)
+
+    revised = service.revise_plan_organization(
+        parent.plan_id,
+        OrganizationRevisionRequest(
+            confirmed=True,
+            reporting_lines=[
+                {"employee": "解读 Agent", "reports_to": None},
+                {"employee": "引用核验 Agent", "reports_to": "解读 Agent"},
+                {"employee": "报告编辑 Agent", "reports_to": "解读 Agent"},
+            ],
+            collaboration_loops=[
+                {
+                    "source_agent": "报告编辑 Agent",
+                    "target_agent": "报告编辑 Agent",
+                    "condition": "版式未通过时自检；通过即停止",
+                    "max_iterations": 3,
+                }
+            ],
+        ),
+    )
+
+    assert revised.plan is not None
+    assert revised.plan.effective_reporting_lines() == parent.plan.effective_reporting_lines()
+    assert revised.plan.collaboration_loops[0].source_agent == "报告编辑 Agent"
+    assert revised.plan_sha256 != parent.plan_sha256
+    service._create_or_find_issue(revised)
+    assert "报告编辑 Agent -> 报告编辑 Agent (max 3:" in paperclip.descriptions[-1]
 
 
 def test_organization_revision_http_facade_requires_csrf_and_confirmation(
@@ -605,6 +705,14 @@ def test_organization_revision_http_facade_requires_csrf_and_confirmation(
             {"employee": "引用核验 Agent", "reports_to": "解读 Agent"},
             {"employee": "报告编辑 Agent", "reports_to": "引用核验 Agent"},
         ],
+        "collaboration_loops": [
+            {
+                "source_agent": "报告编辑 Agent",
+                "target_agent": "报告编辑 Agent",
+                "condition": "版式未通过时自检；通过即停止",
+                "max_iterations": 3,
+            }
+        ],
     }
     with TestClient(app, base_url="http://127.0.0.1:8765") as client:
         denied = client.post(path, json=body)
@@ -618,6 +726,7 @@ def test_organization_revision_http_facade_requires_csrf_and_confirmation(
         accepted = client.post(path, json=body, headers={"X-QD-CSRF": csrf})
         assert accepted.status_code == 201
         assert accepted.json()["parent_plan_id"] == parent.plan_id
+        assert accepted.json()["plan"]["collaboration_loops"][0]["max_iterations"] == 3
 
 
 def test_plan_delete_is_append_only_idempotent_and_hides_the_plan(console_env):
@@ -1056,6 +1165,7 @@ def test_pre_organization_plan_files_keep_their_original_confirmation_hash(conso
     payload = json.loads(plan_path.read_text(encoding="utf-8"))
     for agent in payload["plan"]["agents"]:
         agent.pop("reports_to", None)
+    payload["plan"].pop("collaboration_loops", None)
     plan_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
     reloaded = service.get_plan(ready.plan_id, refresh=False)
@@ -1609,6 +1719,14 @@ def test_aionui_dispatch_receives_the_hash_bound_reporting_hierarchy(
     raw = _fortune_plan().model_dump(mode="json")
     raw["agents"][1]["reports_to"] = "解读 Agent"
     raw["agents"][2]["reports_to"] = "引用核验 Agent"
+    raw["collaboration_loops"] = [
+        {
+            "source_agent": "引用核验 Agent",
+            "target_agent": "报告编辑 Agent",
+            "condition": "引用未通过时返回编辑；通过即停止",
+            "max_iterations": 2,
+        }
+    ]
     plan = TaskPlan.model_validate(raw)
     captured: dict[str, object] = {}
     team = {
@@ -1647,6 +1765,17 @@ def test_aionui_dispatch_receives_the_hash_bound_reporting_hierarchy(
         "引用核验 Agent": "解读 Agent",
         "报告编辑 Agent": "引用核验 Agent",
     }
+    assert prompt_payload["plan"]["collaboration_loops"] == [
+        {
+            "source_agent": "引用核验 Agent",
+            "target_agent": "报告编辑 Agent",
+            "condition": "引用未通过时返回编辑；通过即停止",
+            "max_iterations": 2,
+        }
+    ]
+    prompt_text = str(captured["prompt"]).split("\n", 1)[0]
+    assert "never exceed max_iterations" in prompt_text
+    assert "does not expose a verifiable hard runtime cutoff" in prompt_text
     assert [row["role"] for row in captured["agents"]] == ["lead", "teammate", "teammate"]
     assert result["team_id"] == "team-org"
     assert result["team_run_id"] == "run-org"

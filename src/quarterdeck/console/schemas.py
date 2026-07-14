@@ -57,6 +57,15 @@ class TaskCadence(BaseModel):
     update_interval: str = Field(min_length=1, max_length=160)
 
 
+class AgentCollaborationLoop(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_agent: str = Field(min_length=1, max_length=80)
+    target_agent: str = Field(min_length=1, max_length=80)
+    condition: str = Field(min_length=3, max_length=300)
+    max_iterations: int = Field(ge=1, le=10)
+
+
 class TaskPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -66,6 +75,10 @@ class TaskPlan(BaseModel):
     execution_mode: Literal["aion_team", "workflow"]
     workflow_id: str | None = Field(default=None, min_length=1, max_length=100)
     agents: list[PlannedAgent] = Field(min_length=1, max_length=5)
+    collaboration_loops: list[AgentCollaborationLoop] = Field(
+        default_factory=list,
+        max_length=5,
+    )
     stages: list[TaskStage] = Field(min_length=1, max_length=8)
     cadence: TaskCadence
     tools: list[str] = Field(default_factory=list, max_length=12)
@@ -83,6 +96,7 @@ class TaskPlan(BaseModel):
         names = [agent.name.casefold() for agent in self.agents]
         if len(names) != len(set(names)):
             raise ValueError("agent names must be unique")
+        exact_names = {agent.name for agent in self.agents}
         owners = {agent.name.casefold() for agent in self.agents}
         if any(stage.owner.casefold() not in owners for stage in self.stages):
             raise ValueError("every stage owner must name a planned agent")
@@ -94,7 +108,6 @@ class TaskPlan(BaseModel):
             leader = leaders[0]
             if leader.reports_to is not None:
                 raise ValueError("the lead agent cannot report to another agent")
-            exact_names = {agent.name for agent in self.agents}
             parents: dict[str, str] = {}
             for agent in self.agents:
                 if agent is leader:
@@ -114,8 +127,18 @@ class TaskPlan(BaseModel):
                     if cursor in seen:
                         raise ValueError("agent reporting lines must be acyclic")
                     seen.add(cursor)
+        loop_pairs: set[tuple[str, str]] = set()
+        for loop in self.collaboration_loops:
+            if loop.source_agent not in exact_names or loop.target_agent not in exact_names:
+                raise ValueError("collaboration loops must name exact planned agents")
+            pair = (loop.source_agent, loop.target_agent)
+            if pair in loop_pairs:
+                raise ValueError("collaboration loop pairs must be unique")
+            loop_pairs.add(pair)
         if self.execution_mode == "workflow" and not self.workflow_id:
             raise ValueError("workflow execution requires workflow_id")
+        if self.execution_mode == "workflow" and self.collaboration_loops:
+            raise ValueError("workflow execution cannot override its runtime with agent loops")
         if self.execution_mode == "aion_team" and self.workflow_id is not None:
             raise ValueError("aion_team execution cannot carry workflow_id")
         return self
@@ -164,6 +187,10 @@ class OrganizationRevisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reporting_lines: list[AgentReportingLine] = Field(min_length=1, max_length=5)
+    collaboration_loops: list[AgentCollaborationLoop] | None = Field(
+        default=None,
+        max_length=5,
+    )
     confirmed: Literal[True]
 
     @model_validator(mode="after")

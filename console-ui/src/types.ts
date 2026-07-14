@@ -44,6 +44,13 @@ export type ReportingLine = {
   reports_to: string | null;
 };
 
+export type CollaborationLoop = {
+  source_agent: string;
+  target_agent: string;
+  condition: string;
+  max_iterations: number;
+};
+
 export type TaskPlan = {
   schema_version: 1;
   title: string;
@@ -51,6 +58,7 @@ export type TaskPlan = {
   execution_mode: 'aion_team' | 'workflow';
   workflow_id: string | null;
   agents: PlannedAgent[];
+  collaboration_loops: CollaborationLoop[];
   stages: Array<{
     order: number;
     title: string;

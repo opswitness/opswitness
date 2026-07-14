@@ -130,11 +130,13 @@ def _canonical_sha256(value: Any) -> str:
 
 
 def _hashable_plan_payload(plan: TaskPlan) -> dict[str, Any]:
-    """Keep hashes for pre-organization plans stable while binding explicit reporting lines."""
+    """Keep legacy hashes stable while binding explicit hierarchy and collaboration loops."""
     payload = plan.model_dump(mode="json")
     for agent in payload["agents"]:
         if agent.get("reports_to") is None:
             agent.pop("reports_to", None)
+    if not payload.get("collaboration_loops"):
+        payload.pop("collaboration_loops", None)
     return payload
 
 
@@ -1003,11 +1005,22 @@ class ConsoleService:
             plan_payload = parent.plan.model_dump(mode="json")
             for agent in plan_payload["agents"]:
                 agent["reports_to"] = requested[str(agent["name"])]
+            if request.collaboration_loops is not None:
+                plan_payload["collaboration_loops"] = [
+                    loop.model_dump(mode="json") for loop in request.collaboration_loops
+                ]
             try:
                 revised_plan = TaskPlan.model_validate(plan_payload)
             except ValueError as exc:
-                raise ConsoleConflict("reporting lines must form one valid hierarchy") from exc
-            if revised_plan.effective_reporting_lines() == parent.plan.effective_reporting_lines():
+                raise ConsoleConflict(
+                    "reporting lines and bounded loops must form one valid team plan"
+                ) from exc
+            hierarchy_unchanged = (
+                revised_plan.effective_reporting_lines()
+                == parent.plan.effective_reporting_lines()
+            )
+            loops_unchanged = revised_plan.collaboration_loops == parent.plan.collaboration_loops
+            if hierarchy_unchanged and loops_unchanged:
                 raise ConsoleConflict("organization is unchanged")
 
             revision_number = max(
@@ -1016,7 +1029,7 @@ class ConsoleService:
             if revision_number > 100:
                 raise ConsoleConflict("plan revision limit reached; create a new plan")
             plan_id = new_ulid()
-            instruction = "调整 Agent 组织架构"
+            instruction = "调整 Agent 组织架构与有界循环"
             instruction_sha = hashlib.sha256(instruction.encode()).hexdigest()
             timestamp = utc_now()
             record = PlanRecord(
@@ -1036,7 +1049,15 @@ class ConsoleService:
                 plan=revised_plan,
             )
             record.plan_sha256 = _execution_plan_sha(record)
-            structure_sha = _canonical_sha256(revised_plan.effective_reporting_lines())
+            structure_sha = _canonical_sha256(
+                {
+                    "reporting_lines": revised_plan.effective_reporting_lines(),
+                    "collaboration_loops": [
+                        loop.model_dump(mode="json")
+                        for loop in revised_plan.collaboration_loops
+                    ],
+                }
+            )
             self._append(
                 "task_plan_organization_revised",
                 plan_id,
@@ -1048,6 +1069,7 @@ class ConsoleService:
                     "organization_sha256": structure_sha,
                     "plan_sha256": record.plan_sha256,
                     "agent_count": len(revised_plan.agents),
+                    "loop_count": len(revised_plan.collaboration_loops),
                 },
             )
             self.store.create(record)
@@ -1523,10 +1545,16 @@ class ConsoleService:
             f"{agent.name} ({agent.runtime}, reports to {reporting[agent.name] or 'operator'})"
             for agent in record.plan.agents
         )
+        loops = "; ".join(
+            f"{loop.source_agent} -> {loop.target_agent} "
+            f"(max {loop.max_iterations}: {loop.condition})"
+            for loop in record.plan.collaboration_loops
+        ) or "none"
         description = (
             f"Confirmed Quarterdeck plan `{record.plan_id}`.\n\n"
             f"{record.plan.summary}\n\n"
             f"Team: {architecture}\n"
+            f"Bounded collaboration loops: {loops}\n"
             f"Cadence: {record.plan.cadence.kind} / {record.plan.cadence.update_interval}\n"
             f"Plan sha256: `{record.plan_sha256}`\n\n"
             "Execution completion is not business outcome proof; inspect artifacts, evals, and signoff."

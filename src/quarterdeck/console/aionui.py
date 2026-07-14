@@ -576,7 +576,11 @@ class AionUiClient:
                 "the runtime permission prompts; stop and surface any unavailable approval. Never claim "
                 "business success from process completion alone. Register or cite outcome evidence when "
                 "the available tools support it. Follow the hash-bound organization map: each agent "
-                "reports through its named direct manager and the lead remains the single root. "
+                "reports through its named direct manager and the lead remains the single root. Treat each "
+                "hash-bound collaboration_loops entry as a bounded plan contract: stop early when its "
+                "acceptance condition is met, never exceed max_iterations, and stop with an unresolved "
+                "status when the limit is reached. AionUi does not expose a verifiable hard runtime cutoff, "
+                "so do not describe prompt compliance as deterministic enforcement. "
                 "Paperclip issue: "
                 f"{paperclip_issue_id}.\n"
                 + json.dumps(
@@ -778,9 +782,9 @@ def _planning_prompt(
         revision_contract = (
             " This is a versioned revision. Preserve every sound field from PREVIOUS_PLAN unless "
             "REVISION_INSTRUCTION requires a change. Apply the requested changes consistently across "
-            "the summary, agents, stages, cadence, tools, approvals, artifacts, risks, duration, and "
-            "update policy. Return the complete revised plan, not a patch, and do not return an "
-            "identical plan."
+            "the summary, agents, collaboration loops, stages, cadence, tools, approvals, artifacts, "
+            "risks, duration, and update policy. Return the complete revised plan, not a patch, and do "
+            "not return an identical plan."
         )
     return (
         "You are Quarterdeck's planning-only function. Plan, but do not execute, call tools, read files, "
@@ -790,13 +794,20 @@ def _planning_prompt(
         '{"schema_version":1,"title":"...","summary":"...","execution_mode":"aion_team|workflow",'
         '"workflow_id":null,"agents":[{"name":"...","role":"lead|researcher|operator|reviewer|reporter|specialist",'
         '"responsibility":"...","runtime":"claude_code|codex_cli|aion_cli","reports_to":null}],'
+        '"collaboration_loops":[{"source_agent":"exact agent name","target_agent":"exact agent name",'
+        '"condition":"acceptance or return condition","max_iterations":2}],'
         '"stages":[{"order":1,"title":"...","owner":"exact agent name","outcome":"...","checkpoint":true}],'
         '"cadence":{"kind":"once|daily|weekdays|weekly|manual","timezone":"America/Los_Angeles",'
         '"local_time":null,"update_interval":"..."},"tools":[],"approvals":[],"artifacts":[],"risks":[],'
         '"estimated_duration_minutes":30,"update_policy":"..."}. '
         "Use 1-5 agents, exactly one lead, unique names, contiguous stage order, and exact owner names. "
         "Set the lead reports_to to null. Every other agent must report_to one exact agent name, and "
-        "the resulting reporting hierarchy must be acyclic. "
+        "the resulting reporting hierarchy must be acyclic. Collaboration loops are separate from the "
+        "reporting tree: they may point back to an earlier agent or to the same agent for self-review. "
+        "Use at most 5 loops, exact case-sensitive agent names, unique source/target pairs, and an integer "
+        "max_iterations from 1 through 10. Each condition must say when work returns and when it stops; "
+        "return an empty collaboration_loops array when iteration is unnecessary. Workflow plans must "
+        "always use an empty collaboration_loops array because their runtime owns iteration. "
         "The summary is an AI-expanded execution brief, not a slogan or restatement. For a Chinese "
         "objective, write at least 120 characters as six newline-separated sections using these exact "
         "labels: 目标：, 输入与边界：, 方法与分工：, 检查点：, 交付物：, 不包含：. For a non-Chinese "

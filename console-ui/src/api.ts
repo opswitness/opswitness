@@ -1,5 +1,6 @@
 import type {
   Bootstrap,
+  CollaborationLoop,
   MailAuthorizationJob,
   MailAuthorizationStatus,
   MailSummaryJob,
@@ -60,10 +61,15 @@ export function revisePlan(planId: string, instruction: string): Promise<PlanRec
 export function revisePlanOrganization(
   planId: string,
   reportingLines: ReportingLine[],
+  collaborationLoops: CollaborationLoop[],
 ): Promise<PlanRecord> {
   return api(`/api/v1/plans/${encodeURIComponent(planId)}/organization`, {
     method: 'POST',
-    body: JSON.stringify({ reporting_lines: reportingLines, confirmed: true }),
+    body: JSON.stringify({
+      reporting_lines: reportingLines,
+      collaboration_loops: collaborationLoops,
+      confirmed: true,
+    }),
   });
 }
 

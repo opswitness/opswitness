@@ -102,13 +102,20 @@ The **Team** view renders each current task team as a responsive organization ch
 with no explicit reporting fields is interpreted as one lead with every teammate reporting directly
 to that lead, without rewriting the private plan file or changing its historical hash. A ready plan
 may assign each non-lead employee one exact direct manager. The graph must have one lead root, cover
-every agent exactly once, and remain acyclic. Saving never patches the reviewed plan: Quarterdeck
-creates an immediately reviewable child version, binds the complete reporting tree into its new
-execution-envelope hash, and records only `organization_sha256` plus non-sensitive version metadata
-in `task_plan_organization_revised`. Confirmed or active organizations are read-only. The effective
-tree is included in the Paperclip issue and AionUi execution contract; AionUi remains the executor
-and Paperclip remains the governance plane, so the console does not become an employee database or
-agent runtime.
+every agent exactly once, and remain acyclic.
+
+Iterative collaboration is a separate graph. A ready plan may define up to five directed loops using
+exact agent names, including a self-loop for bounded self-review or cycles between multiple agents.
+Every loop carries a user-editable return/stop condition and an integer `max_iterations` from 1 to
+10. Workflow plans cannot override their runtime with these loops. Saving never patches the reviewed
+plan: Quarterdeck creates an immediately reviewable child version, binds the complete reporting tree
+and loop contracts into its new execution-envelope hash, and records only `organization_sha256`,
+counts, and non-sensitive version metadata in `task_plan_organization_revised`. Confirmed or active
+organizations are read-only. The effective tree and bounded loops are included in the Paperclip issue
+and AionUi execution contract. The pinned AionUi Team API does not expose a verifiable round-limit
+parameter, so version 1 labels the cap as plan-level constraint, not deterministic runtime cutoff.
+AionUi remains the executor and Paperclip remains the governance plane, so the console does not
+become an employee database or agent runtime.
 
 **Delete task** is a visibility tombstone, not record destruction. It is allowed only for `ready`,
 `failed`, or `completed_unverified` plans. Planning, confirmed, dispatching, running, and
