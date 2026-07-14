@@ -134,13 +134,27 @@ Python 包目录始终完整；实测 gate-recovery 恰在这个窗口启动时�
 failure。因此升级前必须先进入维护窗口：
 
 1. 确认没有运行中的 `qd gated-claude` 或 `qd wrap` 进程。
-2. `bootout` projector、watchdog、gate-recovery，以及所有已经由 `qd wrap` 接管的
-   launchd 任务。Paperclip 已经 `execve` 成 Node，不依赖 qd 的 Python 环境，可保持
-   运行。
+2. `bootout` projector、watchdog、gate-recovery、console（若已安装），以及所有已经由
+   `qd wrap` 接管的 launchd 任务。Paperclip 已经 `execve` 成 Node，不依赖 qd 的 Python
+   环境，可保持运行。
 3. 构建并执行用户级 `uv tool install --force --with mcp <wheel>`；立刻运行
    `qd version`、`qd doctor` 和 MCP handshake。
 4. 按原 plist 逐项 bootstrap 周期服务和接管任务；验证每项最近退出码为 0、投影
    backlog 为 0、watchdog/digest 无假绿后才退出维护窗口。
+
+总控制台加入后，当前 HEAD 的 doctor 还要求稳定入口同时具备 `qd soak` 与
+`qd console`。维护窗口内升级后必须额外执行：
+
+```bash
+qd soak --help
+qd console --help
+qd service render console --output /tmp/qd-launchd-render/com.quarterdeck.console.plist --write
+plutil -lint /tmp/qd-launchd-render/com.quarterdeck.console.plist
+```
+
+人工审阅后才复制并 bootstrap `com.quarterdeck.console.plist`。它是 loopback-only
+KeepAlive 服务；安装后 `qd doctor` 必须同时看到 `runtime_console=running` 和配置的
+console port open。现有 canary 通过前不得为升级它而提前中断连续证据。
 
 不得在 qd 周期服务或接管任务仍可能被 launchd 触发时原地更新 tool environment。
 
@@ -187,7 +201,8 @@ Paperclip，确认 UI 可见历史，再销毁副本。未经这一验证，备�
 
 ## 回滚
 
-- `launchctl bootout gui/$UID/<label>` 停止三个 Quarterdeck 服务。
+- `launchctl bootout gui/$UID/<label>` 停止对应 Quarterdeck 服务；当前集合包括
+  Paperclip、projector、watchdog、gate-recovery，以及可选 console。
 - `qd adopt launchd <label> --rollback` 字节级恢复原任务 plist，再 bootstrap。
 - Paperclip 数据从外部 Postgres + age 备份恢复；Quarterdeck ledger 独立保留。
 - 不执行 `git reset`、不手改 ledger、不按未经重新核验的 PID 停进程。

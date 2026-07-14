@@ -18,7 +18,7 @@ from quarterdeck.backup import (
 )
 from quarterdeck.cli import app
 from quarterdeck.config import Settings
-from quarterdeck.doctor import _launchd_service_runtime, run_doctor
+from quarterdeck.doctor import _launchd_service_runtime, _qd_command_surface, run_doctor
 from quarterdeck.service import SERVICE_NAMES, build_service_exec, exec_service, render_launchd
 
 
@@ -96,6 +96,15 @@ def test_service_exec_keeps_database_secret_out_of_argv(tmp_path, monkeypatch):
         "--once",
     ]
     assert "DATABASE_URL" not in recovery_env
+    console, console_env = build_service_exec("console", settings)
+    assert console == [
+        str(settings.services.qd_bin.resolve()),
+        "console",
+        "serve",
+        "--port",
+        "8765",
+    ]
+    assert "DATABASE_URL" not in console_env
 
 
 def test_service_exec_sets_private_umask_before_execve(tmp_path, monkeypatch):
@@ -146,6 +155,9 @@ def test_doctor_fake_toolchain_all_green(tmp_path, monkeypatch):
     checks = {check["name"]: check for check in result["checks"]}
     assert checks["installed_gate-recovery"]["status"] == "pass"
     assert checks["runtime_gate-recovery"]["status"] == "pass"
+    assert checks["installed_console"]["status"] == "pass"
+    assert checks["runtime_console"]["status"] == "pass"
+    assert checks["console_port"]["status"] == "pass"
 
 
 def test_launchd_runtime_check_is_fail_closed():
@@ -154,6 +166,9 @@ def test_launchd_runtime_check_is_fail_closed():
 
     paperclip_ok, _ = _launchd_service_runtime(
         "paperclip", run=lambda *args, **kwargs: completed("state = running\nruns = 1\n")
+    )
+    console_ok, _ = _launchd_service_runtime(
+        "console", run=lambda *args, **kwargs: completed("state = running\nruns = 1\n")
     )
     periodic_ok, detail = _launchd_service_runtime(
         "gate-recovery",
@@ -169,8 +184,49 @@ def test_launchd_runtime_check_is_fail_closed():
     )
 
     assert paperclip_ok is True
+    assert console_ok is True
     assert periodic_ok is True and detail == "runs=4 last_exit=0"
     assert failed is False and failed_detail == "runs=5 last_exit=1"
+
+
+def test_qd_command_surface_rejects_stale_installed_tool():
+    def run(argv, **kwargs):
+        del kwargs
+        return subprocess.CompletedProcess(argv, 2 if argv[1] == "console" else 0, "", "")
+
+    healthy, detail = _qd_command_surface(Path("/tmp/qd"), run=run)
+
+    assert healthy is False
+    assert detail == "installed qd is missing required commands: console"
+
+
+def test_doctor_keeps_command_surface_check_when_settings_are_unavailable(
+    tmp_path, monkeypatch
+):
+    config = tmp_path / "config"
+    config.mkdir(mode=0o700)
+    config.chmod(0o700)
+    (config / "config.yaml").write_text("database_url: forbidden\n")
+    (config / "config.yaml").chmod(0o600)
+    monkeypatch.setenv("QD_CONFIG_DIR", str(config))
+
+    result = run_doctor(
+        settings_loader=lambda: pytest.fail("settings loader must not run"),
+        which=lambda name: None,
+        version=lambda path, args: "unused",
+        port_open=lambda host, port: False,
+        paperclip_processes=lambda: [],
+        launchagents_dir=tmp_path / "LaunchAgents",
+    )
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["healthy"] is False
+    assert checks["config_security"]["status"] == "fail"
+    assert checks["qd_command_surface"] == {
+        "name": "qd_command_surface",
+        "status": "fail",
+        "detail": "settings unavailable",
+    }
 
 
 def test_doctor_rejects_readable_paperclip_backups(tmp_path, monkeypatch):

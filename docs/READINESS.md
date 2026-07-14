@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 214 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
+- Full suite: 216 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
   gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -28,7 +28,11 @@ blocked by the current open gates below.
   three M2 launchd templates; encrypted backup and isolated restore dry-runs.
 - `uv build` succeeds; the wheel was installed into an isolated `/tmp` tool root,
   `qd version` ran, and a packaged watchdog plist rendered and passed `plutil -lint`.
-- Permanent Paperclip/Postgres/launchd are installed. `qd doctor` is fully green and now
+- Permanent Paperclip/Postgres/launchd are installed. The previously installed `qd doctor` is
+  green, but it is itself stale: the stable tool lacks the newer `soak` and `console` commands.
+  Current-HEAD doctor now detects this as `qd_command_surface=fail`; every other live check passes.
+  Upgrading the uv tool before the 24-hour canary would violate the required quiesced maintenance
+  window and reset continuous evidence, so the drift remains an explicit post-canary gate. Doctor
   verifies installed plist drift, rejects symlinks, checks private log/backup leaf modes,
   and fails on unhealthy launchd runtime state; encrypted backup + isolated restore and the
   projector four-test matrix pass.
@@ -83,6 +87,12 @@ blocked by the current open gates below.
   layouts have zero horizontal overflow, and the built wheel contains the versioned static assets.
   Mail stays visibly `未启用` until the existing consent/OAuth gate closes. Design authority:
   [ADR-0007](adr/0007-local-operator-console.md).
+- A fifth secret-free launchd template now makes that console an optional loopback KeepAlive
+  service. `qd service exec console` reads the private configuration then `execve`s the fixed
+  `qd console serve --port <configured>` argv. Doctor treats it like Paperclip: installed plist,
+  running state, and bound port must all pass. The template has passed real dry-run rendering and
+  `plutil -lint`, but is intentionally not installed until the canary checkpoint permits one
+  quiesced stable-tool upgrade.
 - M6 is recruitment-ready but intentionally has no product code. The paid-design-partner
   gate, data boundary, implementation order, and success evidence are fixed in
   [M6-PILOT-GATE.md](M6-PILOT-GATE.md).
@@ -92,26 +102,29 @@ blocked by the current open gates below.
 1. **Canary elapsed time** — `qd soak status m2-canary` must remain non-green until at least
    2026-07-14 15:23:32 PDT, then pass together with the independent production checks;
    register-trigger must remain healthy for 24–48 hours.
-2. **Seven-day soak** — only after the canary passes may feed-monitor and sox-monitor
+2. **Stable-tool and console service upgrade** — after the canary passes, quiesce every qd
+   consumer, install the current wheel, verify stable `qd soak`/`qd console`, install the optional
+   console plist, rebootstrap services, and require current-HEAD doctor to return fully green.
+3. **Seven-day soak** — only after the canary and stable-tool upgrade pass may feed-monitor and sox-monitor
    be adopted; M2 remains incomplete until seven days pass.
-3. **Telegram digest** — secure hidden-input `qd telegram configure/test` tooling is
+4. **Telegram digest** — secure hidden-input `qd telegram configure/test` tooling is
    implemented, atomically writes only the `0600` secret file, and refuses silent
    replacement. Production credentials are still absent and delivery must be exercised
    during soak without exposing or copying tokens into chat, repo, argv, logs, or plists.
-4. **Daily mail consent and OAuth** — before enabling the adapter or creating the AionUi
+5. **Daily mail consent and OAuth** — before enabling the adapter or creating the AionUi
    09:00 America/Los_Angeles task, the operator must explicitly approve Gmail readonly OAuth
    and sending sender/subject/date/message-id metadata to the model provider configured in
    AionUi, set `mail.model_metadata_consent: true`, and bind a separate assistant only to the
    mail profile. Then run one real metadata-only acceptance check; automatic
    send/draft/delete/label mutation remains out of scope.
-5. **Brand gate** — `QUARTERDECK` has an active US class-42 software registration and
+6. **Brand gate** — `QUARTERDECK` has an active US class-42 software registration and
    substantial software-name usage. `OpsWitness` is the preliminary recommended replacement,
    and its exact/broader official USPTO queries plus live package, GitHub, and domain checks
    are clear at the recorded snapshot. No rename or reservation has been approved. Evidence:
    [BRAND-CLEARANCE.md](BRAND-CLEARANCE.md).
-6. **No git remote** — GitHub Actions, attestations, private vulnerability reporting,
+7. **No git remote** — GitHub Actions, attestations, private vulnerability reporting,
    and the release workflow have never actually run.
-7. **M6 commercial gate** — no practitioner UI or private product repository until a
+8. **M6 commercial gate** — no practitioner UI or private product repository until a
    design partner gives a written paid commitment or deposit.
 
 ## Resumption update (2026-07-13 11:59 PDT)
@@ -167,12 +180,15 @@ Continue in this order:
    `qd soak status m2-canary`, doctor, status, digest, watchdog, projector, backup, and canary
    evidence checks. Append `qd soak checkpoint m2-canary` only after recomputing the verdict. Continue
    observation up to 48 hours if any result is ambiguous.
-2. Only after that gate passes, follow the hash-locked, idle-PID adoption procedure in
+2. Only after that gate passes, enter the documented qd maintenance window: stop qd consumers,
+   install the current wheel, verify `soak` and `console`, install/bootstrap the console service,
+   restore periodic services/canary, and require current-HEAD doctor to become fully green.
+3. Only after that upgrade passes, follow the hash-locked, idle-PID adoption procedure in
    `M2-VALIDATION.md` for feed-monitor and sox-monitor. Start the seven-day soak only when
    both jobs are wrapped, enrolled by exact label, and healthy.
-3. Obtain an explicit brand decision before creating a remote or changing public
+4. Obtain an explicit brand decision before creating a remote or changing public
    identifiers. Run real GitHub Actions and provenance only after that decision.
-4. Build the private practitioner product only after written paid commitment or deposit.
+5. Build the private practitioner product only after written paid commitment or deposit.
 
 M2 is complete only after the seven-day soak passes with zero unexplained loss, duplicate,
 false-green state, process-tree survivor, or unrecovered backlog. M3, M5, and M6 retain their

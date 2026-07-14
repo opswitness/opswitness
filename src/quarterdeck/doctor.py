@@ -17,7 +17,7 @@ from typing import Callable
 import psutil
 
 from quarterdeck.config import Settings, config_dir, resolve_api_key, validate_config_files
-from quarterdeck.service import SERVICE_NAMES, _template_bytes
+from quarterdeck.service import KEEPALIVE_SERVICE_NAMES, SERVICE_NAMES, _template_bytes
 from quarterdeck.workflows import load_workflows, workflow_catalog
 
 
@@ -160,7 +160,7 @@ def _launchd_service_runtime(
     output = result.stdout
     state = re.search(r"^\s*state = ([^\s]+)\s*$", output, re.MULTILINE)
     runs = re.search(r"^\s*runs = (\d+)\s*$", output, re.MULTILINE)
-    if name == "paperclip":
+    if name in KEEPALIVE_SERVICE_NAMES:
         running = state is not None and state.group(1) == "running"
         return running, f"state={state.group(1) if state else 'unknown'}"
 
@@ -169,6 +169,31 @@ def _launchd_service_runtime(
         return False, f"runs={runs.group(1) if runs else 'unknown'} last_exit=unknown"
     code = int(last_exit.group(1))
     return code == 0, f"runs={runs.group(1) if runs else 'unknown'} last_exit={code}"
+
+
+def _qd_command_surface(
+    executable: Path,
+    *,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> tuple[bool, str]:
+    required = ("soak", "console")
+    missing: list[str] = []
+    for command in required:
+        try:
+            result = run(
+                [str(executable), command, "--help"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            return False, f"cannot inspect installed qd command surface: {exc}"
+        if result.returncode != 0:
+            missing.append(command)
+    if missing:
+        return False, "installed qd is missing required commands: " + ", ".join(missing)
+    return True, "required commands available: " + ", ".join(required)
 
 
 def run_doctor(
@@ -234,6 +259,7 @@ def run_doctor(
         checks.extend(
             [
                 DoctorCheck("qd_bin", "fail", "settings unavailable"),
+                DoctorCheck("qd_command_surface", "fail", "settings unavailable"),
                 DoctorCheck("paperclip_command", "fail", "settings unavailable"),
                 DoctorCheck("paperclip_credentials", "fail", "settings unavailable"),
                 DoctorCheck("backup_target", "fail", "settings unavailable"),
@@ -245,6 +271,17 @@ def run_doctor(
         qd_bin = settings.services.qd_bin.expanduser().resolve()
         qd_ok = qd_bin.is_file() and os.access(qd_bin, os.X_OK)
         checks.append(DoctorCheck("qd_bin", "pass" if qd_ok else "fail", str(qd_bin)))
+        if qd_ok:
+            command_surface_ok, command_surface_detail = _qd_command_surface(qd_bin)
+        else:
+            command_surface_ok, command_surface_detail = False, "qd executable unavailable"
+        checks.append(
+            DoctorCheck(
+                "qd_command_surface",
+                "pass" if command_surface_ok else "fail",
+                command_surface_detail,
+            )
+        )
         command = settings.services.paperclip_command
         command_ok = bool(command)
         if command_ok:
@@ -347,12 +384,17 @@ def run_doctor(
         except (OSError, ValueError, plistlib.InvalidFileException) as exc:
             checks.append(DoctorCheck(f"template_{name}", "fail", str(exc)))
 
+    console_installed = False
     if settings is not None:
         installed_dir = launchagents_dir or (Path.home() / "Library" / "LaunchAgents")
         installed_names = ["paperclip", "projector", "watchdog"]
         optional_gate = installed_dir / "com.quarterdeck.gate-recovery.plist"
         if optional_gate.exists() or optional_gate.is_symlink():
             installed_names.append("gate-recovery")
+        optional_console = installed_dir / "com.quarterdeck.console.plist"
+        if optional_console.exists() or optional_console.is_symlink():
+            console_installed = True
+            installed_names.append("console")
         for name in installed_names:
             installed_ok, installed_detail = _installed_service_security(
                 name, settings, installed_dir
@@ -378,7 +420,10 @@ def run_doctor(
                     )
                 )
 
-    for name, port in (("postgres_port", 5432), ("paperclip_port", 3100)):
+    service_ports = [("postgres_port", 5432), ("paperclip_port", 3100)]
+    if settings is not None and console_installed:
+        service_ports.append(("console_port", settings.console.port))
+    for name, port in service_ports:
         opened = port_open("127.0.0.1", port)
         checks.append(
             DoctorCheck(

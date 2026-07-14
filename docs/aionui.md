@@ -30,6 +30,11 @@ Plan Mode 临时 Team 在成功或失败后删除。AionUi 执行结束只记为
 `completed_unverified`；业务完成必须继续看 artifact/eval/审签。详见
 [ADR-0007](adr/0007-local-operator-console.md)。
 
+源码验收可直接运行 `qd console serve --open`。长期登录自启使用
+`qd service render console` 生成的 loopback-only KeepAlive plist，但必须在停掉所有 qd
+消费者的维护窗口内先升级稳定 uv tool；当前生产 canary 通过前不得为了安装总控制台而
+中断连续证据。
+
 ## AionUi 配置
 
 用户级工具必须包含 MCP extra：

@@ -52,6 +52,11 @@ create a recurring schedule. A finished Agent Team is labeled `completed_unverif
 artifact, eval, or human sign-off proves the business outcome. See
 [ADR-0007](docs/adr/0007-local-operator-console.md).
 
+An optional secret-free KeepAlive launchd template is available through
+`qd service render console`. Install it only in the same quiesced maintenance window used to
+upgrade the stable `qd` tool; never replace the uv tool environment while wrapped or periodic qd
+jobs can start.
+
 ## Showcases
 
 The same contract, three verticals:

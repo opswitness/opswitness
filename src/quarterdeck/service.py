@@ -11,7 +11,8 @@ from typing import Any
 from quarterdeck.config import Settings, config_dir
 from quarterdeck.fsutil import atomic_write
 
-SERVICE_NAMES = ("paperclip", "projector", "watchdog", "gate-recovery")
+SERVICE_NAMES = ("paperclip", "projector", "watchdog", "gate-recovery", "console")
+KEEPALIVE_SERVICE_NAMES = frozenset({"paperclip", "console"})
 
 
 def _template_bytes(name: str) -> bytes:
@@ -104,8 +105,10 @@ def build_service_exec(
         argv = [str(qd_bin), "project"]
     elif name == "watchdog":
         argv = [str(qd_bin), "watchdog", "--once"]
-    else:
+    elif name == "gate-recovery":
         argv = [str(qd_bin), "gate", "recover", "--once"]
+    else:
+        argv = [str(qd_bin), "console", "serve", "--port", str(settings.console.port)]
     return argv, env
 
 
