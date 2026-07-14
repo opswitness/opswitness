@@ -1,6 +1,6 @@
 # Quarterdeck Completion Audit
 
-Snapshot: 2026-07-13 19:50 PDT. This document maps the approved M0-M6 plan to evidence and
+Snapshot: 2026-07-13 19:56 PDT. This document maps the approved M0-M6 plan to evidence and
 remaining gates. [READINESS.md](READINESS.md) remains the single operational snapshot.
 
 ## Requirement matrix
@@ -19,7 +19,7 @@ remaining gates. [READINESS.md](READINESS.md) remains the single operational sna
 ## Live evidence at this snapshot
 
 - Current-HEAD `qd soak status m2-canary --json`: `pending`; only blocker is
-  `minimum_duration`, with 70,406 seconds remaining at 19:50 PDT. The tracked job has one start,
+  `minimum_duration`, with 70,026 seconds remaining at 19:56 PDT. The tracked job has one start,
   one success, zero failures, and zero projection backlog since the reset contract.
 - Current-HEAD `qd status`: 13 total runs and zero pending projections. The third independently
   clicked AionUi one-click workflow run (`01KXF2VC2NGNK7NFKEXWEBWZEY`) exited 0 without degraded
@@ -56,6 +56,10 @@ remaining gates. [READINESS.md](READINESS.md) remains the single operational sna
   confirmed zero remote Teams, and recorded `started -> finished`. Missing/corrupt/insecure markers,
   ambiguous candidates, identity drift, API failure, cleanup failure, or evidence failure stop
   startup. A pre-marker crash can leave only an unmarked local directory and requires inspection.
+- Post-commit acceptance restarted source commit `d645441` on loopback port 8765. Startup recovery
+  completed with no residue, health stayed green, the sole plan remained `ready` with its original
+  timestamp, the dashboard remained `1/1` covered with zero projection backlog, and the browser
+  emitted no warnings or errors. No plan, mailbox, or production fleet action was triggered.
 - Arbitrary planning, Paperclip, workflow, runtime, and schedule-parser errors no longer cross into
   plan API responses or ledger records. Hostile private-path echoes are covered by regressions.
 - A real primary console on port 8765 held the `0700` state directory's `0600` lease. A second
