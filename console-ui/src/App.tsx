@@ -24,11 +24,13 @@ import {
   LoaderCircle,
   Mail,
   MessageSquare,
+  Network,
   Play,
   Plus,
   PencilLine,
   RefreshCw,
   RotateCcw,
+  Save,
   Send,
   Server,
   Settings,
@@ -58,6 +60,7 @@ import {
   requestMailSummary,
   requestPlan,
   revisePlan,
+  revisePlanOrganization,
   testTelegram,
 } from './api';
 import type {
@@ -69,13 +72,15 @@ import type {
   MailAuthorizationStatus,
   MailSummaryJob,
   PlanRecord,
+  PlannedAgent,
   ProviderConnectionJob,
+  ReportingLine,
   RunRecord,
   TaskPlan,
   TelegramSetupStatus,
 } from './types';
 
-type View = 'workspace' | 'dashboard' | 'tasks' | 'approvals' | 'evidence' | 'settings';
+type View = 'workspace' | 'dashboard' | 'tasks' | 'team' | 'approvals' | 'evidence' | 'settings';
 
 const cadenceOptions = [
   { value: 'once', label: '单次' },
@@ -273,6 +278,7 @@ function App() {
     workspace: '工作台',
     dashboard: '总控制台',
     tasks: '任务',
+    team: '团队',
     approvals: '审批',
     evidence: '证据',
     settings: '连接',
@@ -329,6 +335,9 @@ function App() {
                   onRevise={async (record, instruction) => {
                     mergePlan(await revisePlan(record.plan_id, instruction));
                   }}
+                  onOrganizationSave={async (record, lines) => {
+                    mergePlan(await revisePlanOrganization(record.plan_id, lines));
+                  }}
                   onConfirm={async (record) => {
                     if (!record.plan_sha256) throw new Error('方案哈希缺失');
                     mergePlan(await confirmPlan(record.plan_id, record.plan_sha256));
@@ -354,6 +363,15 @@ function App() {
                   onOpen={openPlan}
                   onDelete={setDeleteTarget}
                   onNew={openNewTask}
+                />
+              )}
+              {view === 'team' && (
+                <TeamView
+                  plans={bootstrap.plans}
+                  onOpen={openPlan}
+                  onOrganizationSave={async (record, lines) => {
+                    mergePlan(await revisePlanOrganization(record.plan_id, lines));
+                  }}
                 />
               )}
               {view === 'approvals' && (
@@ -385,6 +403,9 @@ function App() {
         }}
         onRevise={async (record, instruction) => {
           mergePlan(await revisePlan(record.plan_id, instruction));
+        }}
+        onOrganizationSave={async (record, lines) => {
+          mergePlan(await revisePlanOrganization(record.plan_id, lines));
         }}
         onConfirm={async (record) => {
           if (!record.plan_sha256) throw new Error('方案哈希缺失');
@@ -428,6 +449,7 @@ function Sidebar({ view, onChange }: { view: View; onChange: (view: View) => voi
     { id: 'workspace' as const, label: '工作台', icon: MessageSquare },
     { id: 'dashboard' as const, label: '概览', icon: LayoutDashboard },
     { id: 'tasks' as const, label: '任务', icon: ListTodo },
+    { id: 'team' as const, label: '团队', icon: Network },
     { id: 'approvals' as const, label: '审批', icon: ClipboardCheck },
     { id: 'evidence' as const, label: '证据', icon: FileCheck2 },
     { id: 'settings' as const, label: '连接', icon: Settings },
@@ -480,6 +502,7 @@ function WorkspaceView({
   previousPlan,
   onPlan,
   onRevise,
+  onOrganizationSave,
   onConfirm,
   onRestart,
 }: {
@@ -492,6 +515,7 @@ function WorkspaceView({
     preferred_cadence: string;
   }) => Promise<void>;
   onRevise: (record: PlanRecord, instruction: string) => Promise<void>;
+  onOrganizationSave: (record: PlanRecord, lines: ReportingLine[]) => Promise<void>;
   onConfirm: (record: PlanRecord) => Promise<void>;
   onRestart: () => void;
 }) {
@@ -612,6 +636,7 @@ function WorkspaceView({
                     showStatus={false}
                     previousPlan={previousPlan}
                     revisionNumber={record.revision_number}
+                    onOrganizationSave={(lines) => onOrganizationSave(record, lines)}
                   />
                 )}
                 {['confirmed', 'dispatching', 'running', 'awaiting_approval', 'completed_unverified', 'failed'].includes(record.status) && (
@@ -951,6 +976,94 @@ function TasksView({
         emptyAction={onNew}
       />
     </section>
+  );
+}
+
+function TeamView({
+  plans,
+  onOpen,
+  onOrganizationSave,
+}: {
+  plans: PlanRecord[];
+  onOpen: (plan: PlanRecord) => void;
+  onOrganizationSave: (record: PlanRecord, lines: ReportingLine[]) => Promise<void>;
+}) {
+  const teams = useMemo(
+    () => plans.filter(
+      (record) => record.plan && !plans.some((child) => child.parent_plan_id === record.plan_id),
+    ),
+    [plans],
+  );
+  const [selectedId, setSelectedId] = useState('');
+  useEffect(() => {
+    if (!teams.length) {
+      setSelectedId('');
+      return;
+    }
+    if (!teams.some((record) => record.plan_id === selectedId)) {
+      setSelectedId(teams[0].plan_id);
+    }
+  }, [selectedId, teams]);
+  const selected = teams.find((record) => record.plan_id === selectedId) || teams[0];
+
+  if (!selected?.plan) {
+    return (
+      <section className="panel full-panel team-empty">
+        <Network size={30} />
+        <strong>还没有可管理的 AI 团队</strong>
+        <span>先在工作台生成一项任务，Quarterdeck 会把 Agent 分工显示为组织图。</span>
+      </section>
+    );
+  }
+
+  return (
+    <div className="team-layout">
+      <section className="panel team-directory">
+        <div className="section-heading compact">
+          <div><span className="section-kicker">任务团队</span><h2>AI 员工</h2></div>
+          <span className="count-label">{teams.length}</span>
+        </div>
+        <div className="team-selector" role="list" aria-label="任务团队">
+          {teams.map((record) => (
+            <button
+              key={record.plan_id}
+              className={record.plan_id === selected.plan_id ? 'active' : ''}
+              type="button"
+              role="listitem"
+              onClick={() => setSelectedId(record.plan_id)}
+            >
+              <span>
+                <strong>{record.plan?.title || record.objective}</strong>
+                <small>{record.plan?.agents.length || 0} 名员工 · 第 {record.revision_number} 版</small>
+              </span>
+              <StatusBadge status={record.status} />
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel team-organization-panel">
+        <div className="section-heading compact team-panel-heading">
+          <div>
+            <span className="section-kicker">组织架构</span>
+            <h2>{selected.plan.title}</h2>
+          </div>
+          <button className="secondary-button" type="button" onClick={() => onOpen(selected)}>
+            <ExternalLink size={16} />任务详情
+          </button>
+        </div>
+        <OrganizationChart
+          plan={selected.plan}
+          editable={selected.status === 'ready'}
+          onSave={(lines) => onOrganizationSave(selected, lines)}
+        />
+        {selected.status !== 'ready' && (
+          <div className="organization-readonly-note">
+            <ShieldCheck size={15} />执行中的组织关系已由方案哈希锁定，只能查看。
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -1849,6 +1962,7 @@ function TaskDrawer({
   onClose,
   onPlan,
   onRevise,
+  onOrganizationSave,
   onConfirm,
   onDelete,
   onRestart,
@@ -1860,6 +1974,7 @@ function TaskDrawer({
   onClose: () => void;
   onPlan: (body: { objective: string; constraints: string; workspace: string; preferred_cadence: string }) => Promise<void>;
   onRevise: (record: PlanRecord, instruction: string) => Promise<void>;
+  onOrganizationSave: (record: PlanRecord, lines: ReportingLine[]) => Promise<void>;
   onConfirm: (record: PlanRecord) => Promise<void>;
   onDelete: (record: PlanRecord) => void;
   onRestart: () => void;
@@ -1991,6 +2106,7 @@ function TaskDrawer({
               hash={record.plan_sha256 || ''}
               previousPlan={previousPlan}
               revisionNumber={record.revision_number}
+              onOrganizationSave={(lines) => onOrganizationSave(record, lines)}
             />
           )}
 
@@ -2233,18 +2349,219 @@ function PlanningProgressView({ progress }: { progress: PlanRecord['planning_pro
   );
 }
 
+function effectiveReportingLines(plan: TaskPlan): ReportingLine[] {
+  const lead = plan.agents.find((agent) => agent.role === 'lead');
+  const hasExplicitHierarchy = plan.agents.some((agent) => Boolean(agent.reports_to));
+  return plan.agents.map((agent) => ({
+    employee: agent.name,
+    reports_to: hasExplicitHierarchy
+      ? agent.reports_to || null
+      : agent.name === lead?.name ? null : lead?.name || null,
+  }));
+}
+
+function organizationLevels(agents: PlannedAgent[], lines: ReportingLine[]): PlannedAgent[][] {
+  const parents = new Map(lines.map((line) => [line.employee, line.reports_to]));
+  const grouped = new Map<number, PlannedAgent[]>();
+  for (const agent of agents) {
+    let depth = 0;
+    let cursor = parents.get(agent.name) || null;
+    const seen = new Set([agent.name]);
+    while (cursor && !seen.has(cursor) && depth < agents.length) {
+      seen.add(cursor);
+      depth += 1;
+      cursor = parents.get(cursor) || null;
+    }
+    grouped.set(depth, [...(grouped.get(depth) || []), agent]);
+  }
+  return [...grouped.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, rows]) => rows);
+}
+
+function managerWouldCreateCycle(
+  employee: string,
+  manager: string,
+  lines: ReportingLine[],
+): boolean {
+  const parents = new Map(lines.map((line) => [line.employee, line.reports_to]));
+  let cursor: string | null = manager;
+  while (cursor) {
+    if (cursor === employee) return true;
+    cursor = parents.get(cursor) || null;
+  }
+  return false;
+}
+
+function OrganizationChart({
+  plan,
+  editable,
+  onSave,
+  compact = false,
+}: {
+  plan: TaskPlan;
+  editable: boolean;
+  onSave?: (lines: ReportingLine[]) => Promise<void>;
+  compact?: boolean;
+}) {
+  const organizationKey = JSON.stringify(plan.agents);
+  const initialLines = useMemo(
+    () => effectiveReportingLines(plan),
+    // The dashboard refresh replaces equal plan objects; only structural changes reset editing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [organizationKey],
+  );
+  const [editing, setEditing] = useState(false);
+  const [draftLines, setDraftLines] = useState<ReportingLine[]>(initialLines);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    setEditing(false);
+    setDraftLines(initialLines);
+    setError('');
+  }, [organizationKey]);
+  const visibleLines = editing ? draftLines : initialLines;
+  const levels = useMemo(
+    () => organizationLevels(plan.agents, visibleLines),
+    [plan.agents, visibleLines],
+  );
+  const parentByEmployee = new Map(
+    visibleLines.map((line) => [line.employee, line.reports_to]),
+  );
+  const changed = JSON.stringify(draftLines) !== JSON.stringify(initialLines);
+
+  const changeManager = (employee: string, reportsTo: string) => {
+    setDraftLines((current) => current.map((line) => (
+      line.employee === employee ? { ...line, reports_to: reportsTo } : line
+    )));
+    setError('');
+  };
+  const save = async () => {
+    if (!onSave || !changed || saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      await onSave(draftLines);
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '组织架构保存失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className={`organization-chart ${compact ? 'compact' : ''}`}>
+      <div className="organization-toolbar">
+        <span><Network size={15} />{plan.agents.length} 名员工 · {levels.length} 层汇报关系</span>
+        {editable && plan.agents.length > 1 && (
+          editing ? (
+            <div className="organization-actions">
+              <button
+                className="text-button"
+                type="button"
+                disabled={saving}
+                onClick={() => {
+                  setDraftLines(initialLines);
+                  setEditing(false);
+                  setError('');
+                }}
+              >
+                取消
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={!changed || saving}
+                onClick={() => void save()}
+              >
+                {saving ? <LoaderCircle size={15} className="spin" /> : <Save size={15} />}
+                保存为新版本
+              </button>
+            </div>
+          ) : (
+            <button className="text-button" type="button" onClick={() => setEditing(true)}>
+              <PencilLine size={14} />调整上下级
+            </button>
+          )
+        )}
+      </div>
+
+      <div className="organization-levels">
+        {levels.map((agents, levelIndex) => (
+          <div className="organization-level" key={`level-${levelIndex}`}>
+            <div className="organization-level-label">
+              <span>{levelIndex === 0 ? '负责人' : `第 ${levelIndex + 1} 层`}</span>
+              <small>{agents.length} 人</small>
+            </div>
+            <div className="organization-nodes">
+              {agents.map((agent) => {
+                const manager = parentByEmployee.get(agent.name) || null;
+                const managerOptions = plan.agents.filter(
+                  (candidate) => candidate.name !== agent.name
+                    && !managerWouldCreateCycle(agent.name, candidate.name, visibleLines),
+                );
+                return (
+                  <article className={`organization-node role-${agent.role}`} key={agent.name}>
+                    <div className="agent-node-top">
+                      <Bot size={18} />
+                      <span>{roleLabel[agent.role]}</span>
+                    </div>
+                    <strong>{agent.name}</strong>
+                    <small>{runtimeLabel[agent.runtime]}</small>
+                    <p>{agent.responsibility}</p>
+                    {agent.role === 'lead' ? (
+                      <div className="organization-manager root-manager">
+                        <ShieldCheck size={14} /><span>最高负责人</span>
+                      </div>
+                    ) : editing ? (
+                      <label className="organization-manager-select">
+                        <span>直属上级</span>
+                        <select
+                          value={manager || ''}
+                          onChange={(event) => changeManager(agent.name, event.target.value)}
+                        >
+                          {managerOptions.map((candidate) => (
+                            <option key={candidate.name} value={candidate.name}>{candidate.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <div className="organization-manager">
+                        <span>直属上级</span><strong>{manager || '—'}</strong>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      {editing && (
+        <div className="organization-edit-note">
+          保存会生成新的不可变方案版本；当前版本及其哈希不会被覆盖。
+        </div>
+      )}
+      {error && <InlineError text={error} />}
+    </div>
+  );
+}
+
 function PlanReview({
   plan,
   hash,
   showStatus = true,
   previousPlan = null,
   revisionNumber = 1,
+  onOrganizationSave,
 }: {
   plan: TaskPlan;
   hash: string;
   showStatus?: boolean;
   previousPlan?: TaskPlan | null;
   revisionNumber?: number;
+  onOrganizationSave?: (lines: ReportingLine[]) => Promise<void>;
 }) {
   const changedSections = useMemo(
     () => changedPlanSections(previousPlan, plan),
@@ -2280,17 +2597,12 @@ function PlanReview({
 
       <section className="review-section">
         <div className="review-title"><h3>Agent 架构</h3><span>{plan.execution_mode === 'workflow' ? plan.workflow_id : 'Agent 团队'}</span></div>
-        <div className="agent-flow">
-          {plan.agents.map((agent, index) => (
-            <div className={`agent-node role-${agent.role}`} key={agent.name}>
-              <div className="agent-node-top"><Bot size={18} /><span>{roleLabel[agent.role]}</span></div>
-              <strong>{agent.name}</strong>
-              <small>{runtimeLabel[agent.runtime]}</small>
-              <p>{agent.responsibility}</p>
-              {index < plan.agents.length - 1 && <ArrowRight className="agent-arrow" size={16} />}
-            </div>
-          ))}
-        </div>
+        <OrganizationChart
+          plan={plan}
+          editable={Boolean(onOrganizationSave) && plan.execution_mode === 'aion_team'}
+          onSave={onOrganizationSave}
+          compact
+        />
       </section>
 
       <section className="review-section">

@@ -575,7 +575,9 @@ class AionUiClient:
                 "Execute only the confirmed Quarterdeck plan below. Keep dangerous operations behind "
                 "the runtime permission prompts; stop and surface any unavailable approval. Never claim "
                 "business success from process completion alone. Register or cite outcome evidence when "
-                "the available tools support it. Paperclip issue: "
+                "the available tools support it. Follow the hash-bound organization map: each agent "
+                "reports through its named direct manager and the lead remains the single root. "
+                "Paperclip issue: "
                 f"{paperclip_issue_id}.\n"
                 + json.dumps(
                     {
@@ -583,6 +585,7 @@ class AionUiClient:
                         "objective": objective,
                         "constraints": constraints,
                         "plan": plan.model_dump(mode="json"),
+                        "organization": plan.effective_reporting_lines(),
                     },
                     ensure_ascii=False,
                     separators=(",", ":"),
@@ -786,12 +789,14 @@ def _planning_prompt(
         "for user-facing text when the objective is Chinese. Schema: "
         '{"schema_version":1,"title":"...","summary":"...","execution_mode":"aion_team|workflow",'
         '"workflow_id":null,"agents":[{"name":"...","role":"lead|researcher|operator|reviewer|reporter|specialist",'
-        '"responsibility":"...","runtime":"claude_code|codex_cli|aion_cli"}],'
+        '"responsibility":"...","runtime":"claude_code|codex_cli|aion_cli","reports_to":null}],'
         '"stages":[{"order":1,"title":"...","owner":"exact agent name","outcome":"...","checkpoint":true}],'
         '"cadence":{"kind":"once|daily|weekdays|weekly|manual","timezone":"America/Los_Angeles",'
         '"local_time":null,"update_interval":"..."},"tools":[],"approvals":[],"artifacts":[],"risks":[],'
         '"estimated_duration_minutes":30,"update_policy":"..."}. '
         "Use 1-5 agents, exactly one lead, unique names, contiguous stage order, and exact owner names. "
+        "Set the lead reports_to to null. Every other agent must report_to one exact agent name, and "
+        "the resulting reporting hierarchy must be acyclic. "
         "The summary is an AI-expanded execution brief, not a slogan or restatement. For a Chinese "
         "objective, write at least 120 characters as six newline-separated sections using these exact "
         "labels: 目标：, 输入与边界：, 方法与分工：, 检查点：, 交付物：, 不包含：. For a non-Chinese "

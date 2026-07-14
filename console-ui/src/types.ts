@@ -36,6 +36,12 @@ export type PlannedAgent = {
   role: 'lead' | 'researcher' | 'operator' | 'reviewer' | 'reporter' | 'specialist';
   responsibility: string;
   runtime: 'claude_code' | 'codex_cli' | 'aion_cli';
+  reports_to?: string | null;
+};
+
+export type ReportingLine = {
+  employee: string;
+  reports_to: string | null;
 };
 
 export type TaskPlan = {

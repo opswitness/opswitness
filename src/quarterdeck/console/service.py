@@ -36,6 +36,7 @@ from quarterdeck.console.schemas import (
     MailAuthorizationRequest,
     MailOAuthClientRequest,
     MailSummaryJob,
+    OrganizationRevisionRequest,
     PlanRecord,
     PlanRequest,
     PlanningProgress,
@@ -117,6 +118,15 @@ def _canonical_sha256(value: Any) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def _hashable_plan_payload(plan: TaskPlan) -> dict[str, Any]:
+    """Keep hashes for pre-organization plans stable while binding explicit reporting lines."""
+    payload = plan.model_dump(mode="json")
+    for agent in payload["agents"]:
+        if agent.get("reports_to") is None:
+            agent.pop("reports_to", None)
+    return payload
+
+
 def _deleted_plan_events(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     deleted: dict[str, dict[str, Any]] = {}
     for event in events:
@@ -195,7 +205,7 @@ def _execution_plan_sha(record: PlanRecord, plan: TaskPlan | None = None) -> str
         "constraints": record.constraints,
         "workspace": record.workspace,
         "preferred_cadence": record.preferred_cadence,
-        "plan": selected_plan.model_dump(mode="json"),
+        "plan": _hashable_plan_payload(selected_plan),
     }
     if record.parent_plan_id is not None:
         envelope["revision"] = {
@@ -785,6 +795,99 @@ class ConsoleService:
         self._submit(self.draft_plan, plan_id)
         return record
 
+    def revise_plan_organization(
+        self,
+        parent_plan_id: str,
+        request: OrganizationRevisionRequest,
+    ) -> PlanRecord:
+        with self._plan_transition_lock:
+            deleted = _deleted_plan_events(self.ledger.read_all())
+            if parent_plan_id in deleted:
+                raise PlanNotFound(f"unknown plan: {parent_plan_id}")
+            parent = self.store.get(parent_plan_id)
+            if parent.status != "ready" or parent.plan is None or not parent.plan_sha256:
+                raise ConsoleConflict("only a ready plan organization can be changed")
+            if parent.plan_sha256 != _execution_plan_sha(parent):
+                raise ConsoleConflict("parent plan integrity failed; create a new plan")
+            children = [
+                child
+                for child in self.store.list_all()
+                if child.parent_plan_id == parent_plan_id
+            ]
+            if any(
+                child.plan_id not in deleted
+                and child.status
+                in {
+                    "planning",
+                    "ready",
+                    "confirmed",
+                    "dispatching",
+                    "running",
+                    "awaiting_approval",
+                    "completed_unverified",
+                }
+                for child in children
+            ):
+                raise ConsoleConflict("this plan has a newer revision")
+
+            requested = {line.employee: line.reports_to for line in request.reporting_lines}
+            agent_names = {agent.name for agent in parent.plan.agents}
+            if set(requested) != agent_names:
+                raise ConsoleConflict("reporting lines must include every planned agent exactly once")
+
+            plan_payload = parent.plan.model_dump(mode="json")
+            for agent in plan_payload["agents"]:
+                agent["reports_to"] = requested[str(agent["name"])]
+            try:
+                revised_plan = TaskPlan.model_validate(plan_payload)
+            except ValueError as exc:
+                raise ConsoleConflict("reporting lines must form one valid hierarchy") from exc
+            if revised_plan.effective_reporting_lines() == parent.plan.effective_reporting_lines():
+                raise ConsoleConflict("organization is unchanged")
+
+            revision_number = max(
+                [parent.revision_number, *(child.revision_number for child in children)]
+            ) + 1
+            if revision_number > 100:
+                raise ConsoleConflict("plan revision limit reached; create a new plan")
+            plan_id = new_ulid()
+            instruction = "调整 Agent 组织架构"
+            instruction_sha = hashlib.sha256(instruction.encode()).hexdigest()
+            timestamp = utc_now()
+            record = PlanRecord(
+                plan_id=plan_id,
+                status="ready",
+                objective=parent.objective,
+                constraints=parent.constraints,
+                workspace=parent.workspace,
+                preferred_cadence=parent.preferred_cadence,
+                parent_plan_id=parent.plan_id,
+                parent_plan_sha256=parent.plan_sha256,
+                revision_number=revision_number,
+                revision_instruction=instruction,
+                revision_instruction_sha256=instruction_sha,
+                created_at=timestamp,
+                updated_at=timestamp,
+                plan=revised_plan,
+            )
+            record.plan_sha256 = _execution_plan_sha(record)
+            structure_sha = _canonical_sha256(revised_plan.effective_reporting_lines())
+            self._append(
+                "task_plan_organization_revised",
+                plan_id,
+                {
+                    "schema_version": 1,
+                    "parent_plan_id": parent.plan_id,
+                    "parent_plan_sha256": parent.plan_sha256,
+                    "revision_number": revision_number,
+                    "organization_sha256": structure_sha,
+                    "plan_sha256": record.plan_sha256,
+                    "agent_count": len(revised_plan.agents),
+                },
+            )
+            self.store.create(record)
+            return record
+
     @staticmethod
     def _normalise_requested_workspace(value: str) -> str:
         if not value.strip():
@@ -1250,7 +1353,11 @@ class ConsoleService:
         for issue in client.list_issues():
             if issue.get("title") == title:
                 return issue
-        architecture = ", ".join(f"{agent.name} ({agent.runtime})" for agent in record.plan.agents)
+        reporting = record.plan.effective_reporting_lines()
+        architecture = ", ".join(
+            f"{agent.name} ({agent.runtime}, reports to {reporting[agent.name] or 'operator'})"
+            for agent in record.plan.agents
+        )
         description = (
             f"Confirmed Quarterdeck plan `{record.plan_id}`.\n\n"
             f"{record.plan.summary}\n\n"

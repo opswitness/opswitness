@@ -5,6 +5,7 @@ import type {
   MailSummaryJob,
   PlanRecord,
   ProviderConnectionJob,
+  ReportingLine,
   TelegramSetupStatus,
 } from './types';
 
@@ -53,6 +54,16 @@ export function revisePlan(planId: string, instruction: string): Promise<PlanRec
   return api(`/api/v1/plans/${encodeURIComponent(planId)}/revise`, {
     method: 'POST',
     body: JSON.stringify({ instruction }),
+  });
+}
+
+export function revisePlanOrganization(
+  planId: string,
+  reportingLines: ReportingLine[],
+): Promise<PlanRecord> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/organization`, {
+    method: 'POST',
+    body: JSON.stringify({ reporting_lines: reportingLines, confirmed: true }),
   });
 }
 

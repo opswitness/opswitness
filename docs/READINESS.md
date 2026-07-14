@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 293 tests pass in three consecutive runs; ruff and mypy pass. DCO, worktree
+- Full suite: 299 tests pass in three consecutive runs; ruff and mypy pass. DCO, worktree
   gitleaks, and full-history gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -147,6 +147,19 @@ blocked by the current open gates below.
   confirmation dialog. Source-console acceptance opened and cancelled that dialog without deleting
   any real plan; the desktop layout and 390x844 mobile dialog had no horizontal overflow, all
   controls remained visible, and the browser console stayed clean.
+- The new Team view graphically groups every current task team by reporting level. Legacy plans
+  remain hash-compatible and display as a lead-centered organization without file migration.
+  For ready plans, each non-lead employee can select one direct manager; self-reporting, missing
+  employees, multiple roots, and cycles fail closed. Saving creates a ready append-only child
+  version with a new confirmation hash and a hashed `task_plan_organization_revised` event rather
+  than mutating the reviewed plan. Confirmed and active teams are read-only. The effective hierarchy
+  is included in both the Paperclip issue and AionUi execution prompt, while no second employee
+  database or runtime is introduced. Source-console acceptance used the existing synthetic Bazi
+  team: two reporting levels rendered correctly, changing the report editor's manager produced a
+  three-level preview, the cycle-causing reverse choice disappeared, and the edit survived a full
+  background refresh. The change was cancelled, so no real plan was revised. At 390x844 the seven-item
+  navigation, organization cards, manager controls, and save action remained usable with zero page
+  overflow and no browser warnings.
 - A real source-console acceptance submitted only the synthetic terse intent `算命师`. The first
   AionUi result failed the new brief contract, visibly moved into the repair phase, then returned a
   six-section Bazi demo brief with `DEMO-001`, deterministic `lunar-python`, knowledge-only AI

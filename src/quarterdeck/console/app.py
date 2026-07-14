@@ -20,6 +20,7 @@ from quarterdeck.console.schemas import (
     MailAuthorizationRequest,
     MailDisableRequest,
     MailOAuthClientRequest,
+    OrganizationRevisionRequest,
     PlanRequest,
     RevisePlanRequest,
     TelegramActionRequest,
@@ -148,6 +149,19 @@ def create_app(
     ) -> dict:
         del x_qd_csrf
         record = await run_in_threadpool(service.request_plan_revision, plan_id, body)
+        return record.model_dump(mode="json")
+
+    @app.post(
+        "/api/v1/plans/{plan_id}/organization",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def revise_plan_organization(
+        plan_id: str,
+        body: OrganizationRevisionRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        record = await run_in_threadpool(service.revise_plan_organization, plan_id, body)
         return record.model_dump(mode="json")
 
     @app.post("/api/v1/plans/{plan_id}/confirm", status_code=status.HTTP_202_ACCEPTED)

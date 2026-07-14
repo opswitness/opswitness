@@ -25,6 +25,7 @@ from quarterdeck.console.schemas import (
     ExecutionState,
     MailAuthorizationRequest,
     MailOAuthClientRequest,
+    OrganizationRevisionRequest,
     PlanRequest,
     RevisePlanRequest,
     TaskPlan,
@@ -290,6 +291,7 @@ class FakePaperclip:
     def create_issue(self, title, description):
         assert title.startswith("[qd-plan:")
         assert "outcome proof" in description
+        assert "reports to 总控" in description
         self.created += 1
         return {"id": "issue-1"}
 
@@ -346,6 +348,32 @@ def test_plan_schema_requires_one_lead_and_exact_stage_owners():
         TaskPlan.model_validate(raw)
 
 
+def test_plan_schema_supports_legacy_star_and_rejects_invalid_reporting_trees():
+    legacy = _fortune_plan()
+    assert legacy.effective_reporting_lines() == {
+        "解读 Agent": None,
+        "引用核验 Agent": "解读 Agent",
+        "报告编辑 Agent": "解读 Agent",
+    }
+
+    explicit = legacy.model_dump(mode="json")
+    explicit["agents"][1]["reports_to"] = "解读 Agent"
+    explicit["agents"][2]["reports_to"] = "引用核验 Agent"
+    validated = TaskPlan.model_validate(explicit)
+    assert validated.effective_reporting_lines()["报告编辑 Agent"] == "引用核验 Agent"
+
+    missing_manager = legacy.model_dump(mode="json")
+    missing_manager["agents"][1]["reports_to"] = "解读 Agent"
+    with pytest.raises(ValueError, match="every non-lead agent"):
+        TaskPlan.model_validate(missing_manager)
+
+    cycle = legacy.model_dump(mode="json")
+    cycle["agents"][1]["reports_to"] = "报告编辑 Agent"
+    cycle["agents"][2]["reports_to"] = "引用核验 Agent"
+    with pytest.raises(ValueError, match="acyclic"):
+        TaskPlan.model_validate(cycle)
+
+
 def test_planner_turns_terse_fortune_intent_into_a_validated_execution_brief():
     request = PlanRequest(objective="算命师")
     prompt = _planning_prompt(request, [])
@@ -353,6 +381,7 @@ def test_planner_turns_terse_fortune_intent_into_a_validated_execution_brief():
     assert "DEMO-001" in prompt
     assert "lunar-python" in prompt
     assert "解读 Agent" in prompt
+    assert '"reports_to":null' in prompt
     assert "never send the report" in prompt
 
     plan = _fortune_plan()
@@ -465,6 +494,130 @@ def test_plan_revision_http_facade_requires_csrf(console_env, monkeypatch):
         payload = accepted.json()
         assert payload["parent_plan_id"] == parent.plan_id
         assert payload["revision_number"] == 2
+
+
+def test_organization_revision_is_hash_bound_append_only_and_blocks_parent(
+    console_env, monkeypatch
+):
+    _, service, aion, _ = console_env
+    monkeypatch.setattr(aion, "generate_plan", lambda *args, **kwargs: _fortune_plan())
+    requested = service.request_plan(PlanRequest(objective="生成命理演示报告"))
+    parent = service.draft_plan(requested.plan_id)
+
+    revised = service.revise_plan_organization(
+        parent.plan_id,
+        OrganizationRevisionRequest(
+            confirmed=True,
+            reporting_lines=[
+                {"employee": "解读 Agent", "reports_to": None},
+                {"employee": "引用核验 Agent", "reports_to": "解读 Agent"},
+                {"employee": "报告编辑 Agent", "reports_to": "引用核验 Agent"},
+            ],
+        ),
+    )
+    assert revised.status == "ready"
+    assert revised.parent_plan_id == parent.plan_id
+    assert revised.revision_number == 2
+    assert revised.plan_sha256 != parent.plan_sha256
+    assert revised.plan is not None
+    assert revised.plan.effective_reporting_lines()["报告编辑 Agent"] == "引用核验 Agent"
+    with pytest.raises(ConsoleConflict, match="newer revision"):
+        service.confirm_plan(
+            parent.plan_id,
+            ConfirmRequest(plan_sha256=str(parent.plan_sha256), confirmed=True),
+        )
+
+    events = service.ledger.read_all()
+    assert [event["kind"] for event in events] == [
+        "task_plan_requested",
+        "task_plan_drafted",
+        "task_plan_organization_revised",
+    ]
+    organization_event = events[-1]["payload"]
+    assert organization_event["parent_plan_id"] == parent.plan_id
+    assert organization_event["plan_sha256"] == revised.plan_sha256
+    assert organization_event["agent_count"] == 3
+    assert "解读 Agent" not in json.dumps(organization_event, ensure_ascii=False)
+
+
+def test_organization_revision_rejects_unchanged_incomplete_and_cyclic_trees(
+    console_env, monkeypatch
+):
+    _, service, aion, _ = console_env
+    monkeypatch.setattr(aion, "generate_plan", lambda *args, **kwargs: _fortune_plan())
+    requested = service.request_plan(PlanRequest(objective="组织结构校验"))
+    parent = service.draft_plan(requested.plan_id)
+
+    with pytest.raises(ConsoleConflict, match="unchanged"):
+        service.revise_plan_organization(
+            parent.plan_id,
+            OrganizationRevisionRequest(
+                confirmed=True,
+                reporting_lines=[
+                    {"employee": "解读 Agent", "reports_to": None},
+                    {"employee": "引用核验 Agent", "reports_to": "解读 Agent"},
+                    {"employee": "报告编辑 Agent", "reports_to": "解读 Agent"},
+                ],
+            ),
+        )
+    with pytest.raises(ConsoleConflict, match="every planned agent"):
+        service.revise_plan_organization(
+            parent.plan_id,
+            OrganizationRevisionRequest(
+                confirmed=True,
+                reporting_lines=[
+                    {"employee": "解读 Agent", "reports_to": None},
+                    {"employee": "引用核验 Agent", "reports_to": "解读 Agent"},
+                ],
+            ),
+        )
+    with pytest.raises(ConsoleConflict, match="valid hierarchy"):
+        service.revise_plan_organization(
+            parent.plan_id,
+            OrganizationRevisionRequest(
+                confirmed=True,
+                reporting_lines=[
+                    {"employee": "解读 Agent", "reports_to": None},
+                    {"employee": "引用核验 Agent", "reports_to": "报告编辑 Agent"},
+                    {"employee": "报告编辑 Agent", "reports_to": "引用核验 Agent"},
+                ],
+            ),
+        )
+
+
+def test_organization_revision_http_facade_requires_csrf_and_confirmation(
+    console_env, monkeypatch
+):
+    settings, service, aion, _ = console_env
+    monkeypatch.setattr(aion, "generate_plan", lambda *args, **kwargs: _fortune_plan())
+    requested = service.request_plan(PlanRequest(objective="HTTP 组织结构调整"))
+    parent = service.draft_plan(requested.plan_id)
+    monkeypatch.setattr(service, "acquire_instance_lease", lambda: True)
+    monkeypatch.setattr(service, "recover_startup", lambda: {})
+    monkeypatch.setattr(service, "release_instance_lease", lambda: None)
+    app = create_app(settings, service=service)
+    csrf = app.state.csrf_token
+    path = f"/api/v1/plans/{parent.plan_id}/organization"
+    body = {
+        "confirmed": True,
+        "reporting_lines": [
+            {"employee": "解读 Agent", "reports_to": None},
+            {"employee": "引用核验 Agent", "reports_to": "解读 Agent"},
+            {"employee": "报告编辑 Agent", "reports_to": "引用核验 Agent"},
+        ],
+    }
+    with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+        denied = client.post(path, json=body)
+        assert denied.status_code == 403
+        unconfirmed = client.post(
+            path,
+            json={**body, "confirmed": False},
+            headers={"X-QD-CSRF": csrf},
+        )
+        assert unconfirmed.status_code == 422
+        accepted = client.post(path, json=body, headers={"X-QD-CSRF": csrf})
+        assert accepted.status_code == 201
+        assert accepted.json()["parent_plan_id"] == parent.plan_id
 
 
 def test_plan_delete_is_append_only_idempotent_and_hides_the_plan(console_env):
@@ -893,6 +1046,25 @@ def test_plan_hash_binds_objective_constraints_workspace_and_dispatch(console_en
     failure = service.ledger.read_all()[-1]
     assert failure["kind"] == "task_execution_failed"
     assert failure["payload"]["reason"] == EXECUTION_PLAN_INVALID
+
+
+def test_pre_organization_plan_files_keep_their_original_confirmation_hash(console_env):
+    _, service, _, _ = console_env
+    requested = service.request_plan(PlanRequest(objective="兼容旧方案哈希"))
+    ready = service.draft_plan(requested.plan_id)
+    plan_path = service.store.plans_dir / f"{ready.plan_id}.json"
+    payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    for agent in payload["plan"]["agents"]:
+        agent.pop("reports_to", None)
+    plan_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    reloaded = service.get_plan(ready.plan_id, refresh=False)
+    assert reloaded.plan_sha256 == ready.plan_sha256
+    confirmed = service.confirm_plan(
+        reloaded.plan_id,
+        ConfirmRequest(plan_sha256=str(reloaded.plan_sha256), confirmed=True),
+    )
+    assert confirmed.status == "confirmed"
 
 
 def test_execution_completion_is_explicitly_unverified(console_env):
@@ -1427,6 +1599,57 @@ def test_aionui_mail_summary_fails_when_ephemeral_team_cleanup_is_unconfirmed(
             ],
         )
     assert "private subject" not in str(exc.value)
+
+
+def test_aionui_dispatch_receives_the_hash_bound_reporting_hierarchy(
+    monkeypatch, console_env, tmp_path
+):
+    settings, _, _, _ = console_env
+    client = AionUiClient(settings.console)
+    raw = _fortune_plan().model_dump(mode="json")
+    raw["agents"][1]["reports_to"] = "解读 Agent"
+    raw["agents"][2]["reports_to"] = "引用核验 Agent"
+    plan = TaskPlan.model_validate(raw)
+    captured: dict[str, object] = {}
+    team = {
+        "id": "team-org",
+        "assistants": [
+            {"conversation_id": f"conversation-{index}"}
+            for index, _ in enumerate(plan.agents, start=1)
+        ],
+    }
+
+    def create_team(**kwargs):
+        captured["agents"] = kwargs["agents"]
+        return team
+
+    def send_team_message(team_id, prompt):
+        assert team_id == "team-org"
+        captured["prompt"] = prompt
+        return {"run": {"team_run_id": "run-org"}, "enqueue_status": "queued"}
+
+    monkeypatch.setattr(client, "create_team", create_team)
+    monkeypatch.setattr(client, "ensure_team", lambda team_id: None)
+    monkeypatch.setattr(client, "set_team_mode", lambda team_id, mode: None)
+    monkeypatch.setattr(client, "send_team_message", send_team_message)
+    result = client.dispatch_plan(
+        plan_id="PLAN-ORG",
+        plan=plan,
+        objective="生成命理演示报告",
+        constraints="仅使用合成数据",
+        workspace=tmp_path,
+        paperclip_issue_id="issue-org",
+    )
+
+    prompt_payload = json.loads(str(captured["prompt"]).split("\n", 1)[1])
+    assert prompt_payload["organization"] == {
+        "解读 Agent": None,
+        "引用核验 Agent": "解读 Agent",
+        "报告编辑 Agent": "引用核验 Agent",
+    }
+    assert [row["role"] for row in captured["agents"]] == ["lead", "teammate", "teammate"]
+    assert result["team_id"] == "team-org"
+    assert result["team_run_id"] == "run-org"
 
 
 def test_aionui_planning_fails_when_ephemeral_team_cleanup_is_unconfirmed(monkeypatch, console_env):

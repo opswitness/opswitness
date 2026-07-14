@@ -113,7 +113,9 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
     confirmation; it never edits the reviewed parent in place. User-facing deletion is likewise
     append-only: one `task_plan_deleted` tombstone hides an inert plan while its private record and
     evidence remain intact. Active work cannot be deleted, and version parents require child-first
-    deletion. Completion remains
+    deletion. The graphical Team view folds each plan into one acyclic reporting tree. Organization
+    edits create hash-bound child versions and pass the effective hierarchy to Paperclip governance
+    and AionUi execution; Quarterdeck stores no second employee directory. Completion remains
     `completed_unverified` until outcome evidence exists. See
     [ADR-0007](adr/0007-local-operator-console.md).
 11. **Notification setup is narrow, local, and evidence-first.** The console is not a generic
@@ -213,7 +215,7 @@ paid users ultimately see the vertical workbench, not the generic operations sur
 | MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ 11-tool ops + isolated 2-tool mail profile |
 | allowlisted workflow launcher | `src/quarterdeck/workflows.py`, `workflow_worker.py` | ✅ code + tests + live AionUi one-click acceptance |
 | metadata-only mail monitor | `src/quarterdeck/mail.py`, `console/`, `console-ui/` | ✅ adapter + setup/revoke UI; live OAuth and AionUi schedule pending |
-| local operator console | `src/quarterdeck/console/`, `console-ui/` | ✅ sole operator surface + provider login/status + plan/confirm/dispatch + approval facade + Gmail/Telegram + responsive UI; production install pending canary |
+| local operator console | `src/quarterdeck/console/`, `console-ui/` | ✅ sole operator surface + provider login/status + plan/confirm/dispatch + graphical team hierarchy + approval facade + Gmail/Telegram + responsive UI; production install pending canary |
 | install doctor / secure services / disaster recovery | `src/quarterdeck/doctor.py`, `service.py`, `backup.py` | ✅ five secret-free templates + installed-command drift check; soak pending |
 | gate (PreToolUse `defer` → Paperclip approval → resume) | `gate.py`, `gated_claude.py` | ✅ M3 code + two live approval/resume drills |
 | artifacts (ledger events + content-addressed projection) | `artifacts.py`, `index.py` | ✅ M4 code + live projection |

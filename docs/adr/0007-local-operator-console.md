@@ -98,6 +98,18 @@ the parent cannot be confirmed. The child receives a new execution-envelope hash
 fresh checkbox confirmation. **Start over** alone clears the current presentation and creates an
 unrelated root plan from a blank composer.
 
+The **Team** view renders each current task team as a responsive organization chart. A legacy plan
+with no explicit reporting fields is interpreted as one lead with every teammate reporting directly
+to that lead, without rewriting the private plan file or changing its historical hash. A ready plan
+may assign each non-lead employee one exact direct manager. The graph must have one lead root, cover
+every agent exactly once, and remain acyclic. Saving never patches the reviewed plan: Quarterdeck
+creates an immediately reviewable child version, binds the complete reporting tree into its new
+execution-envelope hash, and records only `organization_sha256` plus non-sensitive version metadata
+in `task_plan_organization_revised`. Confirmed or active organizations are read-only. The effective
+tree is included in the Paperclip issue and AionUi execution contract; AionUi remains the executor
+and Paperclip remains the governance plane, so the console does not become an employee database or
+agent runtime.
+
 **Delete task** is a visibility tombstone, not record destruction. It is allowed only for `ready`,
 `failed`, or `completed_unverified` plans. Planning, confirmed, dispatching, running, and
 approval-waiting work must first reach a terminal state; a parent with any visible child revision
@@ -146,7 +158,8 @@ cleanup recovery does not replay planning or execution.
 
 ## Evidence and privacy
 
-The ledger records `task_plan_requested`, `task_plan_revision_requested`, `task_plan_drafted`, `task_plan_failed`,
+The ledger records `task_plan_requested`, `task_plan_revision_requested`,
+`task_plan_organization_revised`, `task_plan_drafted`, `task_plan_failed`,
 `task_plan_confirmed`, `task_plan_deleted`, `task_execution_requested`, `task_execution_dispatched`,
 `task_execution_failed`, `task_execution_finished`, `aion_ephemeral_recovery_started`,
 `aion_ephemeral_recovery_failed`, `aion_ephemeral_recovery_finished`,
@@ -226,7 +239,7 @@ unmounted in AionUi. Existing Quarterdeck gate and allowlist rules remain author
 
 The operator gets one concise Quarterdeck surface while Paperclip, AionUi, launchd, and provider
 CLIs keep their existing ownership boundaries behind it. The default Workspace reduces task creation to one clear
-description-and-confirm flow while the dashboard, task, evidence, and integration views remain
+description-and-confirm flow while the dashboard, task, team, evidence, and integration views remain
 separate; approvals are available in the same shell. The frontend adds a packaging and
 responsive-layout test surface, but no new orchestration authority. Vertical practitioner UI
 remains a separate private product and is still blocked by the paid-design-partner gate.

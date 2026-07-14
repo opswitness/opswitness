@@ -35,6 +35,7 @@ class PlannedAgent(BaseModel):
     role: AgentRole
     responsibility: str = Field(min_length=1, max_length=600)
     runtime: RuntimeName
+    reports_to: str | None = Field(default=None, min_length=1, max_length=80)
 
 
 class TaskStage(BaseModel):
@@ -88,11 +89,46 @@ class TaskPlan(BaseModel):
         orders = [stage.order for stage in self.stages]
         if sorted(orders) != list(range(1, len(orders) + 1)):
             raise ValueError("stage order must be contiguous from 1")
+        explicit_reporting = any(agent.reports_to is not None for agent in self.agents)
+        if explicit_reporting:
+            leader = leaders[0]
+            if leader.reports_to is not None:
+                raise ValueError("the lead agent cannot report to another agent")
+            exact_names = {agent.name for agent in self.agents}
+            parents: dict[str, str] = {}
+            for agent in self.agents:
+                if agent is leader:
+                    continue
+                if agent.reports_to is None:
+                    raise ValueError("every non-lead agent must have a direct manager")
+                if agent.reports_to not in exact_names:
+                    raise ValueError("every direct manager must name an exact planned agent")
+                if agent.reports_to == agent.name:
+                    raise ValueError("an agent cannot report to itself")
+                parents[agent.name] = agent.reports_to
+            for node_name in parents:
+                seen = {node_name}
+                cursor = node_name
+                while cursor in parents:
+                    cursor = parents[cursor]
+                    if cursor in seen:
+                        raise ValueError("agent reporting lines must be acyclic")
+                    seen.add(cursor)
         if self.execution_mode == "workflow" and not self.workflow_id:
             raise ValueError("workflow execution requires workflow_id")
         if self.execution_mode == "aion_team" and self.workflow_id is not None:
             raise ValueError("aion_team execution cannot carry workflow_id")
         return self
+
+    def effective_reporting_lines(self) -> dict[str, str | None]:
+        """Return a complete tree while preserving legacy plans with no explicit hierarchy."""
+        leader = next(agent for agent in self.agents if agent.role == AgentRole.LEAD)
+        if not any(agent.reports_to is not None for agent in self.agents):
+            return {
+                agent.name: None if agent is leader else leader.name
+                for agent in self.agents
+            }
+        return {agent.name: agent.reports_to for agent in self.agents}
 
 
 class PlanRequest(BaseModel):
@@ -114,6 +150,27 @@ class RevisePlanRequest(BaseModel):
         self.instruction = self.instruction.strip()
         if len(self.instruction) < 3:
             raise ValueError("revision instruction must contain at least three characters")
+        return self
+
+
+class AgentReportingLine(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    employee: str = Field(min_length=1, max_length=80)
+    reports_to: str | None = Field(default=None, min_length=1, max_length=80)
+
+
+class OrganizationRevisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reporting_lines: list[AgentReportingLine] = Field(min_length=1, max_length=5)
+    confirmed: Literal[True]
+
+    @model_validator(mode="after")
+    def validate_unique_employees(self) -> "OrganizationRevisionRequest":
+        names = [line.employee.casefold() for line in self.reporting_lines]
+        if len(names) != len(set(names)):
+            raise ValueError("reporting lines must name each employee once")
         return self
 
 

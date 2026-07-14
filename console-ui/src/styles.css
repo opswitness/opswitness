@@ -2171,6 +2171,285 @@ input::placeholder {
   transform: translateY(-50%);
 }
 
+.team-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.team-directory,
+.team-organization-panel {
+  min-width: 0;
+  padding: 20px;
+}
+
+.team-selector {
+  display: grid;
+  margin: 14px -20px -20px;
+  border-top: 1px solid var(--border);
+}
+
+.team-selector > button {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  padding: 14px 20px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.team-selector > button:last-child {
+  border-bottom: 0;
+}
+
+.team-selector > button:hover,
+.team-selector > button.active {
+  background: #eef5f2;
+}
+
+.team-selector > button.active {
+  box-shadow: inset 3px 0 0 var(--teal);
+}
+
+.team-selector > button > span:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.team-selector strong,
+.team-selector small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-selector strong {
+  font-size: 12px;
+}
+
+.team-selector small {
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.team-panel-heading h2 {
+  overflow-wrap: anywhere;
+}
+
+.team-empty {
+  display: flex;
+  min-height: 360px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--faint);
+  text-align: center;
+}
+
+.team-empty strong {
+  color: var(--ink);
+}
+
+.organization-chart {
+  display: grid;
+  gap: 14px;
+}
+
+.organization-toolbar {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+}
+
+.organization-toolbar > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #5f6c65;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.organization-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.organization-levels {
+  display: grid;
+  gap: 12px;
+}
+
+.organization-level {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.organization-level + .organization-level::before {
+  position: absolute;
+  top: -12px;
+  left: 35px;
+  width: 1px;
+  height: 12px;
+  background: #b6c8c1;
+  content: '';
+}
+
+.organization-level-label {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-right: 1px solid #c9d7d1;
+  color: #557067;
+  text-align: center;
+}
+
+.organization-level-label span {
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.organization-level-label small {
+  color: var(--faint);
+  font-size: 9px;
+}
+
+.organization-nodes {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.organization-node {
+  display: flex;
+  min-width: 0;
+  min-height: 190px;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-top: 3px solid #6c89ae;
+  border-radius: 5px;
+  background: #fbfcfb;
+  padding: 12px;
+}
+
+.organization-node.role-lead {
+  border-top-color: var(--teal);
+}
+
+.organization-node.role-reviewer {
+  border-top-color: var(--amber);
+}
+
+.organization-node.role-reporter {
+  border-top-color: var(--coral);
+}
+
+.organization-node > strong {
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.organization-node > small {
+  margin-top: 3px;
+  color: var(--faint);
+  font-size: 9px;
+}
+
+.organization-node > p {
+  flex: 1;
+  margin: 9px 0 12px;
+  color: #626d67;
+  font-size: 10px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.organization-manager,
+.organization-manager-select {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 9px;
+}
+
+.organization-manager span,
+.organization-manager-select > span {
+  color: var(--faint);
+  font-size: 9px;
+}
+
+.organization-manager strong {
+  overflow-wrap: anywhere;
+  color: #33423b;
+  font-size: 10px;
+}
+
+.root-manager {
+  display: flex;
+  align-items: center;
+  color: var(--teal);
+}
+
+.root-manager span {
+  color: inherit;
+  font-weight: 700;
+}
+
+.organization-manager-select select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  padding: 0 8px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 10px;
+}
+
+.organization-edit-note,
+.organization-readonly-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #66736c;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.organization-readonly-note {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.organization-chart.compact .organization-node {
+  min-height: 175px;
+}
+
 .stage-list {
   display: grid;
   border-top: 1px solid var(--border);
@@ -2558,7 +2837,7 @@ input::placeholder {
   .sidebar nav {
     display: grid;
     height: 100%;
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(7, 1fr);
     padding: 0;
   }
 
@@ -2823,6 +3102,70 @@ input::placeholder {
 
   .agent-arrow {
     display: none;
+  }
+
+  .team-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .team-directory,
+  .team-organization-panel {
+    padding: 16px;
+  }
+
+  .team-selector {
+    margin: 12px -16px -16px;
+  }
+
+  .team-selector > button {
+    padding: 13px 16px;
+  }
+
+  .team-panel-heading {
+    align-items: flex-start;
+  }
+
+  .team-panel-heading .secondary-button {
+    width: 38px;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .organization-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .organization-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .organization-level {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .organization-level + .organization-level::before {
+    display: none;
+  }
+
+  .organization-level-label {
+    min-height: 28px;
+    flex-direction: row;
+    justify-content: flex-start;
+    border-right: 0;
+    border-bottom: 1px solid #c9d7d1;
+    padding-bottom: 5px;
+    text-align: left;
+  }
+
+  .organization-nodes {
+    grid-template-columns: 1fr;
+  }
+
+  .organization-node,
+  .organization-chart.compact .organization-node {
+    min-height: 160px;
   }
 
   .plan-details-grid {
