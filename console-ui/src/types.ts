@@ -134,3 +134,22 @@ export type MailSummaryJob = {
   message_count: number;
   error?: string | null;
 };
+
+export type MailAuthorizationStatus = {
+  enabled: boolean;
+  available: boolean;
+  authenticated: boolean;
+  model_metadata_consent: boolean;
+  ready: boolean;
+  oauth_scope: 'gmail.readonly';
+  metadata_fields: Array<'from' | 'subject' | 'date' | 'message_id'>;
+  privacy: 'metadata_only';
+};
+
+export type MailAuthorizationJob = {
+  job_id: string;
+  status: 'running' | 'ready' | 'failed';
+  created_at: string;
+  updated_at: string;
+  error?: string | null;
+};

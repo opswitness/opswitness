@@ -13,6 +13,7 @@ from quarterdeck.mail import (
     MAX_GWS_OUTPUT_BYTES,
     CommandResult,
     _subprocess_runner,
+    authorize_mail,
     check_mail,
     mail_status,
 )
@@ -206,6 +207,118 @@ def test_mail_status_rejects_oversized_tool_output(tmp_path, monkeypatch):
     )
     assert result["ready"] is False
     assert result["error"] == "gws command output exceeded the safety limit"
+
+
+def test_authorize_mail_uses_only_fixed_readonly_gmail_flow_and_revalidates(
+    tmp_path, monkeypatch
+):
+    settings = _settings(tmp_path, monkeypatch, enabled=False, model_metadata_consent=False)
+    calls: list[tuple[list[str], float]] = []
+    auth_checks = 0
+
+    def runner(argv: list[str], timeout: float) -> CommandResult:
+        nonlocal auth_checks
+        calls.append((argv, timeout))
+        if argv[-1] == "--version":
+            return CommandResult(0, "gws 0.22.5", "")
+        if argv[-2:] == ["auth", "status"]:
+            auth_checks += 1
+            auth = (
+                _READY_AUTH
+                if auth_checks == 2
+                else {
+                    "auth_method": "none",
+                    "storage": "none",
+                    "has_refresh_token": False,
+                    "encryption_valid": False,
+                    "token_valid": False,
+                    "scopes": [],
+                }
+            )
+            return CommandResult(0, json.dumps(auth), "")
+        return CommandResult(0, "private browser output", "private account output")
+
+    result = authorize_mail(settings, runner=runner)
+
+    assert result == {
+        "ok": True,
+        "authenticated": True,
+        "scope_read_only": True,
+        "credential_storage": "encrypted",
+        "privacy": "metadata_only",
+    }
+    login = next(call for call in calls if "login" in call[0])
+    assert login == (
+        [
+            str(settings.mail.gws_bin),
+            "auth",
+            "login",
+            "--readonly",
+            "--services",
+            "gmail",
+        ],
+        300.0,
+    )
+    assert "private" not in json.dumps(result)
+
+
+def test_authorize_mail_skips_login_for_existing_valid_credential(tmp_path, monkeypatch):
+    settings = _settings(tmp_path, monkeypatch, enabled=False, model_metadata_consent=False)
+    calls: list[tuple[list[str], float]] = []
+    result = authorize_mail(
+        settings,
+        runner=_ready_runner(CommandResult(9, "", "must not run"), calls=calls),
+    )
+    assert result["ok"] is True
+    assert all("login" not in argv for argv, _timeout in calls)
+
+
+def test_authorize_mail_hides_failure_and_rejects_mutating_scope(tmp_path, monkeypatch):
+    settings = _settings(tmp_path, monkeypatch, enabled=False, model_metadata_consent=False)
+    unauth = {
+        "auth_method": "none",
+        "storage": "none",
+        "has_refresh_token": False,
+        "encryption_valid": False,
+        "token_valid": False,
+        "scopes": [],
+    }
+
+    failed = authorize_mail(
+        settings,
+        runner=_ready_runner(
+            CommandResult(7, "private@example.com", "/private/token"),
+            auth=unauth,
+        ),
+    )
+    assert failed == {
+        "ok": False,
+        "error": "Gmail readonly authorization did not complete",
+        "privacy": "metadata_only",
+    }
+
+    auth_checks = 0
+
+    def mutating_runner(argv: list[str], timeout: float) -> CommandResult:
+        nonlocal auth_checks
+        del timeout
+        if argv[-1] == "--version":
+            return CommandResult(0, "gws 0.22.5", "")
+        if argv[-2:] == ["auth", "status"]:
+            auth_checks += 1
+            auth = unauth if auth_checks == 1 else {
+                **_READY_AUTH,
+                "scopes": [
+                    GMAIL_READONLY_SCOPE,
+                    "https://www.googleapis.com/auth/gmail.modify",
+                ],
+            }
+            return CommandResult(0, json.dumps(auth), "")
+        return CommandResult(0, "", "")
+
+    rejected = authorize_mail(settings, runner=mutating_runner)
+    assert rejected["ok"] is False
+    assert rejected["error"] == "Gmail credential failed readonly verification"
 
 
 def test_subprocess_runner_hides_startup_oserror(monkeypatch):

@@ -89,7 +89,9 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
    neither event stores those fields. No body, draft, send, delete, label mutation, or runtime
    query exists in the CLI or MCP surface. The normal 11-tool MCP excludes mail entirely;
    `qd mcp --profile mail` exposes only status/check, and model transmission additionally
-   requires an explicit local consent bit. See
+   requires an explicit local consent bit. The loopback console can obtain that bit only after
+   two literal-true acknowledgements and an exact readonly Gmail OAuth flow; activation lives in
+   a private managed file so user configuration is never rewritten. See
    [ADR-0005](adr/0005-metadata-only-mail-monitor.md).
 9. **Elapsed rollout gates are ledger contracts, not prose timestamps.** `qd soak` freezes
    each tracked job's interval/grace and recomputes first/intermediate/trailing cadence gaps,
@@ -188,7 +190,7 @@ paid users ultimately see the vertical workbench, not the generic operations sur
 | adopt (dry-run plist wrapping) | `src/quarterdeck/adopt.py` | ✅ P2 (`--apply` gated on install) |
 | MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ 11-tool ops + isolated 2-tool mail profile |
 | allowlisted workflow launcher | `src/quarterdeck/workflows.py`, `workflow_worker.py` | ✅ code + tests + live AionUi one-click acceptance |
-| metadata-only mail monitor | `src/quarterdeck/mail.py` | ✅ code + tests; OAuth and AionUi schedule pending |
+| metadata-only mail monitor | `src/quarterdeck/mail.py`, `console/`, `console-ui/` | ✅ adapter + setup/revoke UI; live OAuth and AionUi schedule pending |
 | local operator console | `src/quarterdeck/console/`, `console-ui/` | ✅ dashboard + plan/confirm/dispatch + responsive UI + optional KeepAlive service; production install pending canary |
 | install doctor / secure services / disaster recovery | `src/quarterdeck/doctor.py`, `service.py`, `backup.py` | ✅ five secret-free templates + installed-command drift check; soak pending |
 | gate (PreToolUse `defer` → Paperclip approval → resume) | `gate.py`, `gated_claude.py` | ✅ M3 code + two live approval/resume drills |

@@ -10,7 +10,7 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 252 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
+- Full suite: 261 tests pass in three consecutive runs; ruff, mypy, DCO, worktree gitleaks, and full-history
   gitleaks are clean.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
@@ -88,7 +88,11 @@ blocked by the current open gates below.
   only `qd mcp --profile mail`, whose two tools cannot launch workflows or mutate the fleet. The
   adapter is fixed-query, metadata-only, pinned to `gws 0.22.5`, and disabled by default. The
   separate `quarterdeck-mail` connection is tested at exactly two tools but remains disabled;
-  Gmail OAuth is absent and no mailbox access has occurred.
+  Gmail OAuth is absent and no mailbox access has occurred. The total console now has a complete
+  local authorization/revocation dialog: two literal-true acknowledgements gate the fixed readonly
+  Gmail login command, successful login is revalidated before a private managed activation file is
+  written, and failure or missing final evidence leaves the adapter disabled. Desktop and 390px
+  mobile acceptance passed without clicking the authorization action.
 - The local operator console is code-complete at `qd console serve`: FastAPI serves the packaged
   React UI on loopback only; CSRF/origin/content-type/CSP controls protect writes; planning uses an
   ephemeral tool-free AionUi Plan Mode Team; confirmation is bound to the exact plan SHA-256; only
@@ -96,7 +100,8 @@ blocked by the current open gates below.
   synthetic request returned a four-Agent/four-stage review plan and stopped at the unchecked,
   disabled confirmation action, so no execution side effect occurred. Desktop and 390px mobile
   layouts have zero horizontal overflow, and the built wheel contains the versioned static assets.
-  Mail stays visibly `未启用` until the existing consent/OAuth gate closes. Design authority:
+  Mail stays visibly `未启用` until the existing consent/OAuth gate closes, but its setup button now
+  opens the exact readonly and model-metadata consent contract instead of a dead control. Design authority:
   [ADR-0007](adr/0007-local-operator-console.md).
 - Console startup now scans every private plan record strictly. Durable `confirmed` work is
   resubmitted through an atomic per-plan dispatch claim, active work is refreshed, and ambiguous

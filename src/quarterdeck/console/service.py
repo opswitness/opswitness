@@ -15,11 +15,13 @@ from typing import Any, Callable
 import httpx
 
 from quarterdeck.bootstrap import load_effective_schedules
-from quarterdeck.config import Settings, config_dir, resolve_api_key
+from quarterdeck.config import Settings, config_dir, resolve_api_key, save_mail_activation
 from quarterdeck.console.aionui import AionUiClient, AionUiError
 from quarterdeck.console.schemas import (
     ConfirmRequest,
     ExecutionState,
+    MailAuthorizationJob,
+    MailAuthorizationRequest,
     MailSummaryJob,
     PlanRecord,
     PlanRequest,
@@ -31,7 +33,7 @@ from quarterdeck.digest import build_digest
 from quarterdeck.ids import new_ulid
 from quarterdeck.index import job_summary, query_runs, rebuild
 from quarterdeck.ledger import Ledger
-from quarterdeck.mail import check_mail, mail_status
+from quarterdeck.mail import authorize_mail, check_mail, mail_status
 from quarterdeck.notify import alert
 from quarterdeck.paperclip import PaperclipClient, PaperclipError
 from quarterdeck.workflows import start_workflow, workflow_catalog, workflow_status
@@ -48,6 +50,9 @@ class ConsoleUnavailable(RuntimeError):
 
 PaperclipFactory = Callable[[], PaperclipClient]
 MAIL_SUMMARY_FAILURE = "mail summary failed; run qd mail status locally"
+MAIL_AUTHORIZATION_FAILURE = (
+    "Gmail readonly authorization failed; inspect qd mail status locally."
+)
 PLAN_GENERATION_FAILED = "plan_generation_failed"
 PLAN_GENERATION_FAILED_DETAIL = "Planning failed; inspect AionUi locally and create a new plan."
 EXECUTION_PLAN_INVALID = "execution_plan_invalid"
@@ -168,6 +173,8 @@ class ConsoleService:
         self._background = background
         self._mail_jobs: dict[str, MailSummaryJob] = {}
         self._mail_lock = threading.Lock()
+        self._mail_auth_jobs: dict[str, MailAuthorizationJob] = {}
+        self._mail_auth_lock = threading.Lock()
         self._lease_guard = threading.Lock()
         self._lease_fd: int | None = None
 
@@ -797,6 +804,138 @@ class ConsoleService:
                 return self._mail_jobs[job_id]
             except KeyError as exc:
                 raise PlanNotFound(f"unknown mail summary: {job_id}") from exc
+
+    def mail_setup_status(self) -> dict[str, Any]:
+        status = mail_status(self.settings)
+        return {
+            "enabled": status.get("enabled") is True,
+            "available": status.get("available") is True,
+            "authenticated": status.get("authenticated") is True,
+            "model_metadata_consent": status.get("model_metadata_consent") is True,
+            "ready": status.get("mcp_ready") is True,
+            "oauth_scope": "gmail.readonly",
+            "metadata_fields": ["from", "subject", "date", "message_id"],
+            "privacy": "metadata_only",
+        }
+
+    def request_mail_authorization(
+        self, request: MailAuthorizationRequest
+    ) -> MailAuthorizationJob:
+        del request  # Literal[True] fields are validated at the HTTP boundary.
+        with self._mail_auth_lock:
+            running = next(
+                (job for job in self._mail_auth_jobs.values() if job.status == "running"),
+                None,
+            )
+            if running is not None:
+                return running
+            job = MailAuthorizationJob(job_id=new_ulid())
+            self._append(
+                "mail_authorization_requested",
+                job.job_id,
+                {
+                    "schema_version": 1,
+                    "oauth_scope": "gmail.readonly",
+                    "metadata_fields": ["from", "subject", "date", "message_id"],
+                    "model_metadata_consent": True,
+                    "source": "console",
+                },
+            )
+            self._mail_auth_jobs[job.job_id] = job
+        self._submit(self.run_mail_authorization, job.job_id)
+        return job
+
+    def run_mail_authorization(self, job_id: str) -> MailAuthorizationJob:
+        activation_saved = False
+        try:
+            result = authorize_mail(self.settings)
+            if result.get("ok") is not True:
+                raise ConsoleUnavailable("mail OAuth verification failed")
+            save_mail_activation(enabled=True, model_metadata_consent=True)
+            activation_saved = True
+            enabled_mail = self.settings.mail.model_copy(
+                update={"enabled": True, "model_metadata_consent": True}
+            )
+            self.settings = self.settings.model_copy(update={"mail": enabled_mail})
+            self._append(
+                "mail_authorization_finished",
+                job_id,
+                {
+                    "schema_version": 1,
+                    "oauth_scope": "gmail.readonly",
+                    "credential_storage": "encrypted",
+                    "model_metadata_consent": True,
+                    "source": "console",
+                },
+            )
+            updated = MailAuthorizationJob(
+                job_id=job_id,
+                status="ready",
+                created_at=self._mail_auth_jobs[job_id].created_at,
+                updated_at=utc_now(),
+            )
+        except Exception:
+            if activation_saved:
+                try:
+                    save_mail_activation(enabled=False, model_metadata_consent=False)
+                    disabled_mail = self.settings.mail.model_copy(
+                        update={"enabled": False, "model_metadata_consent": False}
+                    )
+                    self.settings = self.settings.model_copy(update={"mail": disabled_mail})
+                except (OSError, ValueError):
+                    alert("mail activation rollback failed after authorization evidence loss")
+            try:
+                self._append(
+                    "mail_authorization_failed",
+                    job_id,
+                    {
+                        "schema_version": 1,
+                        "reason": "oauth_or_activation_failed",
+                        "source": "console",
+                    },
+                )
+            except ConsoleUnavailable:
+                alert(f"audit evidence lost after mail authorization failure job={job_id}")
+            updated = MailAuthorizationJob(
+                job_id=job_id,
+                status="failed",
+                created_at=self._mail_auth_jobs[job_id].created_at,
+                updated_at=utc_now(),
+                error=MAIL_AUTHORIZATION_FAILURE,
+            )
+        with self._mail_auth_lock:
+            self._mail_auth_jobs[job_id] = updated
+        return updated
+
+    def get_mail_authorization(self, job_id: str) -> MailAuthorizationJob:
+        with self._mail_auth_lock:
+            try:
+                return self._mail_auth_jobs[job_id]
+            except KeyError as exc:
+                raise PlanNotFound(f"unknown mail authorization: {job_id}") from exc
+
+    def disable_mail(self) -> dict[str, bool]:
+        try:
+            save_mail_activation(enabled=False, model_metadata_consent=False)
+        except (OSError, ValueError) as exc:
+            raise ConsoleUnavailable("mail consent could not be revoked safely") from exc
+        disabled_mail = self.settings.mail.model_copy(
+            update={"enabled": False, "model_metadata_consent": False}
+        )
+        self.settings = self.settings.model_copy(update={"mail": disabled_mail})
+        event = self.ledger.append(
+            "mail_consent_revoked",
+            new_ulid(),
+            {
+                "schema_version": 1,
+                "model_metadata_consent": False,
+                "source": "console",
+            },
+            fsync=True,
+        )
+        if event is None:
+            alert("mail consent was revoked but audit evidence was unavailable")
+        return {"disabled": True}
 
     def dashboard(self) -> dict[str, Any]:
         index_db = self.settings.ledger_dir.parent / "index.db"

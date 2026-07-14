@@ -89,19 +89,24 @@ cleanup recovery does not replay planning or execution.
 The ledger records `task_plan_requested`, `task_plan_drafted`, `task_plan_failed`,
 `task_plan_confirmed`, `task_execution_requested`, `task_execution_dispatched`,
 `task_execution_failed`, `task_execution_finished`, `aion_ephemeral_recovery_started`,
-`aion_ephemeral_recovery_failed`, and `aion_ephemeral_recovery_finished`. Objective, constraints,
-full plan text, workspace path, mail metadata, and generated mail summaries are not copied into
-ledger events; recovery stores only purpose, path hash, ID-presence booleans, fixed outcomes, and a
-fixed failure reason.
+`aion_ephemeral_recovery_failed`, `aion_ephemeral_recovery_finished`,
+`mail_authorization_requested`, `mail_authorization_finished`, `mail_authorization_failed`, and
+`mail_consent_revoked`. Objective, constraints, full plan text, workspace path, mail metadata,
+account identity, OAuth output, and generated mail summaries are not copied into ledger events;
+recovery stores only purpose, path hash, ID-presence booleans, fixed outcomes, and a fixed failure
+reason.
 Planning and dispatch failures persist only fixed versioned reason codes; arbitrary AionUi,
 Paperclip, workflow, parser, path, or model exception text is neither returned by the API nor
 written to the ledger. Runtime failure and status-unavailable messages are fixed local guidance.
 
-The mail button remains disabled until the existing fixed-query Gmail readonly adapter, encrypted
-OAuth, and explicit model-metadata consent are all ready. A summary uses an ephemeral Plan Mode
-team and a unique private workspace; only message count and summary hash enter the ledger. Team or
-workspace cleanup failure rejects the summary instead of releasing potentially residue-backed
-output.
+When mail is not ready, the mail button opens a local authorization dialog rather than becoming a
+dead control. Two separate checkboxes bind Gmail readonly OAuth and the exact metadata fields sent
+to the configured AionUi model; the OAuth action remains disabled until both are checked. The
+backend accepts only literal true acknowledgements and the fixed readonly Gmail login command.
+Successful re-verification atomically activates the adapter without rewriting user `config.yaml`;
+the same dialog can revoke future access. A summary uses an ephemeral Plan Mode team and a unique
+private workspace; only message count and summary hash enter the ledger. Team or workspace cleanup
+failure rejects the summary instead of releasing potentially residue-backed output.
 
 ## Local security boundary
 

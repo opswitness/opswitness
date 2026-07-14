@@ -175,4 +175,27 @@ class MailSummaryJob(BaseModel):
     error: str | None = Field(default=None, max_length=500)
 
 
+class MailAuthorizationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    gmail_readonly_acknowledged: Literal[True]
+    model_metadata_acknowledged: Literal[True]
+
+
+class MailDisableRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirmed: Literal[True]
+
+
+class MailAuthorizationJob(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str
+    status: Literal["running", "ready", "failed"] = "running"
+    created_at: str = Field(default_factory=utc_now)
+    updated_at: str = Field(default_factory=utc_now)
+    error: str | None = Field(default=None, max_length=500)
+
+
 JsonObject = dict[str, Any]

@@ -32,15 +32,21 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   confirmPlan,
+  disableMail,
+  getMailAuthorization,
+  getMailAuthorizationStatus,
   getMailSummary,
   getPlan,
   loadBootstrap,
+  requestMailAuthorization,
   requestMailSummary,
   requestPlan,
 } from './api';
 import type {
   Bootstrap,
   Integration,
+  MailAuthorizationJob,
+  MailAuthorizationStatus,
   MailSummaryJob,
   PlanRecord,
   RunRecord,
@@ -117,6 +123,7 @@ function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activePlan, setActivePlan] = useState<PlanRecord | null>(null);
   const [mailJob, setMailJob] = useState<MailSummaryJob | null>(null);
+  const [mailSetupOpen, setMailSetupOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -132,6 +139,10 @@ function App() {
       if (!quiet) setLoading(false);
     }
   }, []);
+
+  const refreshAfterMailChange = useCallback(async () => {
+    await refresh(true);
+  }, [refresh]);
 
   useEffect(() => {
     void refresh();
@@ -252,6 +263,7 @@ function App() {
                   data={bootstrap}
                   mailJob={mailJob}
                   onMail={async () => setMailJob(await requestMailSummary())}
+                  onMailSetup={() => setMailSetupOpen(true)}
                   onOpenPlan={openPlan}
                   onNewTask={openNewTask}
                 />
@@ -260,7 +272,9 @@ function App() {
                 <TasksView plans={bootstrap.plans} onOpen={openPlan} onNew={openNewTask} />
               )}
               {view === 'evidence' && <EvidenceView runs={bootstrap.recent_runs} data={bootstrap} />}
-              {view === 'settings' && <ConnectionsView data={bootstrap} />}
+              {view === 'settings' && (
+                <ConnectionsView data={bootstrap} onMailSetup={() => setMailSetupOpen(true)} />
+              )}
             </>
           ) : null}
         </div>
@@ -280,6 +294,11 @@ function App() {
           mergePlan(await confirmPlan(record.plan_id, record.plan_sha256));
         }}
         onRestart={() => setActivePlan(null)}
+      />
+      <MailSetupDialog
+        open={mailSetupOpen}
+        onClose={() => setMailSetupOpen(false)}
+        onChanged={refreshAfterMailChange}
       />
     </div>
   );
@@ -339,12 +358,14 @@ function Dashboard({
   data,
   mailJob,
   onMail,
+  onMailSetup,
   onOpenPlan,
   onNewTask,
 }: {
   data: Bootstrap;
   mailJob: MailSummaryJob | null;
   onMail: () => Promise<void>;
+  onMailSetup: () => void;
   onOpenPlan: (plan: PlanRecord) => void;
   onNewTask: () => void;
 }) {
@@ -395,7 +416,7 @@ function Dashboard({
             </div>
             <Mail size={20} />
           </div>
-          <MailSummary data={data} job={mailJob} onRun={onMail} />
+          <MailSummary data={data} job={mailJob} onRun={onMail} onSetup={onMailSetup} />
         </section>
 
         <section className="panel quick-panel">
@@ -468,7 +489,17 @@ function Metric({
   );
 }
 
-function MailSummary({ data, job, onRun }: { data: Bootstrap; job: MailSummaryJob | null; onRun: () => Promise<void> }) {
+function MailSummary({
+  data,
+  job,
+  onRun,
+  onSetup,
+}: {
+  data: Bootstrap;
+  job: MailSummaryJob | null;
+  onRun: () => Promise<void>;
+  onSetup: () => void;
+}) {
   const [running, setRunning] = useState(false);
   const run = async () => {
     setRunning(true);
@@ -517,9 +548,13 @@ function MailSummary({ data, job, onRun }: { data: Bootstrap; job: MailSummaryJo
       <Inbox size={28} />
       <strong>{data.mail_ready ? '今日摘要尚未生成' : '邮箱尚未就绪'}</strong>
       <span>{data.mail_ready ? '读取固定范围的未读邮件元数据' : detail}</span>
-      <button className="secondary-button" type="button" disabled={!data.mail_ready} onClick={() => void run()}>
+      <button
+        className="secondary-button"
+        type="button"
+        onClick={data.mail_ready ? () => void run() : onSetup}
+      >
         <Mail size={16} />
-        {data.mail_ready ? '查看今日摘要' : '待配置'}
+        {data.mail_ready ? '查看今日摘要' : '设置邮箱'}
       </button>
     </div>
   );
@@ -602,7 +637,7 @@ function EvidenceView({ runs, data }: { runs: RunRecord[]; data: Bootstrap }) {
   );
 }
 
-function ConnectionsView({ data }: { data: Bootstrap }) {
+function ConnectionsView({ data, onMailSetup }: { data: Bootstrap; onMailSetup: () => void }) {
   const icons: Record<string, typeof Server> = { aionui: Bot, paperclip: Server, ledger: Database, mail: Mail };
   return (
     <section className="panel full-panel">
@@ -617,12 +652,216 @@ function ConnectionsView({ data }: { data: Bootstrap }) {
               <div className="connection-icon"><Icon size={19} /></div>
               <div><strong>{item.label}</strong><span>{item.detail || (item.status === 'online' ? '已连接' : '不可用')}</span></div>
               <StatusBadge status={item.status} label={item.status === 'online' ? '在线' : undefined} />
-              {item.url ? <a href={item.url} target="_blank" rel="noreferrer" title={`打开 ${item.label}`}><ExternalLink size={17} /></a> : <span />}
+              {item.url ? (
+                <a href={item.url} target="_blank" rel="noreferrer" title={`打开 ${item.label}`}>
+                  <ExternalLink size={17} />
+                </a>
+              ) : key === 'mail' ? (
+                <button
+                  className="icon-button compact-icon"
+                  type="button"
+                  title={data.mail_ready ? '管理邮箱授权' : '设置邮箱'}
+                  onClick={onMailSetup}
+                >
+                  <Settings size={16} />
+                </button>
+              ) : <span />}
             </div>
           );
         })}
       </div>
     </section>
+  );
+}
+
+function MailSetupDialog({
+  open,
+  onClose,
+  onChanged,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onChanged: () => Promise<void>;
+}) {
+  const [status, setStatus] = useState<MailAuthorizationStatus | null>(null);
+  const [job, setJob] = useState<MailAuthorizationJob | null>(null);
+  const [readonlyAck, setReadonlyAck] = useState(false);
+  const [metadataAck, setMetadataAck] = useState(false);
+  const [revokeAck, setRevokeAck] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const loadStatus = useCallback(async () => {
+    const next = await getMailAuthorizationStatus();
+    setStatus(next);
+    return next;
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    setReadonlyAck(false);
+    setMetadataAck(false);
+    setRevokeAck(false);
+    setJob(null);
+    setError('');
+    setBusy(true);
+    void loadStatus()
+      .catch((err) => setError(err instanceof Error ? err.message : '邮箱状态读取失败'))
+      .finally(() => setBusy(false));
+  }, [open, loadStatus]);
+
+  useEffect(() => {
+    if (!open || !job || job.status !== 'running') return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const next = await getMailAuthorization(job.job_id);
+        if (cancelled) return;
+        setJob(next);
+        if (next.status === 'ready') {
+          await loadStatus();
+          await onChanged();
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : '授权状态读取失败');
+        }
+      }
+    };
+    const timer = window.setInterval(() => void poll(), 1500);
+    void poll();
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [job?.job_id, job?.status, loadStatus, onChanged, open]);
+
+  if (!open) return null;
+
+  const startAuthorization = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      setJob(await requestMailAuthorization());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '授权请求失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revoke = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await disableMail();
+      await loadStatus();
+      await onChanged();
+      setJob(null);
+      setRevokeAck(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '停用失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const ready = status?.ready === true;
+  const running = job?.status === 'running';
+  return (
+    <div className="modal-layer" role="dialog" aria-modal="true" aria-label="邮箱授权">
+      <button className="modal-backdrop" type="button" aria-label="关闭" onClick={onClose} />
+      <section className="mail-setup-dialog">
+        <header className="modal-header">
+          <div>
+            <span className="section-kicker">GMAIL</span>
+            <h2>{ready ? '邮箱摘要已连接' : '设置邮箱摘要'}</h2>
+          </div>
+          <button className="icon-button" type="button" title="关闭" onClick={onClose}>
+            <X size={19} />
+          </button>
+        </header>
+
+        {ready ? (
+          <div className="mail-setup-content">
+            <div className="setup-success">
+              <ShieldCheck size={24} />
+              <div>
+                <strong>Gmail 只读授权有效</strong>
+                <span>首页现在可以按需生成元数据摘要。</span>
+              </div>
+            </div>
+            <div className="privacy-summary">
+              <strong>固定数据边界</strong>
+              <span>仅发件人、主题、日期和 message-id；不读取正文。</span>
+              <span>没有发送、草稿、删除或标签权限。</span>
+            </div>
+            <label className="consent-row">
+              <input
+                type="checkbox"
+                checked={revokeAck}
+                onChange={(event) => setRevokeAck(event.target.checked)}
+              />
+              <span>确认停用后续邮箱读取与模型元数据传输</span>
+            </label>
+            <button
+              className="secondary-button danger-button"
+              type="button"
+              disabled={!revokeAck || busy}
+              onClick={() => void revoke()}
+            >
+              停用邮箱摘要
+            </button>
+          </div>
+        ) : (
+          <div className="mail-setup-content">
+            <div className="privacy-summary">
+              <strong>最小权限</strong>
+              <span>授权页只申请 Gmail readonly，Quarterdeck 不保存账号或 token。</span>
+              <span>固定查询仅查看最近未读收件箱，排除垃圾邮件和回收站。</span>
+            </div>
+            <label className="consent-row">
+              <input
+                type="checkbox"
+                checked={readonlyAck}
+                onChange={(event) => setReadonlyAck(event.target.checked)}
+              />
+              <span>我同意打开 Google 授权页并仅授予 Gmail 只读权限</span>
+            </label>
+            <label className="consent-row">
+              <input
+                type="checkbox"
+                checked={metadataAck}
+                onChange={(event) => setMetadataAck(event.target.checked)}
+              />
+              <span>我同意将发件人、主题、日期和 message-id 发送给当前 AionUi 模型生成摘要</span>
+            </label>
+            {running && (
+              <div className="oauth-progress" role="status">
+                <LoaderCircle size={20} className="spin" />
+                <span>请在已打开的 Google 页面完成授权</span>
+              </div>
+            )}
+            {job?.status === 'failed' && <div className="inline-error">{job.error}</div>}
+            {error && <div className="inline-error">{error}</div>}
+            {status && !status.available && (
+              <div className="inline-error">本机固定版本 gws 尚未就绪，请先运行 doctor。</div>
+            )}
+            <button
+              className="primary-button full-button"
+              type="button"
+              disabled={
+                busy || running || !status?.available || !readonlyAck || !metadataAck
+              }
+              onClick={() => void startAuthorization()}
+            >
+              {busy ? <LoaderCircle size={17} className="spin" /> : <ShieldCheck size={17} />}
+              {status?.authenticated ? '确认并启用摘要' : '打开 Google 只读授权'}
+            </button>
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
 

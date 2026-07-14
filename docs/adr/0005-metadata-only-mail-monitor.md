@@ -39,13 +39,22 @@ Quarterdeck adds a narrow evidence adapter, not a mail agent:
 8. Mail tools live only on `qd mcp --profile mail`. The normal Quarterdeck MCP excludes them,
    while the mail profile excludes every fleet, projection, workflow, shell, and browser action.
    AionUi must bind the two profiles to different assistants and conversations.
-9. AionUi's native Custom Assistant owns the main-screen icon and common prompts. Its native
-   Scheduled Task owns the daily trigger. Quarterdeck builds neither UI nor scheduler.
-10. Before enabling a model-backed daily task, the operator sets
-    `mail.model_metadata_consent: true` to record explicit approval for transmitting
-    sender/subject/date/message-id to the configured model provider. MCP checks fail before
-    invoking `gws` without it; local CLI inspection remains available.
-11. Child output is bounded to 1 MiB and the process group is killed on timeout or overflow.
+9. The loopback total console owns the local on-demand button and authorization dialog; AionUi
+   remains the model runtime and its native Scheduled Task may own a future daily trigger.
+   Quarterdeck does not build a second inbox or scheduler.
+10. Console authorization requires two independent literal-true acknowledgements: Gmail readonly
+    OAuth and transmission of sender/subject/date/message-id to the configured model provider.
+    The only login argv is `gws auth login --readonly --services gmail`. Completion is accepted
+    only after a second version, encrypted-storage, live-token, and readonly-scope verification.
+11. Activation state is atomically written to private `mail-activation.yaml`, which may contain
+    only `mail.enabled` and `mail.model_metadata_consent`. This managed file has precedence over
+    user `config.yaml`, so the console never rewrites comments or unrelated settings. Environment
+    overrides remain authoritative. Revocation sets both values false before any future check.
+12. Authorization records fixed `mail_authorization_requested/finished/failed` events; revocation
+    records `mail_consent_revoked`. No account identity, token, credential path, OAuth output, or
+    upstream exception enters those events or API responses. If final evidence is lost after
+    activation, Quarterdeck rolls activation back to false.
+13. Child output is bounded to 1 MiB and the process group is killed on timeout or overflow.
 
 ## Consequences
 

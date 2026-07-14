@@ -1,4 +1,10 @@
-import type { Bootstrap, MailSummaryJob, PlanRecord } from './types';
+import type {
+  Bootstrap,
+  MailAuthorizationJob,
+  MailAuthorizationStatus,
+  MailSummaryJob,
+  PlanRecord,
+} from './types';
 
 let csrfToken = '';
 
@@ -54,4 +60,29 @@ export function requestMailSummary(): Promise<MailSummaryJob> {
 
 export function getMailSummary(jobId: string): Promise<MailSummaryJob> {
   return api(`/api/v1/mail-summary/${encodeURIComponent(jobId)}`);
+}
+
+export function getMailAuthorizationStatus(): Promise<MailAuthorizationStatus> {
+  return api('/api/v1/mail-authorization/status');
+}
+
+export function requestMailAuthorization(): Promise<MailAuthorizationJob> {
+  return api('/api/v1/mail-authorization', {
+    method: 'POST',
+    body: JSON.stringify({
+      gmail_readonly_acknowledged: true,
+      model_metadata_acknowledged: true,
+    }),
+  });
+}
+
+export function getMailAuthorization(jobId: string): Promise<MailAuthorizationJob> {
+  return api(`/api/v1/mail-authorization/${encodeURIComponent(jobId)}`);
+}
+
+export function disableMail(): Promise<{ disabled: true }> {
+  return api('/api/v1/mail-authorization/disable', {
+    method: 'POST',
+    body: JSON.stringify({ confirmed: true }),
+  });
 }

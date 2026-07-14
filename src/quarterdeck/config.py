@@ -31,6 +31,9 @@ def config_dir() -> Path:
     ).expanduser()
 
 
+MAIL_ACTIVATION_FILE = "mail-activation.yaml"
+
+
 class PaperclipConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     api_base: str = "http://127.0.0.1:3100"
@@ -80,6 +83,7 @@ class MailConfig(BaseModel):
     )
     max_messages: int = Field(default=20, ge=1, le=100)
     timeout_seconds: float = Field(default=30.0, ge=1.0, le=120.0)
+    oauth_timeout_seconds: float = Field(default=300.0, ge=60.0, le=900.0)
 
 
 class ConsoleConfig(BaseModel):
@@ -156,6 +160,10 @@ class Settings(BaseSettings):
         return (
             init_settings,
             env_settings,
+            YamlConfigSettingsSource(
+                settings_cls,
+                yaml_file=config_dir() / MAIL_ACTIVATION_FILE,
+            ),
             YamlConfigSettingsSource(settings_cls, yaml_file=config_dir() / "secrets.yaml"),
             YamlConfigSettingsSource(settings_cls, yaml_file=config_dir() / "config.yaml"),
             file_secret_settings,
@@ -177,6 +185,10 @@ _CONFIG_SECRET_PATHS = {
     ("telegram", "chat_id"),
 }
 _SECRETS_ALLOWED_PATHS = _CONFIG_SECRET_PATHS
+_MAIL_ACTIVATION_ALLOWED_PATHS = {
+    ("mail", "enabled"),
+    ("mail", "model_metadata_consent"),
+}
 
 
 def _yaml_mapping(path: Path) -> dict:
@@ -205,6 +217,7 @@ def validate_config_files(root: Path | None = None) -> None:
     root = root or config_dir()
     config_path = root / "config.yaml"
     secrets_path = root / "secrets.yaml"
+    mail_activation_path = root / MAIL_ACTIVATION_FILE
     if not root.exists():
         return
     try:
@@ -213,7 +226,7 @@ def validate_config_files(root: Path | None = None) -> None:
         raise ValueError(f"{root}: cannot stat config directory — {exc}") from exc
     if root_mode != 0o700:
         raise ValueError(f"{root}: config directory mode must be 0700, found {root_mode:04o}")
-    if not config_path.exists() and not secrets_path.exists():
+    if not config_path.exists() and not secrets_path.exists() and not mail_activation_path.exists():
         return
     if secrets_path.exists():
         mode = stat.S_IMODE(secrets_path.stat().st_mode)
@@ -230,6 +243,22 @@ def validate_config_files(root: Path | None = None) -> None:
         if leaked:
             rendered = ", ".join(".".join(path) for path in leaked)
             raise ValueError(f"{config_path}: secret fields must move to secrets.yaml: {rendered}")
+    if mail_activation_path.exists():
+        if mail_activation_path.is_symlink():
+            raise ValueError(f"{mail_activation_path}: managed mail state must not be a symlink")
+        mode = stat.S_IMODE(mail_activation_path.stat().st_mode)
+        if mode != 0o600:
+            raise ValueError(
+                f"{mail_activation_path}: managed mail state mode must be 0600, "
+                f"found {mode:04o}"
+            )
+        activation_paths = _leaf_paths(_yaml_mapping(mail_activation_path))
+        forbidden = sorted(activation_paths - _MAIL_ACTIVATION_ALLOWED_PATHS)
+        if forbidden:
+            rendered = ", ".join(".".join(path) for path in forbidden)
+            raise ValueError(
+                f"{mail_activation_path}: unsupported managed mail fields: {rendered}"
+            )
 
 
 _TELEGRAM_BOT_TOKEN = re.compile(r"^[0-9]+:[A-Za-z0-9_-]+$")
@@ -275,3 +304,40 @@ def save_telegram_credentials(
     atomic_write(secrets_path, payload, mode=0o600)
     validate_config_files(root)
     return secrets_path
+
+
+def save_mail_activation(
+    *,
+    enabled: bool,
+    model_metadata_consent: bool,
+    root: Path | None = None,
+) -> Path:
+    """Persist the console-owned mail enable/consent decision without rewriting config.yaml."""
+    if model_metadata_consent and not enabled:
+        raise ValueError("model metadata consent requires the mail adapter to be enabled")
+
+    root = (root or config_dir()).expanduser()
+    if root.is_symlink():
+        raise ValueError(f"{root}: config directory must not be a symlink")
+    activation_path = root / MAIL_ACTIVATION_FILE
+    if root.exists():
+        if activation_path.is_symlink():
+            raise ValueError(f"{activation_path}: managed mail state must not be a symlink")
+        validate_config_files(root)
+    else:
+        root.mkdir(parents=True, mode=0o700)
+        root.chmod(0o700)
+
+    payload = yaml.safe_dump(
+        {
+            "mail": {
+                "enabled": enabled,
+                "model_metadata_consent": model_metadata_consent,
+            }
+        },
+        sort_keys=False,
+        allow_unicode=True,
+    ).encode()
+    atomic_write(activation_path, payload, mode=0o600)
+    validate_config_files(root)
+    return activation_path

@@ -13,7 +13,12 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from quarterdeck.config import Settings
-from quarterdeck.console.schemas import ConfirmRequest, PlanRequest
+from quarterdeck.console.schemas import (
+    ConfirmRequest,
+    MailAuthorizationRequest,
+    MailDisableRequest,
+    PlanRequest,
+)
 from quarterdeck.console.service import ConsoleConflict, ConsoleService, ConsoleUnavailable
 from quarterdeck.console.store import PlanNotFound
 
@@ -150,6 +155,32 @@ def create_app(
     @app.get("/api/v1/mail-summary/{job_id}")
     async def get_mail_summary(job_id: str) -> dict:
         job = await run_in_threadpool(service.get_mail_summary, job_id)
+        return job.model_dump(mode="json")
+
+    @app.get("/api/v1/mail-authorization/status")
+    async def mail_authorization_status() -> dict:
+        return await run_in_threadpool(service.mail_setup_status)
+
+    @app.post("/api/v1/mail-authorization", status_code=status.HTTP_202_ACCEPTED)
+    async def create_mail_authorization(
+        body: MailAuthorizationRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        job = await run_in_threadpool(service.request_mail_authorization, body)
+        return job.model_dump(mode="json")
+
+    @app.post("/api/v1/mail-authorization/disable")
+    async def disable_mail(
+        body: MailDisableRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del body, x_qd_csrf
+        return await run_in_threadpool(service.disable_mail)
+
+    @app.get("/api/v1/mail-authorization/{job_id}")
+    async def get_mail_authorization(job_id: str) -> dict:
+        job = await run_in_threadpool(service.get_mail_authorization, job_id)
         return job.model_dump(mode="json")
 
     static_dir = Path(__file__).with_name("static")

@@ -10,7 +10,13 @@ from fastapi.testclient import TestClient
 from quarterdeck.config import Settings
 from quarterdeck.console.aionui import AionUiClient, AionUiError, EphemeralSession
 from quarterdeck.console.app import create_app
-from quarterdeck.console.schemas import ConfirmRequest, ExecutionState, PlanRequest, TaskPlan
+from quarterdeck.console.schemas import (
+    ConfirmRequest,
+    ExecutionState,
+    MailAuthorizationRequest,
+    PlanRequest,
+    TaskPlan,
+)
 from quarterdeck.console.service import (
     DISPATCH_INTERRUPTED,
     DISPATCH_INTERRUPTED_DETAIL,
@@ -21,6 +27,7 @@ from quarterdeck.console.service import (
     EXECUTION_PLAN_INVALID_DETAIL,
     EXECUTION_REMOTE_FAILED_DETAIL,
     EXECUTION_STATUS_UNAVAILABLE_DETAIL,
+    MAIL_AUTHORIZATION_FAILURE,
     MAIL_SUMMARY_FAILURE,
     PLAN_GENERATION_FAILED,
     PLAN_GENERATION_FAILED_DETAIL,
@@ -691,6 +698,107 @@ def test_mail_summary_failure_never_persists_or_returns_third_party_error_text(
     assert '"reason": "mail_summary_failed"' in encoded
 
 
+def test_mail_authorization_requires_evidence_uses_fixed_consent_and_enables_only_after_verify(
+    monkeypatch, console_env
+):
+    _, service, _, _ = console_env
+    saved: list[tuple[bool, bool]] = []
+    monkeypatch.setattr(
+        "quarterdeck.console.service.authorize_mail",
+        lambda settings: {
+            "ok": True,
+            "authenticated": True,
+            "scope_read_only": True,
+            "credential_storage": "encrypted",
+        },
+    )
+    monkeypatch.setattr(
+        "quarterdeck.console.service.save_mail_activation",
+        lambda *, enabled, model_metadata_consent: saved.append(
+            (enabled, model_metadata_consent)
+        ),
+    )
+
+    requested = service.request_mail_authorization(
+        MailAuthorizationRequest(
+            gmail_readonly_acknowledged=True,
+            model_metadata_acknowledged=True,
+        )
+    )
+    assert requested.status == "running"
+    ready = service.run_mail_authorization(requested.job_id)
+
+    assert ready.status == "ready"
+    assert saved == [(True, True)]
+    assert service.settings.mail.enabled is True
+    assert service.settings.mail.model_metadata_consent is True
+    events = service.ledger.read_all()
+    assert [event["kind"] for event in events] == [
+        "mail_authorization_requested",
+        "mail_authorization_finished",
+    ]
+    assert events[0]["payload"]["oauth_scope"] == "gmail.readonly"
+    assert events[0]["payload"]["metadata_fields"] == [
+        "from",
+        "subject",
+        "date",
+        "message_id",
+    ]
+
+
+def test_mail_authorization_failure_is_fixed_and_never_activates(monkeypatch, console_env):
+    _, service, _, _ = console_env
+    hostile = "private@example.com /private/oauth-token"
+    monkeypatch.setattr(
+        "quarterdeck.console.service.authorize_mail",
+        lambda settings: {"ok": False, "error": hostile},
+    )
+    monkeypatch.setattr(
+        "quarterdeck.console.service.save_mail_activation",
+        lambda **kwargs: pytest.fail("failed OAuth must not activate mail"),
+    )
+    requested = service.request_mail_authorization(
+        MailAuthorizationRequest(
+            gmail_readonly_acknowledged=True,
+            model_metadata_acknowledged=True,
+        )
+    )
+    failed = service.run_mail_authorization(requested.job_id)
+
+    assert failed.status == "failed"
+    assert failed.error == MAIL_AUTHORIZATION_FAILURE
+    encoded = json.dumps(service.ledger.read_all(), ensure_ascii=False)
+    assert hostile not in encoded
+    assert '"reason": "oauth_or_activation_failed"' in encoded
+    assert service.settings.mail.enabled is False
+
+
+def test_mail_disable_revokes_future_model_access_even_when_audit_write_fails(
+    monkeypatch, console_env
+):
+    _, service, _, _ = console_env
+    service.settings = service.settings.model_copy(
+        update={
+            "mail": service.settings.mail.model_copy(
+                update={"enabled": True, "model_metadata_consent": True}
+            )
+        }
+    )
+    saved: list[tuple[bool, bool]] = []
+    monkeypatch.setattr(
+        "quarterdeck.console.service.save_mail_activation",
+        lambda *, enabled, model_metadata_consent: saved.append(
+            (enabled, model_metadata_consent)
+        ),
+    )
+    monkeypatch.setattr(service.ledger, "append", lambda *args, **kwargs: None)
+
+    assert service.disable_mail() == {"disabled": True}
+    assert saved == [(False, False)]
+    assert service.settings.mail.enabled is False
+    assert service.settings.mail.model_metadata_consent is False
+
+
 def test_aionui_mail_summary_fails_when_ephemeral_team_cleanup_is_unconfirmed(
     monkeypatch, console_env
 ):
@@ -1251,6 +1359,70 @@ def test_console_requires_csrf_and_serves_built_frontend(console_env, monkeypatc
         assert "Quarterdeck" in page.text
         assert page.headers["x-frame-options"] == "DENY"
     assert lifecycle == ["lease", "recovery", "release"]
+
+
+def test_mail_authorization_http_requires_both_explicit_acknowledgements(
+    console_env, monkeypatch
+):
+    settings, service, _, _ = console_env
+    monkeypatch.setattr(
+        service,
+        "mail_setup_status",
+        lambda: {
+            "enabled": False,
+            "available": True,
+            "authenticated": False,
+            "model_metadata_consent": False,
+            "ready": False,
+            "oauth_scope": "gmail.readonly",
+            "metadata_fields": ["from", "subject", "date", "message_id"],
+            "privacy": "metadata_only",
+        },
+    )
+    with TestClient(
+        create_app(settings, service=service),
+        base_url="http://127.0.0.1:8765",
+    ) as client:
+        csrf = client.get("/api/v1/bootstrap").json()["csrf_token"]
+        headers = {"X-QD-CSRF": csrf, "Origin": "http://127.0.0.1:8765"}
+        status_response = client.get("/api/v1/mail-authorization/status")
+        assert status_response.status_code == 200
+        assert status_response.json()["metadata_fields"] == [
+            "from",
+            "subject",
+            "date",
+            "message_id",
+        ]
+
+        denied = client.post(
+            "/api/v1/mail-authorization",
+            json={
+                "gmail_readonly_acknowledged": True,
+                "model_metadata_acknowledged": False,
+            },
+            headers=headers,
+        )
+        assert denied.status_code == 422
+
+        accepted = client.post(
+            "/api/v1/mail-authorization",
+            json={
+                "gmail_readonly_acknowledged": True,
+                "model_metadata_acknowledged": True,
+            },
+            headers=headers,
+        )
+        assert accepted.status_code == 202
+        job = accepted.json()
+        assert job["status"] == "running"
+        fetched = client.get(f"/api/v1/mail-authorization/{job['job_id']}")
+        assert fetched.json() == job
+
+        without_csrf = client.post(
+            "/api/v1/mail-authorization/disable",
+            json={"confirmed": True},
+        )
+        assert without_csrf.status_code == 403
 
 
 def test_console_lifespan_releases_lease_when_recovery_fails(console_env, monkeypatch):

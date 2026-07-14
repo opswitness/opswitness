@@ -102,7 +102,15 @@ mail:
   query: "in:inbox is:unread newer_than:14d -in:spam -in:trash"
   max_messages: 20
   timeout_seconds: 30
+  oauth_timeout_seconds: 300
 ```
+
+总控制台的“设置邮箱”会先展示两个独立确认项，然后才允许执行固定命令
+`gws auth login --readonly --services gmail`。成功后必须再次验证固定版本、加密存储、有效
+token 和只读 scope，才会原子写入 `0600` 的 `mail-activation.yaml`。该文件只允许
+`enabled` 与 `model_metadata_consent`，不会重写用户的 `config.yaml`；同一弹窗可将两项
+同时撤销。打开弹窗或勾选确认不会访问 Gmail，只有用户最终点击授权才会打开 Google
+OAuth 页面。
 
 `qd_mail_check` 没有参数，AionUi 因而不能扩大邮箱范围。返回值只有 sender、subject、
 date、message_id；本地 ledger 只保存查询哈希和数量，不保存这些邮件字段。任何审计
@@ -113,9 +121,10 @@ CLI 或第三方异常原文不会进入 ledger/UI，避免异常回显夹带邮
 用于摘要的临时 AionUi Team 必须成功删除后，摘要才会返回给总控制台；无法确认清理时
 整次任务按失败处理，不能把“已生成”冒充成“已安全完成”。
 
-邮件必须使用另一个 Custom Assistant：名称 `邮件回复`，MCP **只启用**
+若使用 AionUi 原生定时任务，邮件必须使用另一个 Custom Assistant：名称 `邮件回复`，MCP **只启用**
 `quarterdeck-mail`。不要同时启用 `quarterdeck`；mail profile 结构上只有 status/check
 两个工具，恶意 sender/subject 因而拿不到 workflow、projector 或其他副作用工具。
+总控制台的按需摘要走独立的临时 tool-free Plan Mode Team，不复用运维 Assistant。
 
 默认定时建议：每天 `09:00`、`America/Los_Angeles`、每次创建新对话，固定 Prompt：
 

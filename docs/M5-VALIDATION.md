@@ -79,6 +79,16 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   run. A hostile failure test makes the summarizer exception echo a private sender and subject;
   neither reaches the returned job nor the ledger, which records only the fixed
   `mail_summary_failed` reason code.
+- The total console now turns the disabled mail control into an explicit local setup dialog. Its
+  two acknowledgements separately cover Gmail readonly OAuth and the four metadata fields sent to
+  the configured AionUi model. The backend accepts only literal true values and can execute only
+  `gws auth login --readonly --services gmail`; it revalidates the pinned version, encrypted
+  credential storage, live token, and readonly scope before activation. A private managed file
+  carries only enable/consent booleans and leaves user `config.yaml` byte-for-byte unchanged.
+  Revocation disables future access even if its audit append fails. Real desktop and 390x844
+  browser acceptance proved one acknowledgement keeps the action disabled and both enable it;
+  the action itself was not clicked, no authorization event was written, and no mailbox was
+  accessed. The full suite passes 261 tests in three consecutive runs.
 - Mail summarization now treats deletion of its temporary AionUi Team as part of success. A
   simulated cleanup failure prevents the summary from being returned and exposes only a fixed
   cleanup error, never the upstream exception or email fields.

@@ -254,6 +254,77 @@ def mail_status(
     return status
 
 
+def authorize_mail(
+    settings: Settings | None = None,
+    *,
+    runner: Runner = _subprocess_runner,
+) -> dict[str, Any]:
+    """Run the one allowed Gmail OAuth flow and verify its least-privilege result.
+
+    This function never reads Gmail. The OAuth command is fixed and its output is not returned.
+    A pre-existing valid encrypted readonly credential is accepted without reopening the browser.
+    """
+    settings = settings or Settings()
+    preflight = mail_status(settings, runner=runner)
+    if preflight.get("available") is not True or preflight.get("version_match") is not True:
+        return {
+            "ok": False,
+            "error": "pinned gws is unavailable; run qd mail status locally",
+            "privacy": "metadata_only",
+        }
+    if preflight.get("authenticated") is True:
+        return {
+            "ok": True,
+            "authenticated": True,
+            "scope_read_only": True,
+            "credential_storage": "encrypted",
+            "privacy": "metadata_only",
+        }
+
+    try:
+        executable = _gws_executable(settings)
+        result = _check_output_size(
+            runner(
+                [
+                    str(executable),
+                    "auth",
+                    "login",
+                    "--readonly",
+                    "--services",
+                    "gmail",
+                ],
+                settings.mail.oauth_timeout_seconds,
+            )
+        )
+    except ValueError:
+        return {
+            "ok": False,
+            "error": "Gmail readonly authorization did not complete",
+            "privacy": "metadata_only",
+        }
+    if result.returncode != 0:
+        return {
+            "ok": False,
+            "error": "Gmail readonly authorization did not complete",
+            "privacy": "metadata_only",
+        }
+
+    verified = mail_status(settings, runner=runner)
+    if verified.get("authenticated") is not True:
+        return {
+            "ok": False,
+            "error": "Gmail credential failed readonly verification",
+            "privacy": "metadata_only",
+        }
+    return {
+        "ok": True,
+        "authenticated": True,
+        "scope_read_only": True,
+        "credential_storage": "encrypted",
+        "privacy": "metadata_only",
+    }
+
+
 def _normalise_messages(raw: Any, maximum: int) -> tuple[list[dict[str, str]], int]:
     if raw is None:
         return [], 0
