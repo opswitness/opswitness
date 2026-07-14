@@ -38,6 +38,9 @@ remaining gates. [READINESS.md](READINESS.md) remains the single operational sna
 - Total-console health now uses the same fail-closed coverage/watchdog/outcome rules as the digest
   over one ledger snapshot. The live metric is `1/1 完整覆盖`; successful historical or on-demand
   runs no longer inflate the number of actively monitored jobs.
+- Approval counts are also fail-closed: only a successful Paperclip query may display zero.
+  Unavailable approval state is rendered separately as unknown/attention rather than “no pending
+  approvals.”
 
 ## Safe remaining sequence
 

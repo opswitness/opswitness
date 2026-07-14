@@ -102,6 +102,11 @@ Status: name-independent release engineering is ready; public release is **NO-GO
   schedules, a successful but unregistered stray job, and projection backlog. The live dashboard
   consequently reports `1/1 完整覆盖` for the sole monitored canary instead of the misleading
   historical-run count `5/5`.
+- A second fail-open presentation path was removed: an unavailable Paperclip approvals query used
+  to be swallowed and rendered as zero pending approvals. The bootstrap response now distinguishes
+  a verified zero from an unavailable query. The latter renders `—` and `审批状态不可用`, marks the
+  Paperclip integration for attention, and never displays `当前无待审批项`. Tests pin both the
+  successful-zero and unavailable branches.
 - The acceptance used the repository virtual environment only. Production `~/.local/bin/qd` and
   every launchd service remained unchanged while the canary time gate continues to accumulate.
   The guarded agent references AionUi's versioned Node/ACP runtime, so every AionUi upgrade must

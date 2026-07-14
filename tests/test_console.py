@@ -17,6 +17,7 @@ from quarterdeck.console.service import (
     _mail_setup_detail,
 )
 from quarterdeck.ledger import Ledger
+from quarterdeck.paperclip import PaperclipError
 
 
 def _plan(execution_mode: str = "aion_team", workflow_id: str | None = None) -> TaskPlan:
@@ -402,8 +403,35 @@ def test_console_dashboard_uses_one_authoritative_ledger_snapshot(monkeypatch, c
     monkeypatch.setattr(
         "quarterdeck.console.service.httpx.get", lambda *args, **kwargs: HealthyResponse()
     )
-    service.dashboard()
+    result = service.dashboard()
     assert reads == 1
+    assert result["approvals_available"] is True
+    assert result["pending_approvals"] == 0
+
+
+def test_console_dashboard_never_reports_zero_when_approvals_are_unavailable(
+    monkeypatch, console_env
+):
+    _, service, _, _ = console_env
+
+    class HealthyResponse:
+        def raise_for_status(self):
+            return None
+
+    class FailingApprovals:
+        def list_approvals(self, status=None):
+            del status
+            raise PaperclipError("approval API unavailable")
+
+    monkeypatch.setattr(
+        "quarterdeck.console.service.httpx.get", lambda *args, **kwargs: HealthyResponse()
+    )
+    monkeypatch.setattr(service, "_paperclip_factory", lambda: FailingApprovals())
+    result = service.dashboard()
+    assert result["pending_approvals"] is None
+    assert result["approvals_available"] is False
+    assert result["integrations"]["paperclip"]["status"] == "attention"
+    assert result["integrations"]["paperclip"]["detail"] == "审批状态不可用"
 
 
 def test_console_requires_csrf_and_serves_built_frontend(console_env, monkeypatch):
@@ -427,6 +455,7 @@ def test_console_requires_csrf_and_serves_built_frontend(console_env, monkeypatc
                 "fleet_healthy": False,
             },
             "pending_approvals": 0,
+            "approvals_available": True,
             "workflows": [],
             "plans": [],
             "recent_runs": [],

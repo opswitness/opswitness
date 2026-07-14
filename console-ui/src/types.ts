@@ -116,7 +116,8 @@ export type Bootstrap = {
     coverage_status: 'full' | 'partial' | 'none';
     fleet_healthy: boolean;
   };
-  pending_approvals: number;
+  pending_approvals: number | null;
+  approvals_available: boolean;
   workflows: Workflow[];
   plans: PlanRecord[];
   recent_runs: RunRecord[];

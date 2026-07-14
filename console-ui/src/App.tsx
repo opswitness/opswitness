@@ -370,10 +370,10 @@ function Dashboard({
         />
         <Metric
           label="待审批"
-          value={String(data.pending_approvals)}
-          detail="Paperclip"
+          value={data.approvals_available ? String(data.pending_approvals ?? 0) : '—'}
+          detail={data.approvals_available ? 'Paperclip' : '状态不可用'}
           icon={ClipboardCheck}
-          tone={data.pending_approvals ? 'warning' : 'neutral'}
+          tone={!data.approvals_available || data.pending_approvals ? 'warning' : 'neutral'}
         />
         <Metric
           label="投影积压"
@@ -416,9 +416,13 @@ function Dashboard({
             <span className="quick-icon"><ShieldCheck size={20} /></span>
             <span>
               <strong>治理状态</strong>
-              <small>{data.pending_approvals ? `${data.pending_approvals} 项等待处理` : '当前无待审批项'}</small>
+              <small>{!data.approvals_available
+                ? 'Paperclip 审批状态不可用'
+                : data.pending_approvals
+                  ? `${data.pending_approvals} 项等待处理`
+                  : '当前无待审批项'}</small>
             </span>
-            <span className={`status-dot ${data.pending_approvals ? 'warning' : 'success'}`} />
+            <span className={`status-dot ${!data.approvals_available || data.pending_approvals ? 'warning' : 'success'}`} />
           </div>
         </section>
       </div>

@@ -656,11 +656,18 @@ class ConsoleService:
             "label": "证据账本",
             "detail": f"待投影 {info['pending_projection']}",
         }
-        pending_approvals = 0
+        pending_approvals: int | None = None
+        approvals_available = False
         try:
             pending_approvals = len(self._paperclip_factory().list_approvals("pending"))
+            approvals_available = True
         except (ConsoleUnavailable, PaperclipError):
-            pass
+            if integrations["paperclip"]["status"] == "online":
+                integrations["paperclip"] = {
+                    **integrations["paperclip"],
+                    "status": "attention",
+                    "detail": "审批状态不可用",
+                }
         try:
             workflows = workflow_catalog()
         except (OSError, ValueError):
@@ -674,6 +681,7 @@ class ConsoleService:
                 **health,
             },
             "pending_approvals": pending_approvals,
+            "approvals_available": approvals_available,
             "workflows": workflows,
             "plans": [row.model_dump(mode="json") for row in self.list_plans(12)],
             "recent_runs": recent_runs,
