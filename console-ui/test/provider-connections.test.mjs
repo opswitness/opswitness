@@ -44,5 +44,5 @@ test('local model dialog has no arbitrary endpoint or API key input', () => {
   );
   assert.doesNotMatch(localDialog, /type="password"/);
   assert.doesNotMatch(localDialog, /placeholder=.*https/);
-  assert.match(localDialog, /Quarterdeck 不接受自定义远程 URL/);
+  assert.match(localDialog, /OpsWitness 不接受自定义远程 URL/);
 });

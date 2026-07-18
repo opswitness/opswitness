@@ -2,7 +2,7 @@ import stat
 import subprocess
 import sys
 
-from quarterdeck.ledger import Ledger
+from opswitness.ledger import Ledger
 
 
 def _mode(path) -> int:
@@ -43,7 +43,7 @@ def test_multiprocess_concurrent_append(tmp_path):
     script = (
         "import sys\n"
         "from pathlib import Path\n"
-        "from quarterdeck.ledger import Ledger\n"
+        "from opswitness.ledger import Ledger\n"
         "led = Ledger(Path(sys.argv[1]))\n"
         "for i in range(30):\n"
         "    assert led.append('tick', f'p{sys.argv[2]}-{i}', {'i': i}) is not None\n"

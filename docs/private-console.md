@@ -1,17 +1,17 @@
 # Private HTTPS, device pairing, and PWA
 
-Quarterdeck stays loopback-only unless `console.exposure: private` is explicitly configured.
+OpsWitness stays loopback-only unless `console.exposure: private` is explicitly configured.
 Private mode has two independent gates:
 
 1. the browser connection must be effective HTTPS on the exact configured host; and
-2. the browser must hold a live, revocable Quarterdeck device credential.
+2. the browser must hold a live, revocable OpsWitness device credential.
 
 A tailnet/LAN connection alone is never authentication. AionUi, Paperclip, and provider CLIs keep
 their loopback addresses in both modes.
 
 ## Recommended: Tailscale Serve
 
-Tailscale Serve keeps Quarterdeck bound to `127.0.0.1`, provisions browser-trusted HTTPS, and
+Tailscale Serve keeps OpsWitness bound to `127.0.0.1`, provisions browser-trusted HTTPS, and
 persists its background proxy across restarts. It is private to the tailnet; do not substitute
 Tailscale Funnel, which is public internet exposure.
 
@@ -23,11 +23,11 @@ console:
   private_transport: trusted_loopback_proxy
   host: 127.0.0.1
   port: 8765
-  public_host: quarterdeck.example-tailnet.ts.net
+  public_host: opswitness.example-tailnet.ts.net
   public_port: 443
 ```
 
-Start/restart Quarterdeck, then configure the private reverse proxy:
+Start/restart OpsWitness, then configure the private reverse proxy:
 
 ```bash
 tailscale serve --bg --https=443 http://127.0.0.1:8765
@@ -41,12 +41,12 @@ replacement, run:
 tailscale serve --https=443 off
 ```
 
-Quarterdeck accepts the proxy's `X-Forwarded-Proto: https` only when the TCP peer is loopback and
+OpsWitness accepts the proxy's `X-Forwarded-Proto: https` only when the TCP peer is loopback and
 the request Host exactly equals `public_host`. Direct LAN callers cannot spoof that boundary.
 
 ## Alternative: direct TLS
 
-Direct mode binds Quarterdeck to a private IP or wildcard and requires a matching SAN certificate.
+Direct mode binds OpsWitness to a private IP or wildcard and requires a matching SAN certificate.
 The private key must be a regular, non-symlink file with no group/world permissions. Startup loads
 the certificate/key pair, rejects expired or not-yet-valid certificates, and verifies the exact
 configured DNS/IP SAN before opening the listener.
@@ -57,19 +57,19 @@ console:
   private_transport: direct_tls
   host: 100.100.101.102
   port: 8765
-  public_host: quarterdeck.example-tailnet.ts.net
-  tls_certfile: /Users/you/.config/quarterdeck/tls/quarterdeck.crt
-  tls_keyfile: /Users/you/.config/quarterdeck/tls/quarterdeck.key
+  public_host: opswitness.example-tailnet.ts.net
+  tls_certfile: /Users/you/.config/opswitness/tls/opswitness.crt
+  tls_keyfile: /Users/you/.config/opswitness/tls/opswitness.key
 ```
 
 Tailscale can issue the files, but file-based certificates require renewal:
 
 ```bash
 tailscale cert \
-  --cert-file=/Users/you/.config/quarterdeck/tls/quarterdeck.crt \
-  --key-file=/Users/you/.config/quarterdeck/tls/quarterdeck.key \
-  quarterdeck.example-tailnet.ts.net
-chmod 600 /Users/you/.config/quarterdeck/tls/quarterdeck.key
+  --cert-file=/Users/you/.config/opswitness/tls/opswitness.crt \
+  --key-file=/Users/you/.config/opswitness/tls/opswitness.key \
+  opswitness.example-tailnet.ts.net
+chmod 600 /Users/you/.config/opswitness/tls/opswitness.key
 ```
 
 ## Pair and revoke devices

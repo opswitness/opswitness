@@ -2,18 +2,37 @@
 
 > Run long-lived AI work with approvals, evidence, and recoverable execution.
 
-Quarterdeck is the **trust / evidence bridge** in a five-layer stack. It is not the
+OpsWitness is the **trust / evidence bridge** in a five-layer stack. It is not the
 control plane (that's [Paperclip](https://github.com/paperclipai/paperclip), bought not
 built), and not an executor (your launchd jobs and coding agents stay untouched). It also
 ships a thin local operator console, but that console delegates rather than becoming a
 second control plane. The bridge remains the one layer nothing else can replace: the place
 where ungoverned reality gets connected to governance, with the evidence held locally.
 
+## Community Alpha identity and compatibility
+
+`v0.1.0-alpha.1` uses `OpsWitness` for the product and `opswitness` for the distribution,
+Python module, repository, and primary CLI. `qd` remains the same CLI entry point through at least
+`v0.2.0`. Canonical `OPSWITNESS_*` variables coexist with `QD_*` compatibility aliases; conflicting
+values fail closed. Fresh installs use OpsWitness roots and `com.opswitness.*` services. A machine
+with only the former roots or `com.quarterdeck.*` services continues in place, while simultaneous
+old/new roots or matching services are treated as an operator-visible ambiguity.
+
+Brand migration never rewrites the authority it is supposed to protect. Ledger and lifecycle
+events, CAS bytes, plan/artifact hashes, old protocol markers, and historical external identifiers
+remain immutable. The former Python import package is intentionally not retained because it was not
+publicly released.
+
+The Community Alpha contract covers the local single-operator core. Private HTTPS, device pairing,
+and PWA are Beta; Gmail and Telegram are default-off Experimental integrations. OpenClaw,
+Work-as-worker/team-of-teams, auditable long-term memory, DeepSeek/Grok execution adapters, SaaS,
+and multi-user identity are excluded from this release.
+
 ## Product position
 
 > **本地优先的 AI Workforce 总工作台：把已有的 Claude、Codex、AionUi、Paperclip 和自动化任务，变成一个可规划、可确认、可看见、可审计的团队。**
 
-This is a product-door statement, not a claim that Quarterdeck replaces every layer underneath it.
+This is a product-door statement, not a claim that OpsWitness replaces every layer underneath it.
 The local-first console is the one ordinary place where an operator can describe an outcome, review
 the proposed task plan and reporting hierarchy, confirm the immutable plan hash, watch active
 work, graphically set bounded collaboration loops, make task-bound approval decisions inline, and read evidence-backed
@@ -35,10 +54,10 @@ defaults its product chrome to English, and keeps the optional English/中文 pr
 so language selection cannot mutate plans, hashes, governance state, or evidence. It delegates
 planning and execution to AionUi and other replaceable adapters, governance state to Paperclip, and retains
 only the evidence boundary locally. Users should not need to routinely operate Paperclip or AionUi
-to use Quarterdeck; advanced diagnostics may reveal those adapters when troubleshooting requires it.
+to use OpsWitness; advanced diagnostics may reveal those adapters when troubleshooting requires it.
 The default exposure remains loopback. An explicitly configured private HTTPS surface may be used
 from Safari or Chrome only after device pairing; this changes the product door, not the internal
-adapter boundary. AionUi and Paperclip remain unreachable through Quarterdeck's network listener.
+adapter boundary. AionUi and Paperclip remain unreachable through OpsWitness's network listener.
 
 The Work overview's live-progress surface is a bounded projection of public adapter telemetry, not a
 second workflow state machine. It refreshes the active execution every 2.5 seconds and may expose an
@@ -49,10 +68,10 @@ public verifiable stage primitive, the stage list is the confirmed plan order ra
 claim; outcome status remains owned by artifacts, evals, and sign-off.
 
 The Work **History** surface is a projection of the immutable plan/run chain, not a mutable chat log.
-For an ended Aion run, Quarterdeck may continue the exact mapped team and conversations as a new
+For an ended Aion run, OpsWitness may continue the exact mapped team and conversations as a new
 child run. The new child's parent is the current Work leaf, while `continued_from_plan_id` and the
 source plan hash bind the operator-selected historical run. The follow-up body crosses only the
-local Aion adapter; Quarterdeck persists its hash and lifecycle metadata, not the body. A new plan
+local Aion adapter; OpsWitness persists its hash and lifecycle metadata, not the body. A new plan
 hash, governance issue, and append-only requested/delivered/dispatched evidence are mandatory before
 the child becomes running. Missing identity, active Work, lost un-reconciled delivery, Paperclip
 failure, or unsupported workflow execution fails closed with no fallback runtime. Because the Aion
@@ -78,7 +97,7 @@ does not rewrite the plan or hash. Startup recovery folds an incomplete transiti
 restrictive old/new mode.
 
 In `manual_all`, the actionable approval card is exposed only on the Work item whose locally
-validated `plan_id` matches the Quarterdeck-created Aion approval payload. Approve/reject, the
+validated `plan_id` matches the OpsWitness-created Aion approval payload. Approve/reject, the
 optional note, and the explicit review acknowledgement remain in that task's attention surface;
 the global Approval view is an aggregate queue, not a required navigation hop. A decided card is
 removed before the same Work item resumes or presents its next bounded input request.
@@ -90,13 +109,13 @@ confirmation. Approval/input waits cannot be resumed by the lifecycle control. E
 second confirmation and remains pending until Aion proves the run inactive or terminal.
 
 When required task data is missing, the running AionUi team may create one bounded
-`qd_request_input`. Quarterdeck stores the question only in the private plan record and stores its
+`qd_request_input`. OpsWitness stores the question only in the private plan record and stores its
 hash in the append-only ledger. The operator's answer is likewise hash-audited, tagged for
 idempotent reconciliation, and sent back to the same confirmed team. This is a resumable input
 channel, not a new planner, chat history, or permission to expand the confirmed plan.
 
 The distinction is essential: Paperclip remains the bought control plane, AionUi and vendor CLIs
-remain execution adapters, and Quarterdeck remains the local trust/evidence bridge plus the simple
+remain execution adapters, and OpsWitness remains the local trust/evidence bridge plus the simple
 operator experience. It does not become a second scheduler, generic workflow engine, agent runtime,
 or mutable employee directory.
 
@@ -117,7 +136,7 @@ flowchart BT
         E3["Codex (exec, sandbox)"]
         E4["LangGraph pipelines"]
     end
-    subgraph Q["★ Quarterdeck — trust / evidence bridge (this repo)"]
+    subgraph Q["★ OpsWitness — trust / evidence bridge (this repo)"]
         Q1["qd wrap + local ledger"]
         Q2["projector (commit order, fail-stop)"]
         Q3["watchdog + digest (fail-closed)"]
@@ -133,7 +152,7 @@ flowchart BT
         A2["OpenAI / Anthropic vendor login CLIs"]
     end
     subgraph C["Operator surface"]
-        C0["Quarterdeck console<br/>(workspace · today · tasks · teams · history · connections)"]
+        C0["OpsWitness console<br/>(workspace · today · tasks · teams · history · connections)"]
         C1["qd CLI + Telegram fallback"]
     end
     subgraph V["Vertical case layer (P5, paid)"]
@@ -182,13 +201,13 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
    vertical case layer, where the curated rules corpus is itself the paid content —
    shape defined in [ADR-0002](adr/0002-knowledge-layer.md): deterministic-first split,
    markdown vault as source, structured-first retrieval, verifiable citations.
-7. **A workflow button is an allowlisted launch, never a remote shell.** Quarterdeck owns the
-   visible task action; AionUi may execute it as a hidden adapter. Quarterdeck accepts only an exact id from a local `0600`
+7. **A workflow button is an allowlisted launch, never a remote shell.** OpsWitness owns the
+   visible task action; AionUi may execute it as a hidden adapter. OpsWitness accepts only an exact id from a local `0600`
    manifest, then enforces fixed argv, no runtime parameters, single-workflow concurrency,
    a detached supervisor, and fsync-before-exec dispatch order. See
    [ADR-0004](adr/0004-allowlisted-workflow-launch.md).
 8. **Mailbox content is untrusted external data.** The hidden planning adapter can invoke only one fixed,
-   administrator-owned metadata query. Quarterdeck persists `mail_check_requested` before
+   administrator-owned metadata query. OpsWitness persists `mail_check_requested` before
    access and `mail_check_finished` before returning sender/subject/date/message-id fields;
    neither event stores those fields. No body, draft, send, delete, label mutation, or runtime
    query exists in the CLI or MCP surface. The normal 13-tool MCP excludes mail entirely;
@@ -206,7 +225,7 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
    failure remains failed until a reasoned append-only reset; checkpoints never become a
    second truth source. See [ADR-0006](adr/0006-append-only-soak-gates.md).
 10. **Planning and execution are separate state transitions.** New general work is drafted
-    by an ephemeral AionUi team in Plan Mode, without tools. Quarterdeck validates the strict
+    by an ephemeral AionUi team in Plan Mode, without tools. OpsWitness validates the strict
     plan schema and records only request/plan hashes in the ledger. A Paperclip issue and an
     AionUi execution team or allowlisted workflow can be created only after a human confirms
     the exact plan hash. Plan modification is append-only: a child version binds the immutable
@@ -215,19 +234,19 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
     append-only: one `task_plan_deleted` tombstone hides an inert plan while its private record and
     evidence remain intact. Active work cannot be deleted, and version parents require child-first
     deletion. Task adjustments are chat-first: an operator describes the intended change, including
-    a bounded collaboration-loop change, and Quarterdeck creates a fresh plan revision for review.
+    a bounded collaboration-loop change, and OpsWitness creates a fresh plan revision for review.
     The Team tab inside the unified Work view folds each plan into one acyclic reporting tree and a separate set of
     bounded collaboration loops; its direct editor is an explicit advanced path for precise manual
     edits. Organization edits create hash-bound child versions and pass the effective hierarchy plus
     loop contracts to Paperclip governance and AionUi execution;
-    Quarterdeck stores no second employee directory. The current AionUi adapter has no verifiable
+    OpsWitness stores no second employee directory. The current AionUi adapter has no verifiable
     round-limit primitive, so these loops are plan-level constraints rather than runtime proof.
     Completion remains `completed_unverified` until outcome evidence exists. A runtime or model
     change is a structured child-plan revision: every Agent's runtime and model id are validated
     against sanitized local capability state, receive a fresh plan hash, and cannot silently
     downgrade or fall back at execution time. Exact ids, rolling aliases, and the runtime default
     remain visibly distinct. Runtime control follows the same evidence-first rule. For Aion team
-    executions, Quarterdeck fsyncs pause/resume/cancel requests before calling the public adapter
+    executions, OpsWitness fsyncs pause/resume/cancel requests before calling the public adapter
     API. Pause is accepted only after all active slots report paused; resume binds a fixed marker
     to the same confirmed plan; cancel remains requested until the exact run is observed inactive
     or terminal. These controls are not shown for workflow adapters that cannot prove equivalent
@@ -243,14 +262,14 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
     existing `0600` secret boundary, serializes configuration changes, and exposes only a fixed
     test message behind a separate confirmation. Credentials never enter ledger events or API
     responses; environment-managed values cannot be replaced from the UI.
-12. **Quarterdeck is the only ordinary product door.** Provider login, task planning, approval
+12. **OpsWitness is the only ordinary product door.** Provider login, task planning, approval
     decisions, and evidence review stay in the loopback console. AionUi and Paperclip are named
     only in advanced diagnostics and remain replaceable adapters. Vendor credentials stay with
-    vendor-owned CLI login flows; Quarterdeck receives only sanitized status.
+    vendor-owned CLI login flows; OpsWitness receives only sanitized status.
 
 ## Necessity and shrinkability
 
-Quarterdeck exists because of three verified gaps, no more:
+OpsWitness exists because of three verified gaps, no more:
 
 | Gap | Verified how |
 |---|---|
@@ -274,13 +293,13 @@ agents/routines. Scheduling stays with launchd (launchd intervals are elapsed-ti
 cron is calendar-aligned — they are not translatable); the approval **workflow state** stays with
 Paperclip while the visible decision UI and **authoritative approval evidence**
 (request hash, tool_use_id, expiry, approval id, decision, decider, resume/consume
-outcome) stay in Quarterdeck and the local ledger — law 1 admits no exception: if Paperclip loses its
+outcome) stay in OpsWitness and the local ledger — law 1 admits no exception: if Paperclip loses its
 database, pending calls stay denied and every past decision remains locally auditable;
 sessions stay with the agent CLIs. Version 1 records the local single-user actor as
 `local_console`; it does not claim multi-user or remote identity assurance.
 
 AionUi's native Manual Scheduled Task remains an advanced adapter test surface, not an operator
-requirement. Quarterdeck builds no DAG editor or workflow runtime. Its local console is the one
+requirement. OpsWitness builds no DAG editor or workflow runtime. Its local console is the one
 composition surface for daily operations, approvals, connections, and new-task plan review; confirmed execution is
 delegated to AionUi teams or to fixed asynchronous MCP launches whose requested/dispatched/run
 events share one run id. Internal workflow orchestration stays with the registered command (for
@@ -289,14 +308,14 @@ example LangGraph).
 The standalone Paperclip MCP is deliberately not mounted in AionUi. Its pinned
 v2026.707.0 surface includes approval decisions, other mutations, and a general `/api`
 escape hatch, with no documented read-only mode or scoped read-only token. Prompt-level
-instructions are not an authorization boundary. Quarterdeck therefore exposes only a fixed
+instructions are not an authorization boundary. OpsWitness therefore exposes only a fixed
 approve/reject facade over the Paperclip API and keeps the general Paperclip MCP unavailable to
 the model. On the pinned loopback-only `local_trusted` deployment, that facade verifies the health
 deployment mode and uses Paperclip's implicit local board actor only for the fixed decision call;
-ordinary projection calls retain the service-agent token. AionUi receives Quarterdeck's
+ordinary projection calls retain the service-agent token. AionUi receives OpsWitness's
 evidence-oriented MCP surface.
 
-## Entry doctrine: Quarterdeck is the door
+## Entry doctrine: OpsWitness is the door
 
 Two kinds of doors, two opposite rules:
 
@@ -326,20 +345,20 @@ paid users ultimately see the vertical workbench, not the generic operations sur
 
 | Module | Path | Status |
 |---|---|---|
-| ledger (outbox + write protocol) | `src/quarterdeck/ledger.py`, `fsutil.py` | ✅ P2 |
-| wrap runner (tee, bounded process-tree signals, mirroring) | `src/quarterdeck/wrap/runner.py`, `process_tree.py` | ✅ P2 |
-| projector (issues/comments, reconciliation) | `src/quarterdeck/projector.py`, `paperclip.py` | ✅ P2 |
-| index (disposable SQLite) | `src/quarterdeck/index.py` | ✅ P2 |
-| watchdog / digest / coverage | `src/quarterdeck/watchdog.py`, `digest.py`, `schedules.py` | ✅ P2 |
-| job lifecycle | `src/quarterdeck/lifecycle.py` | ✅ P2 |
-| canary / soak evidence gate | `src/quarterdeck/soak.py` | ✅ append-only contract + CLI |
-| bootstrap (candidates, two-file model) | `src/quarterdeck/bootstrap.py` | ✅ P2 |
-| adopt (dry-run plist wrapping) | `src/quarterdeck/adopt.py` | ✅ P2 (`--apply` gated on install) |
-| MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ 13-tool ops (including safe package metadata and bounded operator input) + isolated 2-tool mail profile |
-| allowlisted workflow launcher | `src/quarterdeck/workflows.py`, `workflow_worker.py` | ✅ code + tests + live AionUi one-click acceptance |
-| metadata-only mail monitor | `src/quarterdeck/mail.py`, `console/`, `console-ui/` | ✅ adapter + setup/revoke UI; live OAuth and AionUi schedule pending |
-| local operator console | `src/quarterdeck/console/`, `console-ui/` | ✅ sole operator surface + default Workspace chatbox with presets/templates/blueprints + optional Today + unified Work details + immutable runtime revisions + independent hash-bound Work forks + evidence-only member observation, bounded live activity, and plan-bound AionUi team-task stage telemetry + evidence-first Aion pause/continue/terminate controls + provider account/Console login, one-time OpenAI CLI stdin handoff, Anthropic Keychain + apiKeyHelper, DeepSeek/xAI Keychain connections, official Grok account flow, and fixed-loopback Ollama/LM Studio discovery plus hidden AionUi registration + planning/progress + graphical hierarchy/bounded loops + ledger-folded run history + approval facade + Gmail/Telegram + responsive UI; real run-control acceptance, DeepSeek/Grok execution adapters, local-model live acceptance, and production canary remain pending |
-| install doctor / secure services / disaster recovery | `src/quarterdeck/doctor.py`, `service.py`, `backup.py` | ✅ five secret-free templates + installed-command drift check; soak pending |
+| ledger (outbox + write protocol) | `src/opswitness/ledger.py`, `fsutil.py` | ✅ P2 |
+| wrap runner (tee, bounded process-tree signals, mirroring) | `src/opswitness/wrap/runner.py`, `process_tree.py` | ✅ P2 |
+| projector (issues/comments, reconciliation) | `src/opswitness/projector.py`, `paperclip.py` | ✅ P2 |
+| index (disposable SQLite) | `src/opswitness/index.py` | ✅ P2 |
+| watchdog / digest / coverage | `src/opswitness/watchdog.py`, `digest.py`, `schedules.py` | ✅ P2 |
+| job lifecycle | `src/opswitness/lifecycle.py` | ✅ P2 |
+| canary / soak evidence gate | `src/opswitness/soak.py` | ✅ append-only contract + CLI |
+| bootstrap (candidates, two-file model) | `src/opswitness/bootstrap.py` | ✅ P2 |
+| adopt (dry-run plist wrapping) | `src/opswitness/adopt.py` | ✅ P2 (`--apply` gated on install) |
+| MCP console surface | `src/opswitness/mcp_server.py` | ✅ 13-tool ops (including safe package metadata and bounded operator input) + isolated 2-tool mail profile |
+| allowlisted workflow launcher | `src/opswitness/workflows.py`, `workflow_worker.py` | ✅ code + tests + live AionUi one-click acceptance |
+| metadata-only mail monitor | `src/opswitness/mail.py`, `console/`, `console-ui/` | ✅ adapter + setup/revoke UI; live OAuth and AionUi schedule pending |
+| local operator console | `src/opswitness/console/`, `console-ui/` | ✅ sole operator surface + default Workspace chatbox with presets/templates/blueprints + optional Today + unified Work details + immutable runtime revisions + independent hash-bound Work forks + evidence-only member observation, bounded live activity, and plan-bound AionUi team-task stage telemetry + evidence-first Aion pause/continue/terminate controls + provider account/Console login, one-time OpenAI CLI stdin handoff, Anthropic Keychain + apiKeyHelper, DeepSeek/xAI Keychain connections, official Grok account flow, and fixed-loopback Ollama/LM Studio discovery plus hidden AionUi registration + planning/progress + graphical hierarchy/bounded loops + ledger-folded run history + approval facade + Gmail/Telegram + responsive UI; real run-control acceptance, DeepSeek/Grok execution adapters, local-model live acceptance, and production canary remain pending |
+| install doctor / secure services / disaster recovery | `src/opswitness/doctor.py`, `service.py`, `backup.py` | ✅ five secret-free templates + installed-command drift check; soak pending |
 | gate (PreToolUse `defer` → Paperclip approval → resume) | `gate.py`, `gated_claude.py` | ✅ M3 code + two live approval/resume drills |
 | artifacts (ledger events + content-addressed projection) | `artifacts.py`, `index.py` | ✅ M4 code + live projection |
 | vertical case packs | separate private repo | P5 |

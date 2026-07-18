@@ -3,9 +3,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from typer.testing import CliRunner
 
-from quarterdeck.cli import app
-from quarterdeck.ledger import Ledger
-from quarterdeck.soak import (
+from opswitness.cli import app
+from opswitness.ledger import Ledger
+from opswitness.soak import (
     evaluate_ledger_soak,
     evaluate_soak,
     record_checkpoint,
@@ -335,9 +335,9 @@ def test_checkpoint_is_append_only_snapshot_and_write_failure_is_fatal(tmp_path,
 
 
 def test_soak_cli_start_status_and_reasoned_reset(tmp_path, monkeypatch):
-    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "ledger"))
-    monkeypatch.setenv("QD_CONFIG_DIR", str(tmp_path / "config"))
-    monkeypatch.setattr("quarterdeck.cli._effective_soak_schedules", lambda: [_schedule()])
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(tmp_path / "ledger"))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr("opswitness.cli._effective_soak_schedules", lambda: [_schedule()])
     runner = CliRunner()
 
     started = runner.invoke(
@@ -369,9 +369,9 @@ def test_soak_cli_start_status_and_reasoned_reset(tmp_path, monkeypatch):
 
 
 def test_unknown_soak_and_invalid_name_are_configuration_errors(tmp_path, monkeypatch):
-    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "ledger"))
-    monkeypatch.setenv("QD_CONFIG_DIR", str(tmp_path / "config"))
-    monkeypatch.setattr("quarterdeck.cli._effective_soak_schedules", lambda: [_schedule()])
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(tmp_path / "ledger"))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr("opswitness.cli._effective_soak_schedules", lambda: [_schedule()])
     runner = CliRunner()
     unknown = runner.invoke(app, ["soak", "status", "missing"])
     invalid = runner.invoke(

@@ -8,9 +8,9 @@ import respx
 from httpx import Response
 from typer.testing import CliRunner
 
-from quarterdeck.cli import app
-from quarterdeck.config import Settings
-from quarterdeck.gate import (
+from opswitness.cli import app
+from opswitness.config import Settings
+from opswitness.gate import (
     fold_gate_states,
     handle_post_tool_use,
     handle_pre_tool_use,
@@ -18,7 +18,7 @@ from quarterdeck.gate import (
     record_linked,
     request_hash,
 )
-from quarterdeck.gated_claude import (
+from opswitness.gated_claude import (
     _approval_for_request,
     _claude_command,
     gate_settings_payload,
@@ -28,9 +28,9 @@ from quarterdeck.gated_claude import (
     validate_claude,
     validate_user_args,
 )
-from quarterdeck.ledger import Ledger
-from quarterdeck.paperclip import PaperclipClient
-from quarterdeck.paperclip import PaperclipError
+from opswitness.ledger import Ledger
+from opswitness.paperclip import PaperclipClient
+from opswitness.paperclip import PaperclipError
 
 
 def _hook(**overrides):
@@ -53,7 +53,7 @@ def _decision(response):
 def _settings(tmp_path: Path, monkeypatch) -> Settings:
     config = tmp_path / "config"
     config.mkdir(mode=0o700)
-    monkeypatch.setenv("QD_CONFIG_DIR", str(config))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(config))
     fake_qd = tmp_path / "qd"
     fake_qd.write_text("#!/bin/sh\n")
     fake_qd.chmod(0o700)
@@ -282,7 +282,7 @@ def test_supervisor_defer_link_decide_resume_and_execute(tmp_path, monkeypatch):
             result = {"type": "result", "stop_reason": "end_turn", "result": "done"}
         return subprocess.CompletedProcess(command, 0, json.dumps(result), "")
 
-    import quarterdeck.gated_claude as supervisor
+    import opswitness.gated_claude as supervisor
 
     monkeypatch.setattr(supervisor, "validate_claude", lambda _settings: settings.gate.claude_bin)
     monkeypatch.setattr(supervisor, "_client", lambda _settings: _ApprovalClient())
@@ -319,7 +319,7 @@ def test_recovery_marks_resume_without_hook_consumption_failed(tmp_path, monkeyp
         result = {"type": "result", "is_error": True, "result": "MCP tool unavailable"}
         return subprocess.CompletedProcess(command, 0, json.dumps(result), "")
 
-    import quarterdeck.gated_claude as supervisor
+    import opswitness.gated_claude as supervisor
 
     monkeypatch.setattr(supervisor, "validate_claude", lambda _settings: settings.gate.claude_bin)
     monkeypatch.setattr(supervisor, "_client", lambda _settings: _ApprovalClient())
@@ -336,7 +336,7 @@ def test_recovery_expires_without_creating_or_resuming_approval(tmp_path, monkey
     old = datetime.now(UTC) - timedelta(minutes=2)
     handle_pre_tool_use(ledger, _hook(cwd=str(tmp_path)), ttl_seconds=1, now=old)
 
-    import quarterdeck.gated_claude as supervisor
+    import opswitness.gated_claude as supervisor
 
     monkeypatch.setattr(supervisor, "validate_claude", lambda _settings: settings.gate.claude_bin)
     monkeypatch.setattr(supervisor, "_client", lambda _settings: _ApprovalClient())
@@ -361,7 +361,7 @@ def test_recovery_never_replays_consumed_call_without_outcome(tmp_path, monkeypa
         )
     ) == "allow"
 
-    import quarterdeck.gated_claude as supervisor
+    import opswitness.gated_claude as supervisor
 
     monkeypatch.setattr(supervisor, "validate_claude", lambda _settings: settings.gate.claude_bin)
     monkeypatch.setattr(supervisor, "_client", lambda _settings: _ApprovalClient())
@@ -385,7 +385,7 @@ def test_parallel_defer_not_returned_is_closed_without_approval(tmp_path, monkey
         }
         return subprocess.CompletedProcess(command, 0, json.dumps(result), "")
 
-    import quarterdeck.gated_claude as supervisor
+    import opswitness.gated_claude as supervisor
 
     monkeypatch.setattr(supervisor, "validate_claude", lambda _settings: settings.gate.claude_bin)
     monkeypatch.setattr(supervisor, "_client", lambda _settings: _ApprovalClient())
@@ -412,7 +412,7 @@ def test_parallel_cleanup_never_closes_another_claude_session(tmp_path, monkeypa
         result = {"type": "result", "stop_reason": "end_turn", "session_id": "session-1"}
         return subprocess.CompletedProcess(command, 0, json.dumps(result), "")
 
-    import quarterdeck.gated_claude as supervisor
+    import opswitness.gated_claude as supervisor
 
     monkeypatch.setattr(supervisor, "validate_claude", lambda _settings: settings.gate.claude_bin)
     monkeypatch.setattr(supervisor, "_client", lambda _settings: _ApprovalClient())
@@ -425,7 +425,7 @@ def test_parallel_cleanup_never_closes_another_claude_session(tmp_path, monkeypa
 
 def test_gate_hook_cli_returns_structured_defer_and_malformed_deny(tmp_path, monkeypatch):
     _settings(tmp_path, monkeypatch)
-    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "cli-ledger"))
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(tmp_path / "cli-ledger"))
     result = CliRunner().invoke(app, ["gate", "hook"], input=json.dumps(_hook()))
     assert result.exit_code == 0
     assert _decision(json.loads(result.output)) == "defer"

@@ -10,14 +10,14 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from quarterdeck.config import Settings
-from quarterdeck.console.access import (
+from opswitness.config import Settings
+from opswitness.console.access import (
     console_local_origins,
     console_public_origins,
     validate_private_tls,
 )
-from quarterdeck.console.app import create_app
-from quarterdeck.console.pairing import (
+from opswitness.console.app import create_app
+from opswitness.console.pairing import (
     DevicePairingStore,
     InvalidPairingCode,
     PAIRING_COOKIE,
@@ -27,10 +27,10 @@ from quarterdeck.console.pairing import (
 
 
 @pytest.fixture(autouse=True)
-def _isolate_quarterdeck_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_opswitness_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_root = tmp_path / "config"
     config_root.mkdir(mode=0o700)
-    monkeypatch.setenv("QD_CONFIG_DIR", str(config_root))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(config_root))
 
 
 class _ConsoleService:

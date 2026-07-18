@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import {
   DEFAULT_UI_LANGUAGE,
+  LEGACY_UI_LANGUAGE_STORAGE_KEY,
   resolveUiLanguage,
   translateUi,
   UI_LANGUAGE_STORAGE_KEY,
@@ -21,7 +22,10 @@ const LanguageContext = createContext<LanguageContextValue>({
 
 function storedLanguage(): UiLanguage {
   try {
-    return resolveUiLanguage(window.localStorage.getItem(UI_LANGUAGE_STORAGE_KEY));
+    const canonical = window.localStorage.getItem(UI_LANGUAGE_STORAGE_KEY);
+    return resolveUiLanguage(
+      canonical ?? window.localStorage.getItem(LEGACY_UI_LANGUAGE_STORAGE_KEY),
+    );
   } catch {
     return DEFAULT_UI_LANGUAGE;
   }

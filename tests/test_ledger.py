@@ -1,6 +1,6 @@
 import json
 
-from quarterdeck.ledger import Ledger
+from opswitness.ledger import Ledger
 
 
 def test_append_and_read_roundtrip(tmp_path):

@@ -6,10 +6,10 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from quarterdeck.cli import app
-from quarterdeck.config import Settings
-from quarterdeck.ledger import Ledger
-from quarterdeck.mail import (
+from opswitness.cli import app
+from opswitness.config import Settings
+from opswitness.ledger import Ledger
+from opswitness.mail import (
     GMAIL_READONLY_SCOPE,
     MAX_GWS_OUTPUT_BYTES,
     CommandResult,
@@ -80,7 +80,7 @@ def _settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **mail: object) -
     _write_oauth_client(home)
     config = tmp_path / "config"
     config.mkdir(mode=0o700)
-    monkeypatch.setenv("QD_CONFIG_DIR", str(config))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(config))
     gws = tmp_path / "bin" / "gws"
     gws.parent.mkdir()
     gws.write_text("#!/bin/sh\nexit 0\n")
@@ -432,7 +432,7 @@ def test_subprocess_runner_hides_startup_oserror(monkeypatch):
     def fail(*args, **kwargs):
         raise OSError("private executable path")
 
-    monkeypatch.setattr("quarterdeck.mail.subprocess.Popen", fail)
+    monkeypatch.setattr("opswitness.mail.subprocess.Popen", fail)
     with pytest.raises(ValueError, match="^gws command could not be executed$"):
         _subprocess_runner(["/private/path/gws", "--version"], 1)
 
@@ -513,7 +513,7 @@ def test_check_mail_uses_only_fixed_query_and_keeps_metadata_out_of_ledger(tmp_p
 
 def test_check_mail_does_not_access_gmail_without_requested_evidence(tmp_path, monkeypatch):
     settings = _settings(tmp_path, monkeypatch)
-    monkeypatch.setattr("quarterdeck.mail.Ledger.append", lambda *args, **kwargs: None)
+    monkeypatch.setattr("opswitness.mail.Ledger.append", lambda *args, **kwargs: None)
 
     def forbidden_runner(argv: list[str], timeout: float) -> CommandResult:
         pytest.fail("Gmail must not be accessed when requested evidence cannot be persisted")
@@ -533,7 +533,7 @@ def test_check_mail_withholds_metadata_when_finished_evidence_is_lost(tmp_path, 
         calls += 1
         return original(ledger, *args, **kwargs) if calls == 1 else None
 
-    monkeypatch.setattr("quarterdeck.mail.Ledger.append", append)
+    monkeypatch.setattr("opswitness.mail.Ledger.append", append)
     result = check_mail(
         settings=settings,
         runner=_ready_runner(
@@ -642,11 +642,11 @@ def test_check_mail_rejects_more_results_than_requested(tmp_path, monkeypatch):
 def test_mail_cli_exposes_status_and_check_without_query_arguments(tmp_path, monkeypatch):
     _settings(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "quarterdeck.mail.mail_status",
+        "opswitness.mail.mail_status",
         lambda settings: {"ready": True, "privacy": "metadata_only"},
     )
     monkeypatch.setattr(
-        "quarterdeck.mail.check_mail",
+        "opswitness.mail.check_mail",
         lambda **kwargs: {"ok": True, "privacy": "metadata_only", "messages": []},
     )
 

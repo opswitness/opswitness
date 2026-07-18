@@ -108,6 +108,7 @@ import {
 } from './execution-progress.js';
 import { useLanguage } from './language';
 import type { UiLanguage } from './i18n.js';
+import { APP_VERSION } from './version';
 import {
   currentWorkItem,
   latestWorkItems,
@@ -532,7 +533,7 @@ function App() {
       <main className="main-area">
         <header className="topbar">
           <div className="topbar-title">
-            <span className="eyebrow">QUARTERDECK</span>
+            <span className="eyebrow">OPSWITNESS · v{APP_VERSION}</span>
             <h1>{title}</h1>
           </div>
           <div className="topbar-actions">
@@ -822,7 +823,7 @@ function Sidebar({
   ];
   return (
     <aside className="sidebar" aria-label={t('主导航')}>
-      <div className="brand-mark" aria-label="Quarterdeck">QD</div>
+      <div className="brand-mark" aria-label="OpsWitness">OW</div>
       <nav>
         {items.map(({ id, label, icon: Icon }) => (
           <button
@@ -1503,7 +1504,7 @@ function WorkspaceView({
               <div className="chat-avatar assistant-avatar"><Bot size={17} /></div>
               <div className="chat-assistant-content">
                 <div className="chat-assistant-heading">
-                  <strong>Quarterdeck</strong>
+                  <strong>OpsWitness</strong>
                   <StatusBadge status={record.status} />
                 </div>
                 {record.status === 'planning' && (
@@ -2101,7 +2102,7 @@ function WorkView({
           <div className="work-empty compact-empty">
             <ListTodo size={26} />
             <strong>{t('还没有工作')}</strong>
-            <span>{t('描述一个目标，Quarterdeck 会先生成团队和计划。')}</span>
+            <span>{t('描述一个目标，OpsWitness 会先生成团队和计划。')}</span>
             <button className="secondary-button" type="button" onClick={onNew}><Plus size={16} />{t('创建第一项工作')}</button>
           </div>
         )}
@@ -2399,7 +2400,7 @@ function WorkView({
                             <MessageSquare size={18} />
                             <div>
                               <strong>{t('继续和这次运行交互')}</strong>
-                              <span>{t('消息正文只进入本机 Aion 会话；Quarterdeck 账本只保存哈希。')}</span>
+                              <span>{t('消息正文只进入本机 Aion 会话；OpsWitness 账本只保存哈希。')}</span>
                             </div>
                           </div>
                           <textarea
@@ -3649,10 +3650,10 @@ function ConnectionsView({
               : job.provider === 'xai' && job.method === 'api_key'
                 ? t('正在验证 xAI API Key，并将其保存到本机 macOS Keychain。')
               : job.provider === 'xai'
-                ? t('请在官方 xAI 页面完成 Grok 账户登录；Quarterdeck 不会读取登录凭据。')
+                ? t('请在官方 xAI 页面完成 Grok 账户登录；OpsWitness 不会读取登录凭据。')
               : job.provider === 'anthropic' && job.method === 'api'
                 ? t('请在已打开的 Anthropic Console 页面完成 API 登录。')
-                : t('请在厂商打开的页面完成登录；Quarterdeck 不会读取登录凭据。')}
+                : t('请在厂商打开的页面完成登录；OpsWitness 不会读取登录凭据。')}
           </div>
         )}
         {job?.status === 'failed' && <InlineError text={job.error || t('登录未完成')} />}
@@ -3796,7 +3797,7 @@ function LocalProviderDialog({
         <div className="mail-setup-content">
           <div className="privacy-summary">
             <strong>{t('只在这台 Mac 上运行')}</strong>
-            <span>{t('模型请求只走固定的本机回环地址。Quarterdeck 不接受自定义远程 URL，也不会生成或保存真实 API Key。')}</span>
+            <span>{t('模型请求只走固定的本机回环地址。OpsWitness 不接受自定义远程 URL，也不会生成或保存真实 API Key。')}</span>
           </div>
           <div className="local-provider-facts">
             <div><span>{t('服务')}</span><strong>{metadata.name}</strong></div>
@@ -3810,7 +3811,7 @@ function LocalProviderDialog({
               checked={confirmed}
               onChange={(event) => setConfirmed(event.target.checked)}
             />
-            <span>{t('我确认启动本地模型服务，并把检测到的模型登记到 Quarterdeck 的本机运行适配器')}</span>
+            <span>{t('我确认启动本地模型服务，并把检测到的模型登记到 OpsWitness 的本机运行适配器')}</span>
           </label>
           {error && <InlineError text={error} />}
           <button className="primary-button full-button" type="button" disabled={busy || !confirmed} onClick={() => void submit()}>
@@ -3847,7 +3848,7 @@ function ProviderApiKeyDialog({
       placeholder: 'sk-...',
       title: '连接 OpenAI API Key',
       invalid: '请输入有效的 OpenAI API Key。',
-      description: 'Key 只会通过 stdin 交给官方 Codex CLI；Quarterdeck 不保存、回显或写入证据。',
+      description: 'Key 只会通过 stdin 交给官方 Codex CLI；OpsWitness 不保存、回显或写入证据。',
       consent: '',
     },
     anthropic: {
@@ -4161,7 +4162,7 @@ function MailSetupDialog({
           <div className="mail-setup-content">
             <div className="privacy-summary">
               <strong>{t('最小权限')}</strong>
-              <span>{t('授权页只申请 Gmail readonly；token 由 gws 加密保存，Quarterdeck 不读取或回显。')}</span>
+              <span>{t('授权页只申请 Gmail readonly；token 由 gws 加密保存，OpsWitness 不读取或回显。')}</span>
               <span>{t('固定查询仅查看最近未读收件箱，排除垃圾邮件和回收站。')}</span>
             </div>
             {status && !status.available && (
@@ -4397,7 +4398,7 @@ function TelegramSetupDialog({
           <div className="privacy-summary">
             <strong>{t('本机秘密边界')}</strong>
             <span>{t('Bot token 与 chat ID 只写入本机 0600 secrets.yaml，不进入账本或页面回显。')}</span>
-            <span>{t('测试按钮只发送固定的 Quarterdeck 探针文本。')}</span>
+            <span>{t('测试按钮只发送固定的 OpsWitness 探针文本。')}</span>
           </div>
 
           {status?.environment_controlled ? (
@@ -6838,7 +6839,7 @@ function ExecutionView({
                 <div><strong>{record.plan?.title || record.objective}</strong><span>{shortId(record.plan_id)}</span></div>
               </div>
               <p className="delete-plan-copy">
-                {t('Quarterdeck 会请求运行时停止当前 Agent 工作。已产生的部分交付物与审计证据会保留，但不会被视为业务完成。')}
+                {t('OpsWitness 会请求运行时停止当前 Agent 工作。已产生的部分交付物与审计证据会保留，但不会被视为业务完成。')}
               </p>
               {controlError && <InlineError text={controlError} />}
               <div className="delete-plan-actions">

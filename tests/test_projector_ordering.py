@@ -1,9 +1,9 @@
 import respx
 from httpx import Response
 
-from quarterdeck.ledger import Ledger
-from quarterdeck.paperclip import PaperclipClient
-from quarterdeck.projector import Projector
+from opswitness.ledger import Ledger
+from opswitness.paperclip import PaperclipClient
+from opswitness.projector import Projector
 
 BASE = "http://pp.test"
 

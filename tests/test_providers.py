@@ -4,9 +4,9 @@ from pathlib import Path
 import httpx
 import pytest
 
-from quarterdeck.config import Settings
-from quarterdeck.console import providers
-from quarterdeck.console.providers import (
+from opswitness.config import Settings
+from opswitness.console import provider_credentials, providers
+from opswitness.console.providers import (
     CommandResult,
     login_command,
     login_provider,
@@ -181,12 +181,18 @@ def test_claude_probe_requires_structured_logged_in_status(tmp_path):
     assert malformed["status"] == "setup"
 
 
-def test_claude_probe_identifies_quarterdeck_managed_api_key_helper(tmp_path, monkeypatch):
+def test_claude_probe_identifies_opswitness_managed_api_key_helper(tmp_path, monkeypatch):
     binary = _executable(tmp_path / "claude")
     state = tmp_path / "state"
     helper = state / "provider-auth" / "anthropic-api-key-helper"
     helper.parent.mkdir(parents=True)
-    _executable(helper)
+    helper.write_bytes(
+        provider_credentials._helper_payload(
+            "api-key",
+            provider_credentials.ANTHROPIC_KEYCHAIN_SERVICE,
+        )
+    )
+    helper.chmod(0o700)
     claude_root = tmp_path / "claude-config"
     claude_root.mkdir()
     (claude_root / "settings.json").write_text(

@@ -1,7 +1,8 @@
 export type UiLanguage = 'en' | 'zh';
 export type TranslationValues = Record<string, string | number>;
 
-export const UI_LANGUAGE_STORAGE_KEY: 'quarterdeck.ui-language';
+export const UI_LANGUAGE_STORAGE_KEY: 'opswitness.ui-language';
+export const LEGACY_UI_LANGUAGE_STORAGE_KEY: 'quarterdeck.ui-language';
 export const DEFAULT_UI_LANGUAGE: 'en';
 
 export function resolveUiLanguage(value: unknown): UiLanguage;

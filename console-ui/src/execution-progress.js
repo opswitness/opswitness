@@ -1,8 +1,8 @@
 const TOOL_LABELS = {
   'mcp__aionui-team__team_task_create': '创建团队工作项',
   'mcp__aionui-team__team_task_update': '更新团队工作状态',
-  'mcp__quarterdeck__qd_fleet_status': '读取舰队状态',
-  'mcp__quarterdeck__qd_artifacts': '检查登记制品',
+  'mcp__opswitness__qd_fleet_status': '读取舰队状态',
+  'mcp__opswitness__qd_artifacts': '检查登记制品',
   ListMcpResourcesTool: '检查可用工具',
   ToolSearch: '查找可用工具',
 };

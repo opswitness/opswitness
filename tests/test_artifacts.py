@@ -6,7 +6,7 @@ import respx
 from httpx import Response
 from typer.testing import CliRunner
 
-from quarterdeck.artifacts import (
+from opswitness.artifacts import (
     artifact_root,
     evaluate_artifact,
     register_artifact,
@@ -14,12 +14,12 @@ from quarterdeck.artifacts import (
     signoff_artifact,
     verify_registration,
 )
-from quarterdeck.cli import app
-from quarterdeck.digest import build_digest, render_markdown
-from quarterdeck.index import query_artifacts, rebuild
-from quarterdeck.ledger import Ledger
-from quarterdeck.paperclip import PaperclipClient
-from quarterdeck.projector import Projector, pending_events
+from opswitness.cli import app
+from opswitness.digest import build_digest, render_markdown
+from opswitness.index import query_artifacts, rebuild
+from opswitness.ledger import Ledger
+from opswitness.paperclip import PaperclipClient
+from opswitness.projector import Projector, pending_events
 
 BASE = "http://paperclip.test"
 
@@ -103,8 +103,8 @@ def test_console_artifact_registration_is_plan_bound_and_idempotent(tmp_path):
 def test_cas_corruption_is_visible_and_cli_returns_nonzero(tmp_path, monkeypatch):
     config = tmp_path / "config"
     config.mkdir(mode=0o700)
-    monkeypatch.setenv("QD_CONFIG_DIR", str(config))
-    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "state" / "ledger"))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(config))
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(tmp_path / "state" / "ledger"))
     ledger = Ledger(tmp_path / "state" / "ledger")
     _seed_run(ledger)
     source = tmp_path / "artifact.bin"
@@ -125,8 +125,8 @@ def test_cas_corruption_is_visible_and_cli_returns_nonzero(tmp_path, monkeypatch
 def test_artifact_cli_register_list_show_eval_signoff(tmp_path, monkeypatch):
     config = tmp_path / "config"
     config.mkdir(mode=0o700)
-    monkeypatch.setenv("QD_CONFIG_DIR", str(config))
-    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "state" / "ledger"))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(config))
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(tmp_path / "state" / "ledger"))
     ledger = Ledger(tmp_path / "state" / "ledger")
     _seed_run(ledger)
     source = tmp_path / "report.md"

@@ -13,7 +13,7 @@ Tests and manual runs must not substitute for elapsed evidence.
 
 ## Decision
 
-Quarterdeck records soak contracts in the authoritative JSONL ledger:
+OpsWitness records soak contracts in the authoritative JSONL ledger:
 
 - `soak_started` freezes a name, minimum duration, tracked jobs, and each job's current
   `expected_interval_seconds + grace_seconds` contract.

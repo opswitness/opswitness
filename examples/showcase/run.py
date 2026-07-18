@@ -12,20 +12,20 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from quarterdeck.artifacts import evaluate_artifact, register_artifact, signoff_artifact
-from quarterdeck.config import Settings
-from quarterdeck.digest import build_digest, render_markdown
-from quarterdeck.gate import (
+from opswitness.artifacts import evaluate_artifact, register_artifact, signoff_artifact
+from opswitness.config import Settings
+from opswitness.digest import build_digest, render_markdown
+from opswitness.gate import (
     fold_gate_states,
     handle_post_tool_use,
     handle_pre_tool_use,
     record_decision,
     record_linked,
 )
-from quarterdeck.ledger import Ledger
-from quarterdeck.paperclip import PaperclipError
-from quarterdeck.projector import Projector, pending_events
-from quarterdeck.wrap.runner import run_wrapped
+from opswitness.ledger import Ledger
+from opswitness.paperclip import PaperclipError
+from opswitness.projector import Projector, pending_events
+from opswitness.wrap.runner import run_wrapped
 
 
 class SyntheticPaperclip:
@@ -75,7 +75,7 @@ def run_showcase(output: Path) -> dict[str, Any]:
     isolated_config = output / "config"
     isolated_config.mkdir(mode=0o700, exist_ok=True)
     os.chmod(isolated_config, 0o700)
-    os.environ["QD_CONFIG_DIR"] = str(isolated_config)
+    os.environ["OPSWITNESS_CONFIG_DIR"] = str(isolated_config)
     settings = Settings(ledger_dir=output / "state" / "ledger")
     ledger = Ledger(settings.ledger_dir)
     if run_wrapped("synthetic-report", [sys.executable, "-c", "pass"], settings) != 0:
@@ -158,7 +158,7 @@ def main() -> int:
     args = parser.parse_args()
     output = args.output or (
         Path(tempfile.gettempdir())
-        / f"quarterdeck-showcase-{datetime.now(UTC):%Y%m%dT%H%M%S}-{os.getpid()}"
+        / f"opswitness-showcase-{datetime.now(UTC):%Y%m%dT%H%M%S}-{os.getpid()}"
     )
     print(json.dumps(run_showcase(output), indent=2))
     return 0

@@ -10,9 +10,9 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from quarterdeck import mcp_server
-from quarterdeck.config import Settings
-from quarterdeck.console.aionui import (
+from opswitness import mcp_server
+from opswitness.config import Settings
+from opswitness.console.aionui import (
     AionUiClient,
     AionUiError,
     EphemeralSession,
@@ -20,8 +20,8 @@ from quarterdeck.console.aionui import (
     _validate_plan_brief,
     _validate_revision_changed,
 )
-from quarterdeck.console.app import create_app
-from quarterdeck.console.schemas import (
+from opswitness.console.app import create_app
+from opswitness.console.schemas import (
     ApprovalDecisionRequest,
     ApprovalMode,
     ConfirmRequest,
@@ -49,7 +49,7 @@ from quarterdeck.console.schemas import (
     TeamBlueprintArchiveRequest,
     TeamBlueprintSaveRequest,
 )
-from quarterdeck.console.service import (
+from opswitness.console.service import (
     DISPATCH_INTERRUPTED,
     DISPATCH_INTERRUPTED_DETAIL,
     EPHEMERAL_RECOVERY_UNAVAILABLE,
@@ -76,10 +76,11 @@ from quarterdeck.console.service import (
     RuntimeArtifactNotFound,
     _fleet_health,
     _mail_setup_detail,
+    _paperclip_launchd_label,
 )
-from quarterdeck.console.store import PlanNotFound
-from quarterdeck.ledger import Ledger
-from quarterdeck.paperclip import PaperclipError
+from opswitness.console.store import PlanNotFound
+from opswitness.ledger import Ledger
+from opswitness.paperclip import PaperclipError
 
 
 def _plan(execution_mode: str = "aion_team", workflow_id: str | None = None) -> TaskPlan:
@@ -316,7 +317,7 @@ class FakeAion:
     def ensure_local_provider(self, provider, models):
         self.local_providers.add(provider)
         self.local_provider_models[provider] = list(models)
-        return f"quarterdeck-{provider}"
+        return f"opswitness-{provider}"
 
     def stale_ephemeral_sessions(self):
         return list(self.stale_sessions)
@@ -496,9 +497,9 @@ class FakePaperclip:
 def console_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     config = tmp_path / "config"
     config.mkdir(mode=0o700)
-    monkeypatch.setenv("QD_CONFIG_DIR", str(config))
-    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "ledger"))
-    monkeypatch.setenv("QD_CONSOLE__STATE_DIR", str(tmp_path / "console"))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(config))
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(tmp_path / "ledger"))
+    monkeypatch.setenv("OPSWITNESS_CONSOLE__STATE_DIR", str(tmp_path / "console"))
     settings = Settings(
         ledger_dir=tmp_path / "ledger",
         console={"state_dir": tmp_path / "console", "port": 8765},
@@ -2301,7 +2302,7 @@ def test_legacy_automatic_safe_mode_approves_exact_read_only_tools(console_env):
             "call_id": "tool-call-safe",
             "title": "Check package metadata",
             "description": "Read installed package metadata without importing it.",
-            "command_type": "mcp__quarterdeck__qd_python_package_status",
+            "command_type": "mcp__opswitness__qd_python_package_status",
             "allow_value": "allow",
             "reject_value": "reject",
         }
@@ -2382,7 +2383,7 @@ def test_manual_all_mode_keeps_read_only_tool_waiting(console_env):
             "call_id": "tool-call-manual",
             "title": "Check package metadata",
             "description": "Read installed package metadata without importing it.",
-            "command_type": "mcp__quarterdeck__qd_python_package_status",
+            "command_type": "mcp__opswitness__qd_python_package_status",
             "allow_value": "allow",
             "reject_value": "reject",
         }
@@ -2854,7 +2855,7 @@ def test_execution_refresh_contains_remote_failure_and_status_errors(monkeypatch
 def test_mail_summary_keeps_metadata_and_summary_out_of_ledger(monkeypatch, console_env):
     _, service, aion, _ = console_env
     monkeypatch.setattr(
-        "quarterdeck.console.service.check_mail",
+        "opswitness.console.service.check_mail",
         lambda **kwargs: {
             "ok": True,
             "messages": [
@@ -2883,7 +2884,7 @@ def test_mail_summary_failure_never_persists_or_returns_third_party_error_text(
 ):
     _, service, aion, _ = console_env
     monkeypatch.setattr(
-        "quarterdeck.console.service.check_mail",
+        "opswitness.console.service.check_mail",
         lambda **kwargs: {
             "ok": True,
             "messages": [
@@ -2918,7 +2919,7 @@ def test_mail_authorization_requires_evidence_uses_fixed_consent_and_enables_onl
     _, service, _, _ = console_env
     saved: list[tuple[bool, bool]] = []
     monkeypatch.setattr(
-        "quarterdeck.console.service.authorize_mail",
+        "opswitness.console.service.authorize_mail",
         lambda settings: {
             "ok": True,
             "authenticated": True,
@@ -2927,7 +2928,7 @@ def test_mail_authorization_requires_evidence_uses_fixed_consent_and_enables_onl
         },
     )
     monkeypatch.setattr(
-        "quarterdeck.console.service.save_mail_activation",
+        "opswitness.console.service.save_mail_activation",
         lambda *, enabled, model_metadata_consent: saved.append((enabled, model_metadata_consent)),
     )
 
@@ -2962,11 +2963,11 @@ def test_mail_authorization_failure_is_fixed_and_never_activates(monkeypatch, co
     _, service, _, _ = console_env
     hostile = "private@example.com /private/oauth-token"
     monkeypatch.setattr(
-        "quarterdeck.console.service.authorize_mail",
+        "opswitness.console.service.authorize_mail",
         lambda settings: {"ok": False, "error": hostile},
     )
     monkeypatch.setattr(
-        "quarterdeck.console.service.save_mail_activation",
+        "opswitness.console.service.save_mail_activation",
         lambda **kwargs: pytest.fail("failed OAuth must not activate mail"),
     )
     requested = service.request_mail_authorization(
@@ -2990,7 +2991,7 @@ def test_mail_oauth_client_import_is_audited_without_secret_material(monkeypatch
     private_json = '{"installed":{"client_secret":"private-oauth-value"}}'
     captured: list[str] = []
     monkeypatch.setattr(
-        "quarterdeck.console.service.save_oauth_client",
+        "opswitness.console.service.save_oauth_client",
         lambda raw: captured.append(raw),
     )
 
@@ -3015,7 +3016,7 @@ def test_mail_oauth_client_import_returns_fixed_rejection(monkeypatch, console_e
     _, service, _, _ = console_env
     hostile = "private-client-secret /private/path"
     monkeypatch.setattr(
-        "quarterdeck.console.service.save_oauth_client",
+        "opswitness.console.service.save_oauth_client",
         lambda raw: (_ for _ in ()).throw(ValueError(f"rejected {raw}")),
     )
 
@@ -3045,7 +3046,7 @@ def test_mail_disable_revokes_future_model_access_even_when_audit_write_fails(
     )
     saved: list[tuple[bool, bool]] = []
     monkeypatch.setattr(
-        "quarterdeck.console.service.save_mail_activation",
+        "opswitness.console.service.save_mail_activation",
         lambda *, enabled, model_metadata_consent: saved.append((enabled, model_metadata_consent)),
     )
     monkeypatch.setattr(service.ledger, "append", lambda *args, **kwargs: None)
@@ -3062,7 +3063,7 @@ def test_telegram_console_configuration_never_persists_or_returns_credentials(
     _, service, _, _ = console_env
     saved = []
     monkeypatch.setattr(
-        "quarterdeck.console.service.save_telegram_credentials",
+        "opswitness.console.service.save_telegram_credentials",
         lambda token, chat_id, *, replace: saved.append((token, chat_id, replace)),
     )
     request = TelegramConfigureRequest(
@@ -3096,7 +3097,7 @@ def test_telegram_console_rejects_bad_credentials_with_fixed_error(monkeypatch, 
         raise ValueError(hostile)
 
     monkeypatch.setattr(
-        "quarterdeck.console.service.save_telegram_credentials",
+        "opswitness.console.service.save_telegram_credentials",
         reject,
     )
     request = TelegramConfigureRequest(
@@ -3124,12 +3125,12 @@ def test_telegram_console_test_is_evidence_first_and_uses_fixed_message(monkeypa
     )
     sent = []
     monkeypatch.setattr(
-        "quarterdeck.console.service.send_telegram",
+        "opswitness.console.service.send_telegram",
         lambda text, settings: sent.append((text, settings.telegram.chat_id)) or True,
     )
 
     assert service.test_telegram() == {"sent": True}
-    assert sent == [("Quarterdeck Telegram delivery test", "123456")]
+    assert sent == [("OpsWitness Telegram delivery test", "123456")]
     encoded = json.dumps(service.ledger.read_all(), ensure_ascii=False)
     assert "private-token" not in encoded
     assert "123456" not in encoded
@@ -3138,7 +3139,7 @@ def test_telegram_console_test_is_evidence_first_and_uses_fixed_message(monkeypa
         "telegram_test_finished",
     ]
 
-    monkeypatch.setattr("quarterdeck.console.service.send_telegram", lambda *args: False)
+    monkeypatch.setattr("opswitness.console.service.send_telegram", lambda *args: False)
     with pytest.raises(ConsoleUnavailable, match=TELEGRAM_TEST_FAILED):
         service.test_telegram()
     assert service.ledger.read_all()[-1]["kind"] == "telegram_test_failed"
@@ -3148,7 +3149,7 @@ def test_telegram_console_does_not_send_without_requested_evidence(monkeypatch, 
     _, service, _, _ = console_env
     monkeypatch.setattr(service.ledger, "append", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        "quarterdeck.console.service.send_telegram",
+        "opswitness.console.service.send_telegram",
         lambda *args: pytest.fail("Telegram must not send without durable requested evidence"),
     )
     with pytest.raises(ConsoleUnavailable, match="telegram_test_requested"):
@@ -3166,16 +3167,35 @@ def test_telegram_console_disable_and_environment_override_fail_closed(monkeypat
     )
     cleared = []
     monkeypatch.setattr(
-        "quarterdeck.console.service.clear_telegram_credentials",
+        "opswitness.console.service.clear_telegram_credentials",
         lambda: cleared.append(True) or True,
     )
     assert service.disable_telegram() == {"disabled": True}
     assert cleared == [True]
     assert service.telegram_setup_status()["configured"] is False
 
-    monkeypatch.setenv("QD_TELEGRAM__BOT_TOKEN", "environment-secret")
+    monkeypatch.setenv("OPSWITNESS_TELEGRAM__BOT_TOKEN", "environment-secret")
     with pytest.raises(ConsoleConflict, match=TELEGRAM_ENVIRONMENT_CONTROLLED):
         service.disable_telegram()
+
+    monkeypatch.delenv("OPSWITNESS_TELEGRAM__BOT_TOKEN")
+    monkeypatch.setenv("QD_TELEGRAM__CHAT_ID", "legacy-environment-secret")
+    assert service.telegram_setup_status()["environment_controlled"] is True
+    with pytest.raises(ConsoleConflict, match=TELEGRAM_ENVIRONMENT_CONTROLLED):
+        service.disable_telegram()
+
+
+def test_paperclip_launchd_label_supports_legacy_and_rejects_dual_install(tmp_path):
+    launchagents = tmp_path / "LaunchAgents"
+    launchagents.mkdir()
+    legacy = launchagents / "com.quarterdeck.paperclip.plist"
+    legacy.write_text("legacy\n")
+
+    assert _paperclip_launchd_label(launchagents) == "com.quarterdeck.paperclip"
+
+    (launchagents / "com.opswitness.paperclip.plist").write_text("canonical\n")
+    with pytest.raises(ConsoleUnavailable, match="new and legacy"):
+        _paperclip_launchd_label(launchagents)
 
 
 def test_telegram_console_serializes_configuration_mutations(monkeypatch, console_env):
@@ -3195,7 +3215,7 @@ def test_telegram_console_serializes_configuration_mutations(monkeypatch, consol
             active -= 1
 
     monkeypatch.setattr(
-        "quarterdeck.console.service.save_telegram_credentials",
+        "opswitness.console.service.save_telegram_credentials",
         save,
     )
     first = TelegramConfigureRequest(
@@ -3387,12 +3407,12 @@ def test_aionui_run_controls_use_exact_public_team_routes(console_env):
     assert (
         "POST",
         "/api/teams/team-1/runs/team-run-1/agents/slot-1/pause",
-        {"reason": "quarterdeck_user_pause"},
+        {"reason": "opswitness_user_pause"},
     ) in requests
     assert (
         "POST",
         "/api/teams/team-1/runs/team-run-1/cancel",
-        {"reason": "quarterdeck_user_terminate"},
+        {"reason": "opswitness_user_terminate"},
     ) in requests
 
 
@@ -3691,7 +3711,7 @@ def test_aionui_execution_progress_binds_safe_activity_to_plan_stages(monkeypatc
                 "created_at": "2026-07-16T07:02:00+00:00",
                 "content": {
                     "update": {
-                        "title": "mcp__quarterdeck__qd_python_package_status",
+                        "title": "mcp__opswitness__qd_python_package_status",
                         "status": "completed",
                         "raw_input": {"api_key": "never-render-this"},
                         "raw_output": "private package result",
@@ -3763,7 +3783,7 @@ def test_aionui_execution_progress_binds_safe_activity_to_plan_stages(monkeypatc
     ]
     assert stages[0]["task_id"] == "task-stage-1"
     assert stages[0]["recent_activity"][0]["tool_name"] == (
-        "mcp__quarterdeck__qd_python_package_status"
+        "mcp__opswitness__qd_python_package_status"
     )
     assert stages[1]["recent_activity"][0]["kind"] == "response"
     assert stages[2]["blocked_by"] == [2]
@@ -4007,7 +4027,7 @@ def test_aionui_ephemeral_workspaces_are_unique_private_and_removed(monkeypatch,
             "name": kwargs["name"],
             "workspace": str(workspace),
         }
-        marker = workspace / ".quarterdeck-session.json"
+        marker = workspace / ".opswitness-session.json"
         assert marker.stat().st_mode & 0o777 == 0o600
         marker_payload = json.loads(marker.read_text())
         assert marker_payload == {
@@ -4022,7 +4042,7 @@ def test_aionui_ephemeral_workspaces_are_unique_private_and_removed(monkeypatch,
     def ensure_team(team_id):
         workspace = workspaces[int(team_id.rsplit("-", 1)[1]) - 1]
         assert (
-            json.loads((workspace / ".quarterdeck-session.json").read_text())["team_id"] == team_id
+            json.loads((workspace / ".opswitness-session.json").read_text())["team_id"] == team_id
         )
 
     def delete_team(team_id):
@@ -4128,7 +4148,7 @@ def test_aionui_workspace_cleanup_failure_rejects_result_after_team_delete(
         del path
         raise OSError("private workspace path")
 
-    monkeypatch.setattr("quarterdeck.console.aionui.shutil.rmtree", cleanup_failed)
+    monkeypatch.setattr("opswitness.console.aionui.shutil.rmtree", cleanup_failed)
     with pytest.raises(AionUiError, match="mail session cleanup could not be confirmed") as exc:
         client.summarize_mail("MAIL2", [])
     assert "private workspace path" not in str(exc.value)
@@ -4212,7 +4232,7 @@ def test_aionui_ephemeral_recovery_rejects_insecure_marker(console_env):
     settings, _, _, _ = console_env
     client = AionUiClient(settings.console)
     session = client._ephemeral_workspace("planning", "PLAN4")
-    marker = session.workspace / ".quarterdeck-session.json"
+    marker = session.workspace / ".opswitness-session.json"
     marker.chmod(0o644)
 
     with pytest.raises(ValueError, match="marker permissions are insecure"):
@@ -4323,7 +4343,7 @@ def test_console_dashboard_uses_one_authoritative_ledger_snapshot(monkeypatch, c
 
     monkeypatch.setattr(service.ledger, "read_all", counted_read)
     monkeypatch.setattr(
-        "quarterdeck.console.service.httpx.get", lambda *args, **kwargs: HealthyResponse()
+        "opswitness.console.service.httpx.get", lambda *args, **kwargs: HealthyResponse()
     )
     result = service.dashboard()
     assert reads == 1
@@ -4403,7 +4423,7 @@ def test_console_dashboard_never_reports_zero_when_approvals_are_unavailable(
             raise PaperclipError("approval API unavailable")
 
     monkeypatch.setattr(
-        "quarterdeck.console.service.httpx.get", lambda *args, **kwargs: HealthyResponse()
+        "opswitness.console.service.httpx.get", lambda *args, **kwargs: HealthyResponse()
     )
     monkeypatch.setattr(service, "_paperclip_factory", lambda: FailingApprovals())
     result = service.dashboard()
@@ -4654,7 +4674,7 @@ def test_local_console_can_resolve_pending_approval_with_append_only_evidence(co
             "createdAt": "2026-07-14T12:00:00+00:00",
             "payload": {
                 "title": "Approve Claude tool: Bash",
-                "summary": "Quarterdeck deferred a tool call.",
+                "summary": "OpsWitness deferred a tool call.",
                 "recommendedAction": "Inspect and decide.",
                 "risks": ["May modify files"],
             },
@@ -4858,7 +4878,7 @@ def test_console_dashboard_contains_schedule_parser_errors(monkeypatch, console_
         raise ValueError(hostile)
 
     monkeypatch.setattr(
-        "quarterdeck.console.service.load_effective_schedules",
+        "opswitness.console.service.load_effective_schedules",
         invalid_schedules,
     )
     result = service.dashboard()
@@ -4942,7 +4962,7 @@ def test_console_requires_csrf_and_serves_built_frontend(console_env, monkeypatc
         assert accepted.status_code == 202
         page = client.get("/")
         assert page.status_code == 200
-        assert "Quarterdeck" in page.text
+        assert "OpsWitness" in page.text
         assert page.headers["x-frame-options"] == "DENY"
     assert lifecycle == ["lease", "recovery", "release"]
 
@@ -5042,7 +5062,7 @@ def test_mail_authorization_http_requires_both_explicit_acknowledgements(console
 def test_telegram_http_redacts_credentials_and_requires_explicit_actions(console_env, monkeypatch):
     settings, service, _, _ = console_env
     monkeypatch.setattr(
-        "quarterdeck.console.service.save_telegram_credentials",
+        "opswitness.console.service.save_telegram_credentials",
         lambda *args, **kwargs: None,
     )
     with TestClient(
@@ -5116,7 +5136,7 @@ def test_console_lifespan_releases_lease_when_recovery_fails(console_env, monkey
 def test_aionui_base_is_loopback_only(tmp_path, monkeypatch):
     config = tmp_path / "config"
     config.mkdir(mode=0o700)
-    monkeypatch.setenv("QD_CONFIG_DIR", str(config))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(config))
     with pytest.raises(ValueError, match="loopback"):
         Settings(console={"aionui_base": "https://remote.example"})
     with pytest.raises(ValueError, match="loopback"):
@@ -5538,7 +5558,7 @@ def test_member_observations_are_safe_signals_not_outcome_evidence(console_env, 
                         "agent_name": "总控",
                         "kind": "tool_call",
                         "status": "completed",
-                        "tool_name": "mcp__quarterdeck__qd_fleet_status",
+                        "tool_name": "mcp__opswitness__qd_fleet_status",
                         "observed_at": "2026-07-14T08:00:30+00:00",
                         "count": 1,
                     }
@@ -5786,19 +5806,19 @@ def test_aionui_local_provider_registration_uses_fixed_loopback_and_placeholder(
         calls.append((method, path, kwargs))
         if method == "GET":
             return []
-        return {"id": "quarterdeck-ollama"}
+        return {"id": "opswitness-ollama"}
 
     monkeypatch.setattr(client, "_request", request)
     provider_id = client.ensure_local_provider("ollama", ["qwen3:8b"])
 
-    assert provider_id == "quarterdeck-ollama"
+    assert provider_id == "opswitness-ollama"
     assert calls[0][:2] == ("GET", "/api/providers")
     method, path, kwargs = calls[1]
     assert (method, path) == ("POST", "/api/providers")
     assert kwargs["json"] == {
-        "id": "quarterdeck-ollama",
+        "id": "opswitness-ollama",
         "platform": "custom",
-        "name": "Ollama (Quarterdeck)",
+        "name": "Ollama (OpsWitness)",
         "base_url": "http://127.0.0.1:11434/v1",
         "api_key": "ollama",
         "models": ["qwen3:8b"],

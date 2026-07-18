@@ -2,8 +2,8 @@ import plistlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from quarterdeck.adopt import apply, is_wrapped, plan, rollback, scan
-from quarterdeck.watchdog import check
+from opswitness.adopt import apply, is_wrapped, plan, rollback, scan
+from opswitness.watchdog import check
 
 
 def _write_plist(dir_path: Path, label: str, **extra) -> Path:
@@ -91,9 +91,9 @@ def test_watchdog_detects_overdue_never_run_and_unsupported():
 def test_watchdog_loop_mode_is_refused(tmp_path, monkeypatch):
     from typer.testing import CliRunner
 
-    from quarterdeck.cli import app
+    from opswitness.cli import app
 
-    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "ledger"))
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(tmp_path / "ledger"))
     result = CliRunner().invoke(app, ["watchdog", "--loop"])
     assert result.exit_code == 2
 
@@ -102,7 +102,7 @@ def test_watchdog_refuses_all_disabled_explicit_schedules(tmp_path, monkeypatch)
     import yaml
     from typer.testing import CliRunner
 
-    from quarterdeck.cli import app
+    from opswitness.cli import app
 
     path = tmp_path / "disabled.yaml"
     path.write_text(
@@ -110,7 +110,7 @@ def test_watchdog_refuses_all_disabled_explicit_schedules(tmp_path, monkeypatch)
             {"jobs": [{"job": "disabled", "expected_interval_seconds": 60, "enabled": False}]}
         )
     )
-    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "ledger"))
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(tmp_path / "ledger"))
     result = CliRunner().invoke(app, ["watchdog", "--schedules", str(path)])
     assert result.exit_code == 2
     assert "no active interval schedules" in result.output
@@ -119,7 +119,7 @@ def test_watchdog_refuses_all_disabled_explicit_schedules(tmp_path, monkeypatch)
 def test_resolve_qd_bin_requires_absolute_executable(tmp_path):
     import pytest
 
-    from quarterdeck.adopt import resolve_qd_bin
+    from opswitness.adopt import resolve_qd_bin
 
     with pytest.raises(ValueError):
         resolve_qd_bin(str(tmp_path / "does-not-exist"))
@@ -132,8 +132,8 @@ def test_resolve_qd_bin_requires_absolute_executable(tmp_path):
 def test_adopt_defaults_to_full_label_id(tmp_path):
     from typer.testing import CliRunner
 
-    from quarterdeck.adopt import collisions, scan
-    from quarterdeck.cli import app
+    from opswitness.adopt import collisions, scan
+    from opswitness.cli import app
 
     _write_plist(tmp_path, "com.a.gateway")
     _write_plist(tmp_path, "com.b.gateway")
@@ -174,7 +174,7 @@ def test_apply_preserves_file_mode(tmp_path):
 
 
 def test_half_written_backup_cannot_be_mistaken_for_pristine(tmp_path):
-    from quarterdeck.adopt import BACKUP_SUFFIX, _publish_backup
+    from opswitness.adopt import BACKUP_SUFFIX, _publish_backup
 
     p = _write_plist(tmp_path, "com.t.crash")
     pristine = p.read_bytes()

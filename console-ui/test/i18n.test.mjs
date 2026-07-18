@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import {
   DEFAULT_UI_LANGUAGE,
+  LEGACY_UI_LANGUAGE_STORAGE_KEY,
   resolveUiLanguage,
   translateApiError,
   translateUi,
@@ -12,7 +13,8 @@ import {
 
 test('English is the fail-closed default for absent or invalid preferences', () => {
   assert.equal(DEFAULT_UI_LANGUAGE, 'en');
-  assert.equal(UI_LANGUAGE_STORAGE_KEY, 'quarterdeck.ui-language');
+  assert.equal(UI_LANGUAGE_STORAGE_KEY, 'opswitness.ui-language');
+  assert.equal(LEGACY_UI_LANGUAGE_STORAGE_KEY, 'quarterdeck.ui-language');
   assert.equal(resolveUiLanguage(null), 'en');
   assert.equal(resolveUiLanguage('fr'), 'en');
   assert.equal(resolveUiLanguage('zh'), 'zh');
@@ -22,11 +24,11 @@ test('stable API error codes render in the selected interface language', () => {
   const fallback = 'origin denied';
   assert.equal(
     translateApiError('en', 'origin_denied', fallback),
-    'This console address is not authorized. Reopen Quarterdeck from the local address or the paired private HTTPS address.',
+    'This console address is not authorized. Reopen OpsWitness from the local address or the paired private HTTPS address.',
   );
   assert.equal(
     translateApiError('zh', 'origin_denied', fallback),
-    '当前工作台地址未获授权。请从本机地址或已配对的私网 HTTPS 地址重新打开 Quarterdeck。',
+    '当前工作台地址未获授权。请从本机地址或已配对的私网 HTTPS 地址重新打开 OpsWitness。',
   );
   assert.equal(translateApiError('en', 'unknown_code', fallback), fallback);
 });

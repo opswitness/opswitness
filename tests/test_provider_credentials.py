@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from quarterdeck.config import Settings
-from quarterdeck.console import provider_credentials
-from quarterdeck.console.provider_credentials import (
+from opswitness.config import Settings
+from opswitness.console import provider_credentials
+from opswitness.console.provider_credentials import (
     ProviderCredentialError,
     configure_anthropic_api_key,
     configure_provider_api_key,
@@ -108,8 +108,8 @@ def test_anthropic_key_never_overwrites_an_unmanaged_claude_helper(tmp_path, mon
 @pytest.mark.parametrize(
     ("provider", "service"),
     [
-        ("deepseek", "com.quarterdeck.deepseek-api-key"),
-        ("xai", "com.quarterdeck.xai-api-key"),
+        ("deepseek", "com.opswitness.deepseek-api-key"),
+        ("xai", "com.opswitness.xai-api-key"),
     ],
 )
 def test_provider_key_is_validated_and_keychained_without_aionui_or_disk_secret(
@@ -185,6 +185,54 @@ def test_provider_key_rejects_invalid_key_before_local_write(tmp_path, monkeypat
     )
     assert calls == []
     assert not settings.console.state_dir.exists()
+
+
+@pytest.mark.parametrize("provider", ["deepseek", "xai"])
+def test_legacy_provider_keychain_helper_remains_available(
+    tmp_path, monkeypatch, provider
+):
+    security = _executable(tmp_path / "security")
+    monkeypatch.setattr(provider_credentials, "_SECURITY_BIN", security)
+    settings = Settings(console={"state_dir": tmp_path / "console"})
+    helper = provider_credentials.provider_api_key_helper_path(settings, provider)
+    helper.parent.mkdir(parents=True, mode=0o700)
+    legacy_service = f"com.quarterdeck.{provider}-api-key"
+    helper.write_bytes(
+        provider_credentials._helper_payload("api-key", legacy_service)
+    )
+    helper.chmod(0o700)
+    calls = []
+
+    assert managed_provider_api_key_helper(settings, provider) == helper
+    assert provider_api_key_available(
+        settings,
+        provider,
+        runner=lambda argv, timeout: calls.append((argv, timeout)) or 0,
+    )
+    assert legacy_service in calls[0][0]
+
+
+def test_legacy_anthropic_helper_remains_managed(tmp_path, monkeypatch):
+    claude_root = tmp_path / "claude"
+    claude_root.mkdir(mode=0o700)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_root))
+    security = _executable(tmp_path / "security")
+    monkeypatch.setattr(provider_credentials, "_SECURITY_BIN", security)
+    settings = Settings(console={"state_dir": tmp_path / "console"})
+    helper = provider_credentials.anthropic_api_key_helper_path(settings)
+    helper.parent.mkdir(parents=True, mode=0o700)
+    helper.write_bytes(
+        provider_credentials._helper_payload(
+            "api-key", "com.quarterdeck.anthropic-api-key"
+        )
+    )
+    helper.chmod(0o700)
+    (claude_root / "settings.json").write_text(
+        json.dumps({"apiKeyHelper": str(helper)}),
+        encoding="utf-8",
+    )
+
+    assert managed_anthropic_api_key_helper(settings) == helper
 
 
 @pytest.mark.parametrize(

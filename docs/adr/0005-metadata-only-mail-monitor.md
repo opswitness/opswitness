@@ -17,7 +17,7 @@ Daily automation makes an accidental permission expansion persistent.
 
 ## Decision
 
-Quarterdeck adds a narrow evidence adapter, not a mail agent:
+OpsWitness adds a narrow evidence adapter, not a mail agent:
 
 1. The executable is an absolute, administrator-configured path and its version must equal
    `0.22.5`.
@@ -36,12 +36,12 @@ Quarterdeck adds a narrow evidence adapter, not a mail agent:
    third-party stderr.
 7. Every returned mail field is explicitly untrusted data. No body, draft, reply, send, delete,
    label mutation, link opening, attachment, or generic `gws` tool is exposed.
-8. Mail tools live only on `qd mcp --profile mail`. The normal Quarterdeck MCP excludes them,
+8. Mail tools live only on `qd mcp --profile mail`. The normal OpsWitness MCP excludes them,
    while the mail profile excludes every fleet, projection, workflow, shell, and browser action.
    AionUi must bind the two profiles to different assistants and conversations.
 9. The loopback total console owns the local on-demand button and authorization dialog; AionUi
    remains the model runtime and its native Scheduled Task may own a future daily trigger.
-   Quarterdeck does not build a second inbox or scheduler.
+   OpsWitness does not build a second inbox or scheduler.
 10. Console authorization first requires a Google OAuth client whose top-level type is `installed`
     (Desktop app), whose endpoints are Google's fixed HTTPS endpoints, and whose redirect is
     localhost. The console accepts the JSON only after a private-storage acknowledgement,
@@ -60,7 +60,7 @@ Quarterdeck adds a narrow evidence adapter, not a mail agent:
     Authorization records fixed `mail_authorization_requested/finished/failed` events; revocation
     records `mail_consent_revoked`. No account identity, token, credential path, OAuth output, or
     upstream exception enters those events or API responses. If final evidence is lost after
-    activation, Quarterdeck rolls activation back to false.
+    activation, OpsWitness rolls activation back to false.
 14. Child output is bounded to 1 MiB and the process group is killed on timeout or overflow.
 
 ## Consequences
@@ -70,6 +70,6 @@ Quarterdeck adds a narrow evidence adapter, not a mail agent:
 - The adapter is read-only at both product and OAuth scope boundaries. Adding drafts or sends
   requires a new ADR, separate tools, explicit action-time approval, and new evidence semantics.
 - AionUi can be replaced without changing the mail trust boundary; the fixed query and evidence
-  remain local to Quarterdeck.
+  remain local to OpsWitness.
 - The daily task uses a fresh conversation to reduce cross-run prompt contamination and fails
   closed when readiness, audit evidence, or the external service is unavailable.

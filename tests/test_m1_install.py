@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from quarterdeck.backup import (
+from opswitness.backup import (
     _pg_restore_command,
     _rebase_paperclip_config,
     backup_plan,
@@ -16,10 +16,10 @@ from quarterdeck.backup import (
     restore_backup,
     restore_plan,
 )
-from quarterdeck.cli import app
-from quarterdeck.config import Settings
-from quarterdeck.doctor import _launchd_service_runtime, _qd_command_surface, run_doctor
-from quarterdeck.service import SERVICE_NAMES, build_service_exec, exec_service, render_launchd
+from opswitness.cli import app
+from opswitness.config import Settings
+from opswitness.doctor import _launchd_service_runtime, _qd_command_surface, run_doctor
+from opswitness.service import SERVICE_NAMES, build_service_exec, exec_service, render_launchd
 
 
 def _executable(path: Path) -> Path:
@@ -32,7 +32,7 @@ def _settings(tmp_path, monkeypatch) -> Settings:
     config = tmp_path / "config"
     config.mkdir(exist_ok=True)
     config.chmod(0o700)
-    monkeypatch.setenv("QD_CONFIG_DIR", str(config))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(config))
     qd = _executable(tmp_path / "qd")
     node = _executable(tmp_path / "node")
     paperclip_script = tmp_path / "paperclip-index.js"
@@ -45,7 +45,7 @@ def _settings(tmp_path, monkeypatch) -> Settings:
     log_dir.mkdir(mode=0o700)
     log_dir.chmod(0o700)
     return Settings(
-        database_url="postgresql://qd:secret@127.0.0.1:5432/quarterdeck",
+        database_url="postgresql://qd:secret@127.0.0.1:5432/opswitness",
         paperclip={"api_key": "api-key", "company_id": "company"},
         services={
             "qd_bin": qd,
@@ -110,9 +110,9 @@ def test_service_exec_keeps_database_secret_out_of_argv(tmp_path, monkeypatch):
 def test_service_exec_sets_private_umask_before_execve(tmp_path, monkeypatch):
     settings = _settings(tmp_path, monkeypatch)
     calls = []
-    monkeypatch.setattr("quarterdeck.service.os.umask", lambda mask: calls.append(("umask", mask)))
+    monkeypatch.setattr("opswitness.service.os.umask", lambda mask: calls.append(("umask", mask)))
     monkeypatch.setattr(
-        "quarterdeck.service.os.execve",
+        "opswitness.service.os.execve",
         lambda executable, argv, env: calls.append(("execve", executable, argv, env)),
     )
 
@@ -124,10 +124,10 @@ def test_service_exec_sets_private_umask_before_execve(tmp_path, monkeypatch):
 
 def test_service_render_is_dry_run_by_default(tmp_path, monkeypatch):
     settings = _settings(tmp_path, monkeypatch)
-    monkeypatch.setenv("QD_SERVICES__QD_BIN", str(settings.services.qd_bin))
+    monkeypatch.setenv("OPSWITNESS_SERVICES__QD_BIN", str(settings.services.qd_bin))
     output = tmp_path / "rendered.plist"
     result = CliRunner().invoke(app, ["service", "render", "watchdog", "--output", str(output)])
-    assert result.exit_code == 0 and "com.quarterdeck.watchdog" in result.output
+    assert result.exit_code == 0 and "com.opswitness.watchdog" in result.output
     assert not output.exists()
 
 
@@ -136,7 +136,7 @@ def test_doctor_fake_toolchain_all_green(tmp_path, monkeypatch):
     launchagents = tmp_path / "LaunchAgents"
     launchagents.mkdir()
     for name in SERVICE_NAMES:
-        (launchagents / f"com.quarterdeck.{name}.plist").write_bytes(render_launchd(name, settings))
+        (launchagents / f"com.opswitness.{name}.plist").write_bytes(render_launchd(name, settings))
     tools = {name: str(_executable(tmp_path / name)) for name in ("node", "psql", "pg_dump", "age")}
     result = run_doctor(
         settings_loader=lambda: settings,
@@ -158,6 +158,69 @@ def test_doctor_fake_toolchain_all_green(tmp_path, monkeypatch):
     assert checks["installed_console"]["status"] == "pass"
     assert checks["runtime_console"]["status"] == "pass"
     assert checks["console_port"]["status"] == "pass"
+
+
+def test_doctor_accepts_one_legacy_launchd_install(tmp_path, monkeypatch):
+    settings = _settings(tmp_path, monkeypatch)
+    launchagents = tmp_path / "LaunchAgents"
+    launchagents.mkdir()
+    for name in ("paperclip", "projector", "watchdog"):
+        payload = plistlib.loads(render_launchd(name, settings))
+        payload["Label"] = f"com.quarterdeck.{name}"
+        (launchagents / f"com.quarterdeck.{name}.plist").write_bytes(
+            plistlib.dumps(payload)
+        )
+    tools = {
+        name: str(_executable(tmp_path / name))
+        for name in ("node", "psql", "pg_dump", "age")
+    }
+
+    result = run_doctor(
+        settings_loader=lambda: settings,
+        which=lambda name: tools.get(name),
+        version=lambda path, args: "test-version",
+        port_open=lambda host, port: True,
+        paperclip_processes=lambda: [123],
+        launchagents_dir=launchagents,
+    )
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert result["healthy"] is True
+    assert "legacy compatible" in checks["installed_paperclip"]["detail"]
+
+
+def test_doctor_rejects_dual_new_and_legacy_launchd_install(tmp_path, monkeypatch):
+    settings = _settings(tmp_path, monkeypatch)
+    launchagents = tmp_path / "LaunchAgents"
+    launchagents.mkdir()
+    for name in ("paperclip", "projector", "watchdog"):
+        canonical = plistlib.loads(render_launchd(name, settings))
+        (launchagents / f"com.opswitness.{name}.plist").write_bytes(
+            plistlib.dumps(canonical)
+        )
+        if name == "paperclip":
+            legacy = {**canonical, "Label": "com.quarterdeck.paperclip"}
+            (launchagents / "com.quarterdeck.paperclip.plist").write_bytes(
+                plistlib.dumps(legacy)
+            )
+    tools = {
+        name: str(_executable(tmp_path / name))
+        for name in ("node", "psql", "pg_dump", "age")
+    }
+
+    result = run_doctor(
+        settings_loader=lambda: settings,
+        which=lambda name: tools.get(name),
+        version=lambda path, args: "test-version",
+        port_open=lambda host, port: True,
+        paperclip_processes=lambda: [123],
+        launchagents_dir=launchagents,
+    )
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert result["healthy"] is False
+    assert checks["installed_paperclip"]["status"] == "fail"
+    assert "both exist" in checks["installed_paperclip"]["detail"]
 
 
 def test_launchd_runtime_check_is_fail_closed():
@@ -208,7 +271,7 @@ def test_doctor_keeps_command_surface_check_when_settings_are_unavailable(
     config.chmod(0o700)
     (config / "config.yaml").write_text("database_url: forbidden\n")
     (config / "config.yaml").chmod(0o600)
-    monkeypatch.setenv("QD_CONFIG_DIR", str(config))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(config))
 
     result = run_doctor(
         settings_loader=lambda: pytest.fail("settings loader must not run"),
@@ -285,7 +348,7 @@ def test_doctor_rejects_stale_installed_plist_and_readable_log(tmp_path, monkeyp
         payload = plistlib.loads(render_launchd(name, settings))
         if name == "paperclip":
             payload.pop("Umask")
-        (launchagents / f"com.quarterdeck.{name}.plist").write_bytes(plistlib.dumps(payload))
+        (launchagents / f"com.opswitness.{name}.plist").write_bytes(plistlib.dumps(payload))
     tools = {name: str(_executable(tmp_path / name)) for name in ("node", "psql", "pg_dump", "age")}
 
     result = run_doctor(
@@ -339,7 +402,7 @@ def test_doctor_checks_enabled_mail_adapter_without_exposing_identity(tmp_path, 
 
 def test_doctor_rejects_insecure_workflow_manifest(tmp_path, monkeypatch):
     settings = _settings(tmp_path, monkeypatch)
-    manifest = Path(os.environ["QD_CONFIG_DIR"]) / "workflows.yaml"
+    manifest = Path(os.environ["OPSWITNESS_CONFIG_DIR"]) / "workflows.yaml"
     manifest.write_text("schema_version: 1\nworkflows: {}\n")
     manifest.chmod(0o644)
     result = run_doctor(
@@ -402,8 +465,8 @@ def test_backup_execute_uses_secure_atomic_output(tmp_path, monkeypatch):
     with __import__("tarfile").open(output, "r") as archive:
         assert {
             "database.dump",
-            "quarterdeck_state/ledger/events.jsonl",
-            f"quarterdeck_state/artifacts/sha256/ab/{'ab' * 32}",
+            "opswitness_state/ledger/events.jsonl",
+            f"opswitness_state/artifacts/sha256/ab/{'ab' * 32}",
         } <= set(archive.getnames())
 
 
@@ -481,7 +544,7 @@ def test_backup_restore_round_trip_preserves_artifact_cas(tmp_path, monkeypatch)
         3310,
         execute=True,
     )
-    restored = target / "quarterdeck_state" / "artifacts" / "sha256" / "cd" / digest
+    restored = target / "opswitness_state" / "artifacts" / "sha256" / "cd" / digest
     assert result["executed"] is True
     assert restored.read_bytes() == b"restorable-artifact"
 
@@ -494,7 +557,7 @@ def test_restore_rejects_production_paths_ports_and_database_names(tmp_path, mon
     with pytest.raises(ValueError, match="non-production"):
         restore_plan(*args, tmp_path / "restore", "qd_restore_x", 3100)
     with pytest.raises(ValueError, match="qd_restore_"):
-        restore_plan(*args, tmp_path / "restore", "quarterdeck", 3310)
+        restore_plan(*args, tmp_path / "restore", "opswitness", 3310)
 
 
 def test_restore_implementation_passes_explicit_database_name():
@@ -537,7 +600,7 @@ def test_restored_paperclip_paths_are_rebased_to_isolated_root(tmp_path):
 
 def test_doctor_cli_json_is_machine_readable(monkeypatch):
     monkeypatch.setattr(
-        "quarterdeck.doctor.run_doctor",
+        "opswitness.doctor.run_doctor",
         lambda: {"healthy": False, "checks": [{"name": "x", "status": "fail", "detail": "no"}]},
     )
     result = CliRunner().invoke(app, ["doctor", "--json"])

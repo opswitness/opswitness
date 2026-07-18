@@ -9,11 +9,11 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from quarterdeck.cli import app
-from quarterdeck.config import Settings
-from quarterdeck.digest import build_digest
-from quarterdeck.ledger import Ledger
-from quarterdeck.workflows import (
+from opswitness.cli import app
+from opswitness.config import Settings
+from opswitness.digest import build_digest
+from opswitness.ledger import Ledger
+from opswitness.workflows import (
     WorkflowDefinition,
     load_workflows,
     register_workflow,
@@ -27,8 +27,8 @@ from quarterdeck.workflows import (
 def workflow_env(tmp_path, monkeypatch):
     config = tmp_path / "config"
     config.mkdir(mode=0o700)
-    monkeypatch.setenv("QD_CONFIG_DIR", str(config))
-    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "state" / "ledger"))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(config))
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(tmp_path / "state" / "ledger"))
     return tmp_path, config
 
 

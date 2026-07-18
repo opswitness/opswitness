@@ -1,3 +1,0 @@
-"""Quarterdeck — run long-lived AI work with approvals, evidence, and recoverable execution."""
-
-__version__ = "0.0.1"

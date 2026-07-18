@@ -5,8 +5,8 @@ import yaml
 from httpx import Response
 from typer.testing import CliRunner
 
-from quarterdeck.digest import build_digest, render_markdown, render_telegram_html
-from quarterdeck.notify.telegram import _split
+from opswitness.digest import build_digest, render_markdown, render_telegram_html
+from opswitness.notify.telegram import _split
 
 
 def _sched(*jobs):
@@ -146,11 +146,11 @@ def test_none_coverage_still_names_known_gaps():
 
 
 def test_watchdog_refuses_green_on_empty_explicit_schedules(tmp_path, monkeypatch):
-    from quarterdeck.cli import app
-    from quarterdeck.ledger import Ledger
+    from opswitness.cli import app
+    from opswitness.ledger import Ledger
 
-    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "ledger"))
-    monkeypatch.setenv("QD_CONFIG_DIR", str(tmp_path / "conf"))
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(tmp_path / "ledger"))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(tmp_path / "conf"))
     Ledger(tmp_path / "ledger").append("run_started", "R1", {"job": "demo"})
     empty = tmp_path / "empty.yaml"
     empty.write_text("")
@@ -204,11 +204,11 @@ def test_running_renders_neutral_not_success():
 
 
 def test_digest_cli_exit_codes(tmp_path, monkeypatch):
-    from quarterdeck.cli import app
-    from quarterdeck.ledger import Ledger
+    from opswitness.cli import app
+    from opswitness.ledger import Ledger
 
-    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "ledger"))
-    monkeypatch.setenv("QD_CONFIG_DIR", str(tmp_path / "conf"))
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(tmp_path / "ledger"))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(tmp_path / "conf"))
     led = Ledger(tmp_path / "ledger")
     led.append("run_started", "R9", {"job": "demo"})
     led.append("run_finished", "R9", {"job": "demo", "status": "succeeded", "exit_code": 0})
@@ -254,7 +254,7 @@ def test_telegram_long_fields_clipped_and_chunks_never_cut_tags():
 def test_legacy_schedules_validation_matrix(tmp_path):
     import pytest
 
-    from quarterdeck.bootstrap import load_legacy_schedules
+    from opswitness.bootstrap import load_legacy_schedules
 
     empty = tmp_path / "empty.yaml"
     empty.write_text("")
@@ -285,11 +285,11 @@ def test_legacy_schedules_validation_matrix(tmp_path):
 
 
 def test_retire_and_unretire_cli_are_append_only(tmp_path, monkeypatch):
-    from quarterdeck.cli import app
-    from quarterdeck.ledger import Ledger
+    from opswitness.cli import app
+    from opswitness.ledger import Ledger
 
     ledger_dir = tmp_path / "ledger"
-    monkeypatch.setenv("QD_LEDGER_DIR", str(ledger_dir))
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(ledger_dir))
     runner = CliRunner()
     retired = runner.invoke(app, ["retire", "old-job", "--reason", "decommissioned"])
     assert retired.exit_code == 0 and "retired: old-job" in retired.output
@@ -301,11 +301,11 @@ def test_retire_and_unretire_cli_are_append_only(tmp_path, monkeypatch):
 
 
 def test_explicit_schedules_empty_file_no_traceback(tmp_path, monkeypatch):
-    from quarterdeck.cli import app
-    from quarterdeck.ledger import Ledger
+    from opswitness.cli import app
+    from opswitness.ledger import Ledger
 
-    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "ledger"))
-    monkeypatch.setenv("QD_CONFIG_DIR", str(tmp_path / "conf"))
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(tmp_path / "ledger"))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(tmp_path / "conf"))
     Ledger(tmp_path / "ledger").append("run_started", "R1", {"job": "demo"})
     empty = tmp_path / "empty.yaml"
     empty.write_text("")
@@ -324,10 +324,10 @@ def test_explicit_schedules_empty_file_no_traceback(tmp_path, monkeypatch):
 
 @respx.mock
 def test_telegram_send_uses_parse_mode(monkeypatch, tmp_path):
-    from quarterdeck.config import Settings
-    from quarterdeck.notify.telegram import send_telegram
+    from opswitness.config import Settings
+    from opswitness.notify.telegram import send_telegram
 
-    monkeypatch.setenv("QD_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(tmp_path))
     tmp_path.chmod(0o700)
     secrets = tmp_path / "secrets.yaml"
     secrets.write_text("telegram:\n  bot_token: T\n  chat_id: '42'\n")
@@ -339,6 +339,6 @@ def test_telegram_send_uses_parse_mode(monkeypatch, tmp_path):
     body = route.calls[0].request.content
     assert b"parse_mode" in body and b"HTML" in body
 
-    monkeypatch.setenv("QD_CONFIG_DIR", str(tmp_path / "empty"))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(tmp_path / "empty"))
     assert send_telegram("hello", Settings()) is False
     assert route.call_count == 1

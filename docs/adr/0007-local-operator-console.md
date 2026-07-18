@@ -1,11 +1,11 @@
-# ADR-0007: Quarterdeck is the sole local operator surface
+# ADR-0007: OpsWitness is the sole local operator surface
 
 Status: accepted
 
 ## Context
 
 Paperclip is the governance system of record and AionUi is a replaceable planning/agent adapter.
-They remain internal implementation components. Daily operators need one quiet Quarterdeck entry
+They remain internal implementation components. Daily operators need one quiet OpsWitness entry
 for fleet health, evidence, approvals, AI connections, mail summary, and new work. New work
 must not jump directly from a sentence into execution: the operator needs to review the objective,
 agent architecture, stages, cadence, checkpoints, artifacts, and risks first.
@@ -16,7 +16,7 @@ the existing trust boundaries.
 
 ## Decision
 
-Quarterdeck ships a thin FastAPI + React operator console, started with:
+OpsWitness ships a thin FastAPI + React operator console, started with:
 
 ```bash
 qd console serve --open
@@ -24,7 +24,7 @@ qd console serve --open
 
 This console is the sole ordinary product door. Users connect ChatGPT/OpenAI, Claude, DeepSeek,
 Grok/xAI, Ollama, or LM Studio, plan and run tasks, review approvals, and inspect evidence without opening AionUi or Paperclip. Those names
-appear only inside a closed advanced-diagnostics disclosure. Quarterdeck still delegates to their
+appear only inside a closed advanced-diagnostics disclosure. OpsWitness still delegates to their
 versioned local APIs and does not absorb their planner, agent runtime, governance state machine, or
 database.
 
@@ -35,34 +35,34 @@ or used to translate user-authored objectives, generated plans, evidence, or pro
 product navigation, controls, statuses, and consent/safety copy follow the selected language. An
 absent, inaccessible, or unknown preference fails to English.
 
-Provider connection is real, local, and credential-minimizing. Quarterdeck probes the installed
+Provider connection is real, local, and credential-minimizing. OpsWitness probes the installed
 vendor CLIs with fixed argv (`codex login status`, `claude auth status --json`) and exposes only a
 sanitized readiness result. ChatGPT login, local single-user Claude subscription login, and
 Anthropic Console API login use their vendors' fixed flows (`codex login`, `claude auth login
 --claudeai`, `claude auth login --console`). OpenAI also has one narrow API-key path: a
 loopback, CSRF-protected request accepts the key only for the current connection attempt, passes it
-through stdin to the fixed `codex login --with-api-key` command, then discards it. Quarterdeck never
+through stdin to the fixed `codex login --with-api-key` command, then discards it. OpsWitness never
 logs, echoes, places in argv, or writes to evidence an OpenAI/Anthropic password, browser cookie,
 OAuth token, or API key. Anthropic has a separate persistent API-key path because Claude Code has no
 equivalent stdin login command: the operator must explicitly confirm storage and usage billing; the
 key is validated against the read-only Models API, passed through stdin to macOS Keychain, and
 made available through a fixed executable `apiKeyHelper`. The helper path, provider, method, and
-outcome may be evidence; the key may not. Existing non-Quarterdeck `apiKeyHelper` configuration is
+outcome may be evidence; the key may not. Existing non-OpsWitness `apiKeyHelper` configuration is
 never overwritten. Claude subscription login is limited to the operator's own local session;
 hosted or multi-user product execution must use Anthropic API billing.
 
 DeepSeek and xAI use separate persistent API-key paths. Each key is validated only against the
 provider's fixed Models endpoint, passed to macOS Keychain through stdin, and represented by a
-Quarterdeck-owned non-secret helper. It is never submitted to AionUi: the pinned AionUi provider
+OpsWitness-owned non-secret helper. It is never submitted to AionUi: the pinned AionUi provider
 endpoint returns submitted credentials in its response and therefore cannot satisfy this boundary.
 Grok account login is allowed only through the official Grok Build `grok login` browser flow; no
-browser cookie, consumer token, or password crosses Quarterdeck. The xAI account may be shared by
+browser cookie, consumer token, or password crosses OpsWitness. The xAI account may be shared by
 Grok and the developer console, but API usage has separate billing. Provider authentication and
 Agent runtime readiness remain distinct. Until reviewed DeepSeek and Grok execution adapters pass
 acceptance, these connections are visible as credential-ready but absent from runtime choices.
 
 Local model connection is a separate, credential-free contract. Ollama and LM Studio are the only
-version-1 local providers. Quarterdeck probes compile-time fixed loopback endpoints, requires an
+version-1 local providers. OpsWitness probes compile-time fixed loopback endpoints, requires an
 explicit confirmation before starting either vendor service, and accepts neither a custom URL nor a
 local API key. It extracts only bounded model names and registers them in AionUi as OpenAI-compatible
 Custom providers at fixed `/v1` URLs. AionUi receives the literal non-secret placeholders `ollama`
@@ -97,7 +97,7 @@ An active Work overview refreshes its execution detail every 2.5 seconds and ren
 verifiable runtime progress: an exactly mapped active Agent slot, observed duration, slow/blocked
 state, and a recent activity timeline containing Agent name, strict tool identifier, tool status,
 timestamp, and collapsed count. Text responses contribute only a `response_observed` marker. The
-pinned AionUi runtime also exposes structured team work-item create/update records. Quarterdeck binds
+pinned AionUi runtime also exposes structured team work-item create/update records. OpsWitness binds
 those task IDs to the immutable plan stages, folds pending/running/blocked/completed/failed state, and
 attaches only the same content-free runtime activity observed between each stage's start and finish.
 New dispatch prompts require exact `[QD-STAGE:<order>] <title>` subjects; existing runs use a strict,
@@ -141,15 +141,15 @@ It binds only to `127.0.0.1` and delegates through narrow local adapters:
    `0700` workspace. The planner receives no tools and must return a versioned strict JSON plan
    with at most five agents and exactly one lead. Returning a result requires confirmed deletion
    of both the temporary Team and its local workspace.
-3. Quarterdeck validates the plan, stores its full text only in a private local plan store, and
+3. OpsWitness validates the plan, stores its full text only in a private local plan store, and
    appends request/plan hashes plus non-sensitive structure to the authoritative ledger.
 4. The review UI displays the exact `plan_sha256`, calculated over the objective, constraints,
    workspace, preferred cadence, and validated plan. Confirmation with any other hash is rejected.
-5. Quarterdeck recomputes that execution-envelope hash at confirmation and immediately before
+5. OpsWitness recomputes that execution-envelope hash at confirmation and immediately before
    dispatch, then fsyncs `task_plan_confirmed` before creating external side effects. It then creates
    or reconciles a Paperclip issue and either starts a registered allowlisted workflow or creates
    an AionUi execution Team from the confirmed agent architecture. These are hidden adapter calls;
-   the operator remains in Quarterdeck.
+   the operator remains in OpsWitness.
 6. Runtime completion is `completed_unverified`. Artifact, eval, or human sign-off is required to
    prove a business outcome.
 
@@ -169,7 +169,7 @@ states. An unavailable runtime, unadvertised model, incomplete assignment set, o
 rejected. Dispatch passes the hash-bound model id and does not auto-fallback.
 
 Task changes are chat-first. The operator describes a desired change, such as returning a failed
-citation check to a named Agent for at most two iterations, and Quarterdeck uses the same immutable
+citation check to a named Agent for at most two iterations, and OpsWitness uses the same immutable
 revision contract to draft a complete replacement plan. It cannot mutate or dispatch the reviewed
 plan. The hierarchy/loop graph remains an explicitly labelled advanced manual editor for cases where
 the operator needs to set an exact relationship or iteration limit directly.
@@ -209,7 +209,7 @@ visible only in the collapsed **Settings → Advanced diagnostics** section. Thi
 merge, not evidence deletion: append-only events, tombstones, run IDs, and retention semantics
 remain unchanged.
 
-An ended Aion run may expose **Continue this run** only when Quarterdeck can prove the exact team and
+An ended Aion run may expose **Continue this run** only when OpsWitness can prove the exact team and
 one conversation mapping for every planned Agent and the current Work leaf is also terminal. The
 operator's follow-up creates a new immutable child version rather than reopening or mutating the
 selected run. Its parent is the current leaf; `continued_from_plan_id`, source hash, follow-up hash,
@@ -226,7 +226,7 @@ input containing only Agent role keys, reporting edges, collaboration-edge limit
 preferences, source plan identity/hash, creation time, and a verification label. It contains no
 credentials, plan body, outside data, conversation transcript, or persistent employee identity. The
 operator can manually save it only from a non-active task; a completed task has `verified` status
-only where outcome evidence exists, otherwise it is explicitly unverified. Quarterdeck never
+only where outcome evidence exists, otherwise it is explicitly unverified. OpsWitness never
 auto-saves, overwrites, enables, or instantiates a blueprint. Reusing one still generates and reviews
 a full new plan and requires a new hash confirmation.
 
@@ -248,7 +248,7 @@ planning -> ready -> confirmed -> dispatching -> running
                                                  +---------> cancel_requested -> cancelled
 ```
 
-Pause, resume, and cancel are evidence-first Aion team transitions. Quarterdeck appends and fsyncs
+Pause, resume, and cancel are evidence-first Aion team transitions. OpsWitness appends and fsyncs
 the request before invoking the public adapter endpoint. A pause is complete only when all active
 Agent slots report paused. Continue sends a fixed request marker into the same Team and binds the
 new run id to the unchanged confirmed plan hash. Cancel remains `cancel_requested` until the exact
@@ -284,8 +284,8 @@ policy. A mode change writes `task_approval_mode_change_requested` before state 
 the request without terminal evidence, startup recovery selects the more restrictive of the old
 and requested modes and appends `task_approval_mode_change_recovered`.
 
-Manual attention is task-local. Quarterdeck exposes an Aion approval inside Work only when its
-Quarterdeck source marker is exact, its `planId` resolves to an existing private plan, and that id
+Manual attention is task-local. OpsWitness exposes an Aion approval inside Work only when its
+OpsWitness source marker is exact, its `planId` resolves to an existing private plan, and that id
 matches the displayed Work item. The redacted request, risks, approve/reject choice, optional note,
 and explicit review acknowledgement are completed inline. The global Approval view remains an
 aggregate queue and recovery surface; it is not the ordinary continuation path for one task.
@@ -335,7 +335,7 @@ Iterative collaboration is a separate graph. A ready plan may define up to five 
 exact agent names, including a self-loop for bounded self-review or cycles between multiple agents.
 Every loop carries a user-editable return/stop condition and an integer `max_iterations` from 1 to
 10. Workflow plans cannot override their runtime with these loops. Saving never patches the reviewed
-plan: Quarterdeck creates an immediately reviewable child version, binds the complete reporting tree
+plan: OpsWitness creates an immediately reviewable child version, binds the complete reporting tree
 and loop contracts into its new execution-envelope hash, and records only `organization_sha256`,
 counts, and non-sensitive version metadata in `task_plan_organization_revised`. Confirmed or active
 organizations are read-only. The effective tree and bounded loops are included in the Paperclip issue
@@ -347,7 +347,7 @@ become an employee database or agent runtime.
 **Delete task** is a visibility tombstone, not record destruction. It is allowed only for `ready`,
 `failed`, `cancelled`, or `completed_unverified` plans. Planning, confirmed, dispatching, running,
 approval-waiting, and input-waiting work must first reach a terminal state; a parent with any visible child revision
-must be deleted child-first. Quarterdeck fsyncs one idempotent `task_plan_deleted` event containing
+must be deleted child-first. OpsWitness fsyncs one idempotent `task_plan_deleted` event containing
 only non-sensitive identity/hash metadata. The private plan file, execution evidence, artifacts,
 and governance records remain unchanged, while ordinary list/get/recovery paths fold the event and
 hide the plan. This makes a crash after deletion unambiguous and prevents the UI from becoming an
@@ -376,9 +376,9 @@ Before recovery starts, the process holds a non-blocking exclusive `console.leas
 state directory. A second port or process therefore cannot inspect or mutate the same plan state;
 graceful shutdown waits for background work before releasing the lease.
 
-Before the Team POST, Quarterdeck fsyncs a `0600` marker containing only the request owner,
+Before the Team POST, OpsWitness fsyncs a `0600` marker containing only the request owner,
 purpose, exact workspace, and optional Team ID. Team creation is then bound atomically to that
-marker. On startup, while holding the exclusive console lease, Quarterdeck records recovery intent,
+marker. On startup, while holding the exclusive console lease, OpsWitness records recovery intent,
 lists AionUi Teams, requires one exact workspace + expected-name + optional-ID match, deletes only
 that Team, lists again to prove absence, removes the local workspace, and records completion. A
 missing or malformed marker, insecure permissions, multiple matches, identity drift, unavailable
@@ -386,7 +386,7 @@ AionUi, unconfirmed deletion, or unavailable audit ledger refuses startup. There
 or bulk Team deletion.
 
 A machine crash before the initial marker is published can leave an unmarked local directory, but
-cannot follow the later Team POST in Quarterdeck's program order. That directory is not deleted by
+cannot follow the later Team POST in OpsWitness's program order. That directory is not deleted by
 guesswork: startup stops for operator inspection. Interrupted planning remains failed separately;
 cleanup recovery does not replay planning or execution.
 
@@ -445,7 +445,7 @@ deleted by the console.
 - loopback bind by default and an always-loopback AionUi URL;
 - optional private exposure requires either direct browser-trusted TLS or one trusted loopback TLS
   terminator; plaintext private requests fail closed;
-- the recommended Tailscale Serve mode keeps Quarterdeck on `127.0.0.1` and trusts forwarded HTTPS
+- the recommended Tailscale Serve mode keeps OpsWitness on `127.0.0.1` and trusts forwarded HTTPS
   only when the socket peer is loopback and the Host exactly matches configured `public_host`;
 - private requests require a revocable `Secure`, `HttpOnly`, `SameSite=Strict` device cookie whose
   raw bearer value is never persisted; pairing codes are short-lived, single-use, rate-limited, and
@@ -468,23 +468,23 @@ deleted by the console.
 - approval mutation requires paired or local access, exact Origin, CSRF, JSON, an explicit review acknowledgement, and
   an exact pending UUID.
 
-Quarterdeck is the approval-decision surface. Before calling Paperclip's fixed approve/reject API,
+OpsWitness is the approval-decision surface. Before calling Paperclip's fixed approve/reject API,
 it fsyncs `approval_decision_requested`; afterward it records a fixed outcome. The optional note is
 sent to the governance record but only its SHA-256 is written to the local ledger. The authoritative
 local actor in version 1 is `local_console`: this is a single-owner boundary, not a claim of
 multi-user identity or Paperclip-authenticated human identity. A paired device is revocable access
 material, not a new user account or proof of a particular human. The standalone Paperclip MCP remains
-unmounted in AionUi. Existing Quarterdeck gate and allowlist rules remain authoritative.
+unmounted in AionUi. Existing OpsWitness gate and allowlist rules remain authoritative.
 
 Paperclip v2026.707.0 permits approval resolution only for a `board` actor. In the pinned
-`local_trusted` deployment, Quarterdeck therefore keeps the service-agent bearer token on ordinary
+`local_trusted` deployment, OpsWitness therefore keeps the service-agent bearer token on ordinary
 projection calls but deliberately omits it for approve/reject only after an unauthenticated health
 probe proves the exact API base is loopback and reports `deploymentMode=local_trusted`. A non-loopback
-base or authenticated deployment fails closed; Quarterdeck never relabels an agent token as a user
+base or authenticated deployment fails closed; OpsWitness never relabels an agent token as a user
 and never writes the Paperclip database directly.
 
 For AionUi execution Teams, AionUi remains the component that physically pauses the tool call,
-Paperclip remains the approval object and decision store, and Quarterdeck binds both with the exact
+Paperclip remains the approval object and decision store, and OpsWitness binds both with the exact
 plan, conversation, call, and request hash. The console exposes only allow-once and reject, always
 sends `always_allow=false`, and retries delivery only after the Paperclip decision is durable. A
 missing, changed, duplicated, or unreachable confirmation fails closed; a pending count alone is
@@ -514,7 +514,7 @@ supplies the single-use decision.
 
 ## Consequences
 
-The operator gets one concise Quarterdeck surface while Paperclip, AionUi, launchd, and provider
+The operator gets one concise OpsWitness surface while Paperclip, AionUi, launchd, and provider
 CLIs keep their existing ownership boundaries behind it. Workspace remains the default chatbox and
 reduces task creation to one clear description-and-confirm flow; Today provides an optional
 evidence-based operating view rather than replacing that main entry. Task teams, manually saved blueprints, runtime revisions,

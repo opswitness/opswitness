@@ -4,10 +4,10 @@ import os
 import respx
 from httpx import Response
 
-from quarterdeck.artifacts import register_console_artifact
-from quarterdeck.ledger import Ledger
-from quarterdeck.paperclip import PaperclipClient
-from quarterdeck.projector import Projector, pending_events, qd_metadata
+from opswitness.artifacts import register_console_artifact
+from opswitness.ledger import Ledger
+from opswitness.paperclip import PaperclipClient
+from opswitness.projector import Projector, pending_events, qd_metadata
 
 BASE = "http://pp.test"
 
@@ -144,11 +144,11 @@ def test_lease_excludes_second_projector(tmp_path):
 def test_index_and_cli_status(tmp_path, monkeypatch):
     from typer.testing import CliRunner
 
-    from quarterdeck.cli import app
-    from quarterdeck.config import Settings
-    from quarterdeck.index import job_summary, query_runs, rebuild
+    from opswitness.cli import app
+    from opswitness.config import Settings
+    from opswitness.index import job_summary, query_runs, rebuild
 
-    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "ledger"))
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(tmp_path / "ledger"))
     led = Ledger(Settings().ledger_dir)
     _seed_run(led, job="feed-monitor")
 
