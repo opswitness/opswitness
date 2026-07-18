@@ -1,5 +1,12 @@
 # Paperclip 永久安装清单 v3（M2，已批准执行）
 
+> **Historical execution record.** This runbook records the pre-public Quarterdeck installation
+> that was actually executed, so its `qd` command, old paths, package version, and
+> `com.quarterdeck.*` labels are intentionally preserved. Do not replay it as a fresh OpsWitness
+> Alpha installation. Start with [QUICKSTART.md](QUICKSTART.md); new services use
+> `com.opswitness.*`, while `opswitness doctor` rejects matching old and new services running
+> together.
+
 目标机器：用户 MacBook。本文记录已获批准并执行的 M2 安装步骤。永久安装、真实
 doctor、隔离恢复和活库四连已经完成；register-trigger 正处于 24–48 小时 canary，
 后续真实任务仍受 [READINESS.md](READINESS.md) 的 soak 闸门约束。

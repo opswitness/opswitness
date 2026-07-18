@@ -1,0 +1,34 @@
+name: Feature request
+description: Propose a bounded improvement to the Community core
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Operator problem
+      description: Describe the user problem without prescribing a second scheduler or runtime.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Trust and evidence boundary
+      description: What must be confirmed, recorded, redacted, or fail closed?
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: I checked the support matrix and known limitations.
+          required: true
+        - label: This request contains no secrets or private task data.
+          required: true

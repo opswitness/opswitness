@@ -1,0 +1,33 @@
+# Known Limitations
+
+These limitations are release promises, not a hidden backlog.
+
+1. **Durability remains experimental.** A 24-48 hour release canary is required for the Alpha
+   candidate. Stable `v0.1.0` additionally requires the full seven-day soak, feed-monitor and
+   sox-monitor adoption, and a successful isolated recovery drill.
+2. **Execution is not outcome proof.** A process exit, Agent response, or Agent-reported completed
+   stage does not prove that a report or other business result is correct. CAS artifacts, evals, and
+   human sign-off supply outcome evidence.
+3. **Aion stage telemetry is bounded and self-reported.** The UI deliberately omits chain-of-thought,
+   raw tool arguments, message bodies, and fabricated completion percentages.
+4. **Pause is cooperative.** Pause and stop become final only when the mapped runtime supplies
+   confirming evidence. A successful RPC acknowledgement alone is not termination proof.
+5. **Automatic approval is the default.** It still creates single-use governance records, but it
+   removes the per-tool human interruption. Select manual mode before confirmation for sensitive
+   work, or tighten a supported active run in Work.
+6. **Full operation has local dependencies.** The core wrapper works without Paperclip, but the
+   full Workforce flow depends on compatible local AionUi and Paperclip services. There is no silent
+   runtime fallback.
+7. **Private-network and mobile use are Beta.** Browser-trusted HTTPS and paired-device credentials
+   are required. Physical Safari/Chrome acceptance must pass before the mobile entry is promoted.
+8. **Provider readiness is explicit.** DeepSeek and Grok credentials may be connected, but they are
+   not selectable execution runtimes in this Alpha. OpenClaw is not integrated.
+9. **No team-of-teams or long-term learning.** A Work contains its own planned Agent team. One Work
+   cannot yet invoke another Work as a worker, and runtime material does not become memory without a
+   future auditable candidate/approval/version mechanism.
+10. **Compatibility is intentionally bounded.** `qd`, `QD_*`, old data roots, old launchd labels, and
+    known Keychain services are supported for existing installs. The old Python import package is not.
+11. **GitHub Release only.** PyPI is not configured for Alpha, and release assets are valid only when
+    their checksums, build manifest, SPDX SBOM, and GitHub attestation agree.
+12. **No SLA or production guarantee.** Community Alpha is suitable for synthetic and non-critical
+    pilots. Keep independent backups and recovery paths for important work.

@@ -1,4 +1,33 @@
-# Quarterdeck Readiness
+# OpsWitness Readiness
+
+## Community Alpha release-candidate update (2026-07-18)
+
+The approved source migration targets `v0.1.0-alpha.1` (`0.1.0a1` in Python metadata) with
+`opswitness` as the distribution, module, and primary CLI. The `qd` CLI, `QD_*` environment
+aliases, former data roots, launchd labels, and known Keychain services remain bounded
+compatibility surfaces. Conflicts between old and new state fail closed, and no historical
+ledger, CAS, plan hash, artifact hash, protocol marker, or validation record is rewritten.
+
+This is not yet a public-release verdict. The exact GitHub organization/domain are not reserved,
+no remote Actions run exists, the append-only 24-48 hour release canary is not complete, and
+physical iPhone Safari/Chrome Beta acceptance has not been recorded. Alpha may publish only after
+private remote checks, distribution verification, wheel smoke installation, the browser journey,
+synthetic failure drills, canary evidence, and manual Release-asset inspection all pass. Stable
+remains blocked on the seven-day soak and recovery/adoption gates recorded below.
+
+The private remote is a validation stage, not a publication stage: its manual workflow builds and
+verifies artifacts with read-only repository permissions. GitHub documents
+[private-repository artifact attestations](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)
+as an Enterprise Cloud feature, so the OIDC-enabled `publish` job is restricted to the final
+approved tag after the repository is public (or Enterprise support is independently confirmed).
+
+The operational text below is the preserved 2026-07-16 pre-migration snapshot. Its old product
+name, paths, service labels, version numbers, and candidate-brand statements are historical
+evidence, not current installation instructions. For fresh Alpha installation use
+[QUICKSTART.md](QUICKSTART.md); for current support boundaries use
+[SUPPORT-MATRIX.md](SUPPORT-MATRIX.md) and [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md).
+
+## Pre-migration operational snapshot
 
 Snapshot date: 2026-07-16 · This file is a SINGLE current snapshot; all earlier review
 text is preserved verbatim under History. ADRs remain the source of design truth;

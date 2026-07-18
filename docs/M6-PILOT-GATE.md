@@ -39,7 +39,7 @@ the product gate; a verbal expression of interest is not.
 
 ## Engineering start gate
 
-Do not create `quarterdeck-practitioner`, choose a frontend template, or implement UI before
+Do not create `opswitness-practitioner`, choose a frontend template, or implement UI before
 paid evidence exists. Once it exists, implementation starts in this order:
 
 1. threat model and egress allowlist tests;

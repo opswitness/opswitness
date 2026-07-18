@@ -1,11 +1,19 @@
 # Commercialization Strategy
 
+## Community Alpha packaging update
+
+The first public candidate is the Apache-2.0, single-operator OpsWitness Community Alpha distributed
+only as signed GitHub Release assets. It has no account requirement, artificial run quota, PyPI
+dependency, token resale, or hosted control plane. Private HTTPS/PWA and optional mail/Telegram
+connections remain clearly labeled Beta or Experimental; future commercial modules cannot weaken
+the free core's local evidence, export, backup, approval, or fail-closed behavior.
+
 Status: product decision, 2026-07-14. This document guides packaging and sequencing; it
 is not legal, tax, privacy, or licensing advice.
 
 ## Decision
 
-Quarterdeck commercializes as an **open local core plus paid vertical delivery, then paid
+OpsWitness commercializes as an **open local core plus paid vertical delivery, then paid
 team operations**. It does not begin as a generic freemium product with an artificial
 feature paywall or a token-execution tax.
 
@@ -22,7 +30,7 @@ be withdrawn into a paid edition.
 
 The local, single-operator Community edition remains open source and useful without an
 account, vendor proxy, artificial run quota, or paid server. It includes the capabilities
-that make Quarterdeck credible:
+that make OpsWitness credible:
 
 - local append-only ledger, evidence review, export, and backup/restore paths;
 - plan-confirmed Auto execution, an audited in-Work Auto/manual switch for future calls, opt-in
@@ -41,7 +49,7 @@ that make Quarterdeck credible:
 - plan-bound live stage telemetry from structured runtime work items, with safe activity metadata
   and an explicit separation between Agent-reported execution and verified business outcomes;
 - fixed-loopback Ollama and LM Studio discovery/connection through the hidden local adapter, with
-  no vendor proxy, remote endpoint, or Quarterdeck token markup;
+  no vendor proxy, remote endpoint, or OpsWitness token markup;
 - core AionUi, Paperclip, Claude Code, and Codex adapter boundaries.
 
 Safety, evidence, data export, and the ability to leave the product are not upsell levers.
@@ -51,7 +59,7 @@ an unsafe demonstration rather than a product people can adopt.
 ## First revenue: paid vertical Pilot and implementation
 
 The first commercial product is a paid, local-first vertical workbench, not a generic
-"Quarterdeck Pro" subscription. The initial case is the practitioner workbench described in
+"OpsWitness Pro" subscription. The initial case is the practitioner workbench described in
 [M6-PILOT-GATE.md](M6-PILOT-GATE.md) and the customer-facing
 [PRACTITIONER-PILOT-OFFER.zh-CN.md](PRACTITIONER-PILOT-OFFER.zh-CN.md).
 
@@ -96,11 +104,11 @@ Offer managed deployment, encrypted backups, optional multi-machine coordination
 and update operations only after the operational and security burden can be carried honestly.
 This is a service commitment, not an early feature checkbox. Preserve local control and clear
 data residency boundaries; do not require customers to send raw operational or vertical data to
-a Quarterdeck cloud merely to use the core.
+an OpsWitness cloud merely to use the core.
 
 ## Product and repository boundaries
 
-- `quarterdeck` remains the Apache-2.0 platform core.
+- `opswitness` remains the Apache-2.0 platform core.
 - Private vertical workbenches, proprietary domain corpora, eval/rule update services, and
   customer-specific configuration live in separate repositories and packages.
 - Credentials, customer data, strategies, and private knowledge never enter the public core.

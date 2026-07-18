@@ -1,4 +1,12 @@
-# Quarterdeck Completion Audit
+# OpsWitness Completion Audit
+
+Community Alpha update, 2026-07-18: the release candidate is being normalized as
+`OpsWitness v0.1.0-alpha.1` / Python `0.1.0a1`. The package/module rename preserves compatibility at
+the CLI, configuration, data-root, launchd, and known Keychain boundaries without rewriting any
+historical evidence or hash. Release engineering now requires a clean checkout, exact identity
+mapping, dual CLI verification, Linux/macOS quality gates, full-history DCO/gitleaks, checksums,
+build manifest, SPDX SBOM, and GitHub attestation. Publication remains blocked on the external
+brand/remote gates and final RC acceptance recorded in READINESS.
 
 Operational snapshot: 2026-07-13 21:24 PDT. The source-only console updates below were recorded
 through 2026-07-15 02:18 PDT without changing production state. This document maps the approved M0-M6
@@ -14,7 +22,7 @@ snapshot.
 | M2 permanent install and soak | Postgres/Paperclip/services installed; live matrix, recovery, doctor checks and canary ledger contract exist | In progress: elapsed canary, stable-tool upgrade, then seven-day soak |
 | M3 Claude gate | Two live defer/approval/resume/consume drills and 60-second recovery service | Complete for non-interactive `qd gated-claude` only |
 | M4 artifact/eval/signoff | Atomic CAS, ledger authority, live projection/reconciliation and restore evidence | Complete |
-| M5 open-source v0.1 | CI/release/SBOM/provenance code, tracked-only distribution verification, showcase, wheel and first-run evidence exist | Blocked by brand decision and real Git remote/Actions |
+| M5 Community Alpha | CI/release/SBOM/provenance code, tracked-only distribution verification, compatibility migration, showcase, wheel and first-run evidence exist | Release candidate: blocked by identifier reservation, real Git remote/Actions, final RC tests and canary |
 | M6 paid practitioner Pilot | Offer, privacy contract, technical boundary and success criteria exist | Blocked by written paid commitment/deposit; product code intentionally absent |
 | Local total console | Default chat-first Workspace, AI-expanded execution brief, persisted planning stages and time range, provider connection facade, versioned plan revision, independent hash-bound Work forks, evidence-preserving deletion, graphical hierarchy and bounded collaboration loops, evidence-backed Auto/manual approval modes with task-local decisions, resumable runtime operator questions, plan-bound AionUi team-task stage telemetry, ledger-folded immutable run history with exact-context continuation, hash-bound confirmation, atomic dispatch/recovery, fixed-error privacy boundary, single-instance lease, per-request private AionUi workspaces, responsive UI and packaged assets | Complete in source; stable install/KeepAlive service waits for canary maintenance window |
 
