@@ -204,7 +204,14 @@ class Projector:
                     stats["blocked"] += 1
                     continue
                 try:
-                    issue_id = self._issue_for(job)
+                    bound_issue_id = event["payload"].get("paperclip_issue_id")
+                    issue_id = (
+                        bound_issue_id
+                        if event["kind"] == "artifact_registered"
+                        and isinstance(bound_issue_id, str)
+                        and bound_issue_id
+                        else self._issue_for(job)
+                    )
                     if event["kind"] == "artifact_registered":
                         remote_id, reconciled = self._project_artifact(issue_id, event)
                         self._ack(event, "work_product", remote_id)

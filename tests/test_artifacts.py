@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 import respx
@@ -9,6 +10,7 @@ from quarterdeck.artifacts import (
     artifact_root,
     evaluate_artifact,
     register_artifact,
+    register_console_artifact,
     signoff_artifact,
     verify_registration,
 )
@@ -65,6 +67,37 @@ def test_cas_survives_source_overwrite_and_preserves_multiple_lineages(tmp_path)
     assert [path for path in target.iterdir() if path.is_file()] == [
         target / first["payload"]["sha256"]
     ]
+
+
+def test_console_artifact_registration_is_plan_bound_and_idempotent(tmp_path):
+    ledger = Ledger(tmp_path / "state" / "ledger")
+    source = tmp_path / "report.pdf"
+    source.write_bytes(b"synthetic pdf")
+
+    first = register_console_artifact(
+        ledger,
+        source,
+        plan_id="01KXRXK1BHC8RDEJGXNZNVGM3G",
+        logical_name="report.pdf",
+        labels=["console-output"],
+        paperclip_issue_id="issue-1",
+    )
+    repeated = register_console_artifact(
+        ledger,
+        source,
+        plan_id="01KXRXK1BHC8RDEJGXNZNVGM3G",
+        logical_name="report.pdf",
+        labels=["console-output"],
+        paperclip_issue_id="issue-1",
+    )
+
+    assert repeated["event_id"] == first["event_id"]
+    assert first["run_id"] == "01KXRXK1BHC8RDEJGXNZNVGM3G"
+    assert first["payload"]["plan_id"] == first["run_id"]
+    assert first["payload"]["job"] == f"console:{first['run_id']}"
+    assert first["payload"]["paperclip_issue_id"] == "issue-1"
+    assert verify_registration(ledger, first)["ok"] is True
+    assert len([event for event in ledger.read_all() if event["kind"] == "artifact_registered"]) == 1
 
 
 def test_cas_corruption_is_visible_and_cli_returns_nonzero(tmp_path, monkeypatch):
@@ -169,6 +202,24 @@ def test_artifact_index_is_rebuilt_from_ledger(tmp_path):
     assert info["artifacts"] == 1
     rows = query_artifacts(db, run_id="run-1")
     assert rows[0]["sha256"] == event["payload"]["sha256"]
+
+
+def test_artifact_index_concurrent_rebuilds_publish_complete_databases(tmp_path):
+    ledger = Ledger(tmp_path / "state" / "ledger")
+    _seed_run(ledger)
+    source = tmp_path / "x.json"
+    source.write_text("{}")
+    event = register_artifact(ledger, source, run_id="run-1", logical_name="x.json")
+    db = tmp_path / "index.db"
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(lambda _: rebuild(db, ledger), range(32)))
+
+    assert {result["runs"] for result in results} == {1}
+    assert {result["artifacts"] for result in results} == {1}
+    rows = query_artifacts(db, run_id="run-1")
+    assert [row["event_id"] for row in rows] == [event["event_id"]]
+    assert not list(tmp_path.glob(".index.db.*.qd-index-tmp*"))
 
 
 def test_digest_separates_execution_and_outcome_evidence(tmp_path):

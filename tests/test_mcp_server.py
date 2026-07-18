@@ -33,6 +33,13 @@ def test_underlying_functions(seeded_env):
     backlog = mcp_server.projection_backlog()
     assert backlog["pending"] == 2 and backlog["by_job"] == {"feed-monitor": 2}
 
+    package = mcp_server.python_package_status("pytest")
+    assert package["installed"] is True
+    assert package["version"]
+    assert mcp_server.python_package_status("not a package")["error"] == (
+        "invalid package name"
+    )
+
 
 def test_project_now_refuses_without_config(seeded_env, monkeypatch):
     monkeypatch.delenv("PAPERCLIP_API_KEY", raising=False)
@@ -51,6 +58,8 @@ def test_server_exposes_all_tools(seeded_env):
         "qd_projection_backlog",
         "qd_artifacts",
         "qd_artifact_verify",
+        "qd_python_package_status",
+        "qd_request_input",
         "qd_watchdog",
         "qd_project_now",
         "qd_workflows",

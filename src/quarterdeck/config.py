@@ -11,10 +11,12 @@ Legacy escape hatch: the Paperclip API key is also honored from the env var name
 import os
 import re
 import stat
+from ipaddress import ip_address, ip_network
 from pathlib import Path
+from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -87,14 +89,23 @@ class MailConfig(BaseModel):
 
 
 class ConsoleConfig(BaseModel):
-    """Loopback-only total console and local AionUi adapter settings."""
+    """Local console plus an explicit, fail-closed private HTTPS exposure mode."""
 
     model_config = ConfigDict(extra="forbid")
+    exposure: Literal["loopback", "private"] = "loopback"
+    private_transport: Literal["direct_tls", "trusted_loopback_proxy"] = "direct_tls"
     host: str = "127.0.0.1"
     port: int = Field(default=8765, ge=1024, le=65535)
+    public_host: str = ""
+    public_port: int | None = Field(default=None, ge=1, le=65535)
+    tls_certfile: Path | None = None
+    tls_keyfile: Path | None = None
+    pairing_code_ttl_seconds: int = Field(default=600, ge=60, le=3600)
+    device_session_days: int = Field(default=90, ge=1, le=365)
     aionui_base: str = "http://127.0.0.1:63021"
     aionui_app: Path = Path("/Applications/AionUi.app")
     codex_bin: Path = Path("/Applications/Codex.app/Contents/Resources/codex")
+    grok_bin: Path = Path.home() / ".local" / "bin" / "grok"
     state_dir: Path = Path.home() / ".local" / "state" / "quarterdeck" / "console"
     planner_timeout_seconds: float = Field(default=180.0, ge=30.0, le=600.0)
     planner_assistant_id: str = "bare:2d23ff1c"
@@ -106,12 +117,55 @@ class ConsoleConfig(BaseModel):
         }
     )
 
-    @field_validator("host")
-    @classmethod
-    def loopback_only(cls, value: str) -> str:
-        if value != "127.0.0.1":
-            raise ValueError("console.host must be 127.0.0.1")
-        return value
+    @model_validator(mode="after")
+    def validate_exposure(self) -> "ConsoleConfig":
+        if self.exposure == "loopback":
+            if self.host != "127.0.0.1":
+                raise ValueError("console.host must be 127.0.0.1 in loopback mode")
+            if self.public_host:
+                raise ValueError("console.public_host is only valid in private mode")
+            if self.public_port is not None:
+                raise ValueError("console.public_port is only valid in private mode")
+            if self.private_transport != "direct_tls":
+                raise ValueError("console.private_transport is only valid in private mode")
+            if self.tls_certfile is not None or self.tls_keyfile is not None:
+                raise ValueError("console TLS files are only valid in private mode")
+            return self
+
+        try:
+            bind_address = ip_address(self.host)
+        except ValueError as exc:
+            raise ValueError("console.host must be an IP address in private mode") from exc
+        tailscale_v4 = ip_network("100.64.0.0/10")
+        if not (
+            bind_address.is_unspecified
+            or bind_address.is_private
+            or bind_address in tailscale_v4
+        ):
+            raise ValueError("console.host must be a private or wildcard IP address")
+        if not self.public_host or any(
+            character in self.public_host for character in "/:@?#[]"
+        ):
+            raise ValueError("console.public_host must be one DNS name or IPv4 address")
+        if len(self.public_host) > 253 or self.public_host.startswith("."):
+            raise ValueError("console.public_host is invalid")
+        try:
+            ip_address(self.public_host)
+        except ValueError:
+            labels = self.public_host.rstrip(".").split(".")
+            if not labels or any(
+                not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label)
+                for label in labels
+            ):
+                raise ValueError("console.public_host is invalid") from None
+        if self.private_transport == "trusted_loopback_proxy":
+            if self.host != "127.0.0.1":
+                raise ValueError("trusted_loopback_proxy must bind console.host to 127.0.0.1")
+            if self.tls_certfile is not None or self.tls_keyfile is not None:
+                raise ValueError("trusted_loopback_proxy must not configure console TLS files")
+        elif self.tls_certfile is None or self.tls_keyfile is None:
+            raise ValueError("private direct_tls exposure requires tls_certfile and tls_keyfile")
+        return self
 
     @field_validator("aionui_base")
     @classmethod

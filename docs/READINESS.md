@@ -1,6 +1,6 @@
 # Quarterdeck Readiness
 
-Snapshot date: 2026-07-14 · This file is a SINGLE current snapshot; all earlier review
+Snapshot date: 2026-07-16 · This file is a SINGLE current snapshot; all earlier review
 text is preserved verbatim under History. ADRs remain the source of design truth;
 `INSTALL-PAPERCLIP.md` records the approved M2 procedure. Remaining rollout steps stay
 blocked by the current open gates below.
@@ -10,8 +10,9 @@ blocked by the current open gates below.
 - M0-M4, M5/M6 preparation, and production permission hardening are committed on `main`.
   M2 permanent install and live integration
   executed successfully, while its elapsed soak gates remain open.
-- Full suite: 303 tests pass in three consecutive runs; ruff, mypy, TypeScript, and the packaged
-  Vite build pass. DCO, targeted worktree gitleaks, and full-history gitleaks are clean.
+- Full suite: 384 Python tests and 37 frontend tests pass; ruff, mypy, TypeScript, and the packaged
+  Vite build pass. The current worktree gitleaks scan is clean; DCO and full-history gitleaks remain
+  release gates for the eventual committed revision.
 - Process-tree signalling no longer executes `pgrep`, recursion, sleeps, or subprocesses
   in a signal handler. The handler writes a self-pipe; the supervisor snapshots
   `(pid, create_time)`, verifies descendants, escalates after 750ms, and emits
@@ -62,7 +63,7 @@ blocked by the current open gates below.
   [ADR-0003](adr/0003-artifact-authority.md).
 - M5 name-independent release preparation includes cross-platform CI, DCO enforcement,
   wheel/sdist hashes, SPDX SBOM, GitHub provenance attestation, release assets, an
-  end-to-end synthetic showcase, an eleven-tool ops MCP, and a structurally isolated two-tool
+  end-to-end synthetic showcase, a thirteen-tool ops MCP, and a structurally isolated two-tool
   mail MCP. The first-run local core
   clears the ten-minute target. Public release remains blocked by the brand and remote
   gates. Evidence: [M5-VALIDATION.md](M5-VALIDATION.md).
@@ -85,7 +86,7 @@ blocked by the current open gates below.
   evidence and projection acknowledgements. That acceptance itself left production qd and
   launchd unchanged; the later mail-schema recovery used the documented maintenance procedure.
 - AionUi now shows the enabled custom Assistant `每日工作台`, fixed to `Permission=default` and
-  bound only to the eleven-tool ops MCP.
+  bound only to the thirteen-tool ops MCP.
   Mail data is intentionally excluded from that surface: a future `邮件回复` assistant must bind
   only `qd mcp --profile mail`, whose two tools cannot launch workflows or mutate the fleet. The
   adapter is fixed-query, metadata-only, pinned to `gws 0.22.5`, and disabled by default. The
@@ -99,7 +100,18 @@ blocked by the current open gates below.
   fixed readonly Gmail login command. Desktop and 390x844 mobile acceptance pass with no horizontal
   overflow; the real state remains `oauth_client_issue=missing` and disabled.
 - The local operator console is code-complete at `qd console serve`: FastAPI serves the packaged
-  React UI on loopback only. Its default left-navigation Workspace is a chat-first task entry:
+  React UI on loopback by default. The optional private surface now fails closed unless effective
+  HTTPS and a paired-device credential are both present. It supports direct TLS and a recommended
+  trusted-loopback Tailscale Serve mode; Host/Origin/CSRF checks, one-time pairing, immediate
+  revocation, hashed credential storage, and proxy-spoof rejection have deterministic tests. The
+  packaged PWA has Safari/Chrome manifest metadata, PNG icons, a static-only service worker, and an
+  offline page that explicitly withholds task data. The 2026-07-14 live-tailnet acceptance passed:
+  the console runs as a user LaunchAgent behind a tailnet-only Tailscale Serve route; HTTP/2, HSTS,
+  unpaired redirect/API denial, real code claim, authenticated bootstrap, immediate revocation,
+  Chrome, Safari, and 390px no-overflow checks all passed. Physical-iPhone acceptance remains an
+  environment gate because the enrolled phone was offline during this run; it is not inferred from
+  the responsive browser check. The original chat-first Workspace remains the default route and a
+  permanent navigation category; only Tasks and Team are merged into Work:
   one plain-language description opens the existing ephemeral tool-free AionUi Plan Mode contract,
   expands terse intent into a validated six-section execution brief, then renders the Agent
   architecture, stages, cadence, checkpoints, artifacts, and risks inline. Persisted backend phases
@@ -110,25 +122,64 @@ blocked by the current open gates below.
   occur. A real
   synthetic request returned a four-Agent/four-stage review plan and stopped at the unchecked,
   disabled confirmation action, so no execution side effect occurred. Desktop and 390px mobile
-  layouts have zero horizontal overflow; the Workspace composer stays above the six-item mobile
+  layouts have zero horizontal overflow; the New work composer stays above the five-item mobile
   navigation, quick prompts only populate local input, and New conversation resets it without a
   planning side effect. The built wheel contains the versioned static assets.
+  Workspace provides 27 bilingual, locally searchable and
+  category-filtered common-task presets. Each preset is a detailed planning brief with an explicit approval/data boundary;
+  selecting one only fills the composer and cannot call planning, confirmation, or execution.
+  Search remains browser-local. The catalog includes the synthetic
+  Bazi demo with fixed `DEMO-001`, deterministic `lunar-python`, three review roles, human sign-off,
+  traceable JSON/citation/review/PDF outputs, no delivery, and no real-person data.
+  My task templates and Team blueprints sit beside that catalog, so reusable starting points no
+  longer require a separate top-level Library route. The template entry lets the operator save, search, reuse, and archive private
+  task objectives. Files are mode `0600`, ledger events contain hashes rather than template text,
+  writes require CSRF and explicit confirmation, and selection has no planning or dispatch side
+  effect. Task templates remain distinct from topology-only TeamBlueprints.
   Mail stays visibly `未启用` until the existing consent/OAuth gate closes, but its setup button now
   opens the exact readonly and model-metadata consent contract instead of a dead control. Design authority:
   [ADR-0007](adr/0007-local-operator-console.md).
+- The console now defaults to English and offers an English/中文 selector in Settings. The preference
+  is browser-local presentation state; static controls and safety copy switch immediately while
+  authored task content, backend state, plan hashes, and ledger evidence remain untouched. Frontend
+  unit coverage fixes English as the invalid-or-absent fallback and verifies both localized member
+  observations and task-adjustment drafts.
 - Quarterdeck is now the sole ordinary operator surface. The Connections view probes the real
-  local ChatGPT/OpenAI and Claude login state and launches only fixed vendor-owned login flows;
-  it never accepts or returns model credentials. Planning automatically selects a ready provider
+  local ChatGPT/OpenAI and Claude login state and launches fixed vendor-owned login flows. Claude
+  exposes local subscription (`--claudeai`), Console API billing (`--console`), and explicit API Key
+  paths; the subscription path is only for the operator's own local single-user session. Anthropic
+  keys require an explicit persistence confirmation, are validated with `GET /v1/models`, enter
+  macOS Keychain through stdin, and are read by Claude through a Quarterdeck-owned `apiKeyHelper`.
+  OpenAI retains a CSRF-protected, one-time stdin handoff to the fixed Codex CLI. Neither path
+  returns, logs, or records a raw key in the ledger. Planning automatically selects a ready provider
   and starts the hidden AI adapter when needed. The new Approval view lists redacted pending calls
   and performs fixed approve/reject mutations behind explicit review, loopback Origin, CSRF, and
   JSON gates. The local ledger fsyncs the request before the governance API call and records a
   fixed outcome afterward; free-text notes enter the ledger only as SHA-256. AionUi and Paperclip
   are absent from normal navigation and appear only in a closed advanced-diagnostics disclosure.
-  Version 1 is explicitly a single-user loopback surface whose local actor is `local_console`, not
+  Version 1 is explicitly a single-owner surface whose local actor is `local_console`, not
   a multi-user identity system. Final source-console acceptance showed `chatgpt` and `account`
   auth modes with both registered runtimes ready; the UI labeled them separately, exposed no
   provider output or internal system name, kept diagnostics closed, had no browser warnings, and
   had zero horizontal overflow at desktop and 390x844 mobile sizes.
+- The Connections view also exposes DeepSeek API Key, xAI API Key, and official Grok account login.
+  DeepSeek/xAI keys use fixed Models endpoints and separate macOS Keychain items; source tests prove
+  the secret is absent from argv, helper files, API responses, and ledger payloads. Grok account
+  login is enabled only when the official `grok` executable is present. On this machine it is not
+  installed, so the account action correctly remains unavailable while xAI API Key setup remains
+  available. These providers deliberately report credential connection separately from
+  `runtime_ready`; no DeepSeek/Grok Agent execution adapter is claimed or selectable yet. Live
+  credential validation was not attempted because no key was entered during source acceptance.
+- The Connections view now also exposes Ollama and LM Studio as local-model providers. Their
+  endpoints are compile-time fixed to `127.0.0.1:11434` and `127.0.0.1:1234`; the UI accepts no
+  custom URL or key. An explicit confirmation starts the vendor-owned local service, reads a
+  bounded model-name list, starts the hidden AionUi adapter when needed, and creates or reconciles
+  an OpenAI-compatible provider using only `ollama`/`lm-studio` non-secret placeholders. Runtime
+  readiness requires a live server, at least one model, reconciled provider registration, and the
+  team-selectable `aion_cli` Assistant. Source tests cover fixed endpoints, no-model fail-closed,
+  fixed startup commands, confirmation, append-only evidence, registration payloads, and runtime
+  gating. On this machine both apps/CLIs are installed, but their API servers were intentionally
+  left stopped during source acceptance; live model execution therefore remains an explicit gate.
 - Ready plans now separate **Modify plan** from **Start over**. Modify creates an append-only child
   record bound to the immutable parent id/hash and a ledger-only instruction hash, passes the full
   previous plan to the tool-free planner, rejects an identical result, and issues a new confirmation
@@ -143,12 +194,58 @@ blocked by the current open gates below.
   tombstone. The private plan file and all evidence remain byte-for-byte available; ordinary list,
   direct-get, dashboard, and startup-recovery paths hide tombstoned plans. Only ready, failed, and
   completed-unverified plans are eligible, while active work and parents with visible revisions
-  fail closed. Both task tables and the detail drawer expose an icon action behind an explicit
+  fail closed. Work settings and the retained detail dialog expose the action behind an explicit
   confirmation dialog. Source-console acceptance opened and cancelled that dialog without deleting
   any real plan; the desktop layout and 390x844 mobile dialog had no horizontal overflow, all
   controls remained visible, and the browser console stayed clean.
-- The Team view graphically groups every current task team by reporting level. Legacy plans
+- The unified Work view removes the duplicate task/team lists. Its Team tab graphically groups the
+  selected work item's task-scoped team by reporting level, while Activity, Outputs, and Settings
+  keep execution signals, outcome evidence, and lifecycle controls distinct. Legacy plans
   remain hash-compatible and display as a lead-centered organization without file migration.
+  Today's currently labelled Task Teams panel is a read-only projection of the same plan ids, limited
+  to confirmed, dispatching, running, approval-waiting, and input-waiting records. It stores no second team object
+  and cannot edit hierarchy, runtime, model, evidence, or lifecycle state.
+- Any intact reviewed Work exposes an explicitly confirmed `Fork work` action. The new Work remains
+  independently visible at version 1, binds source plan id/hash into its own confirmation hash, and
+  records `task_plan_forked` metadata without dispatching an adapter. It copies no execution,
+  approval, operator answer, artifact, or outcome state and returns to Workspace review before run.
+- Failed and `completed_unverified` Work items expose `Run again` in the detail header. It prepares
+  an idempotent ready child with the same reviewed plan, the default `automatic` approval mode, a
+  new version/hash, and `task_plan_rerun_prepared` evidence. Preparation performs no runtime
+  dispatch; manual approval remains selectable and the ordinary plan review checkbox/hash
+  confirmation remain mandatory.
+- Aion team executions now expose source-complete Start/Continue, Pause, and End controls in a
+  fixed three-position Work group. Only the action accepted by the current state is enabled:
+  Start/Continue resumes a runtime-confirmed pause and never bypasses initial plan/hash review.
+  Pause/resume/cancel requests are fsynced before adapter calls; pending
+  states remain visible until Aion confirms the resulting run state. Stop uses an explicit second
+  confirmation, preserves partial outputs/evidence, and becomes `cancelled` only after the exact
+  run is no longer active. Cooperative pause is not claimed as an OS-level process freeze, and
+  workflow runs remain uncontrollable in the UI. Fake-adapter/API tests pass; a real task was not
+  paused or terminated during source validation, so live run-control acceptance remains open.
+- New confirmations and reviewed reruns default to the snapshotted `automatic` approval mode.
+  After exact plan confirmation it creates the ordinary Paperclip approval, fsyncs policy evidence,
+  and resolves each AionUi tool call allow-once through the same delivery path without a user
+  prompt. A confirmation-screen switch selects `manual_all`. Existing `automatic_safe` plans
+  retain their exact read-only allowlist, and records with no stored mode remain manual.
+- Active Aion Work now exposes the current execution approval mode beside Pause/Continue/End.
+  Auto-off is an immediate tightening; Auto-on requires explicit confirmation and affects only
+  future tool calls. Existing paused approvals preserve their request-time policy. The endpoint
+  uses expected-current-mode compare-and-set semantics, changes only `ExecutionState`, leaves the
+  reviewed plan/hash untouched, writes requested/committed evidence, and recovers interrupted
+  changes to the more restrictive mode. Fake-service, request-snapshot, crash-recovery, CSRF, and
+  API validation tests pass; source validation did not change the policy of a live task.
+- Manual approvals now render in the same Work attention slot as runtime operator questions.
+  Quarterdeck accepts the inline binding only for its exact Aion approval source and an existing
+  local `plan_id`; unrelated or malformed global approvals cannot appear under another task.
+  Approve/reject, optional note, and explicit review acknowledgement happen without navigation.
+  After a manual `qd_request_input` allow-once decision, the resulting suggested-answer panel
+  replaces it in place. The global Approval view remains a cross-task queue and recovery surface.
+- The normal ops MCP now has thirteen tools: `qd_python_package_status` replaces shell-based package
+  presence checks, and `qd_request_input` lets an active planned Agent create one bounded operator
+  question. Work and Today expose `awaiting_input`; an answer resumes the same confirmed AionUi
+  team. Question/answer plaintext stays in the private task channel and only SHA-256 identities are
+  appended to the ledger. A stale runtime refresh cannot overwrite a newly committed question.
   For ready plans, each non-lead employee can select one direct manager; self-reporting, missing
   employees, multiple roots, and cycles fail closed. Saving creates a ready append-only child
   version with a new confirmation hash and a hashed `task_plan_organization_revised` event rather
@@ -165,16 +262,43 @@ blocked by the current open gates below.
   background refresh. A later acceptance added one loop, changed it to self-review, set its cap to
   four, edited the stop condition, and kept save enabled at desktop and 390x844 mobile widths. Both
   changes were cancelled, so the real plan remains revision 1 with zero loops and no new ledger
-  event. At 390x844 the seven-item navigation, organization cards, manager/loop controls, and save
+  event. At 390x844 the current four-item navigation, organization cards, manager/loop controls, and save
   action remained usable with zero page overflow and no browser warnings.
-- The former Evidence navigation is now the unified History view. Confirmed Agent executions are
-  folded deterministically from `task_plan_confirmed`, requested, dispatched, and terminal ledger
-  events; private plan records only supply validated display metadata. Each row expands to the exact
-  evidence timeline, retains a visible tombstone marker after task-list deletion, and keeps
-  `completed_unverified` distinct from outcome proof. Wrapped system jobs remain available in a
-  separate tab. Missing expected ledger evidence is rendered as a warning rather than a healthy
-  state. Backend deletion-retention coverage and the full suite pass at 301 tests across three
-  consecutive runs; ruff, mypy,
+- Work now exposes evidence-based live execution progress instead of a generic running spinner.
+  Active AionUi records refresh every 2.5 seconds and may show only an exactly mapped Agent slot,
+  elapsed duration, slow/blocked state, safe tool identifier/status, response marker, timestamp,
+  and collapsed repeat count. Each newly dispatched plan stage is also bound to one AionUi team
+  work item, so Work can show `not_started`, `running`, `blocked`, `completed`, and failure evidence
+  per stage without inventing percentages. Tool arguments, output, message bodies, arbitrary command
+  titles, chain-of-thought, inferred stage completion, and fabricated percentages never enter the API.
+  A legacy `completed_unverified` record gets at most one schema-versioned, read-only stage mapping
+  backfill that cannot change terminal state, append another finish event, or rerun work; failed
+  records do not use this path. Live acceptance against the completed synthetic Bazi run recovered
+  all five confirmed stages: stages 1-3 were Agent-reported complete with four bounded activity rows
+  each, stage 4 remained not started, and stage 5 remained blocked on stage 4. The Work item correctly
+  stayed `completed_unverified` rather than claiming business success. Raw commands, response bodies,
+  and percentages were absent. Desktop and 390px checks had zero page overflow; all five stage cards,
+  twelve safe activity rows, New work, and Approvals remained reachable; browser logs were clean.
+  Python is now 385/385; frontend tests are 38/38; ruff, mypy, TypeScript, Vite build, and both git-history
+  and working-tree gitleaks scans are green.
+- Per-Agent model selection is now a second level under runtime selection. The bootstrap API returns
+  only bounded, secret-free model metadata from the active local adapters; the UI marks exact ids,
+  rolling aliases, and runtime default separately. Saving a change creates a new immutable plan
+  version whose hash binds both runtime and model, and AionUi receives that exact value at dispatch.
+  Legacy plans keep their prior hash and render as runtime-default until explicitly revised.
+- History is no longer a top-level navigation item. **Activity** shows the selected Work version's
+  current bounded runtime signals; **History** folds its immutable run chain deterministically from
+  `task_plan_confirmed`, requested, dispatched, continuation, and terminal ledger events. An ended
+  Aion run with exact team/conversation identity can be continued as a new hash-bound child while
+  retaining `continued_from_plan_id` provenance to the selected run. The follow-up body is sent only
+  to the same local Aion team and only its SHA-256 enters the ledger. Active Work, workflow runs,
+  missing identity, unconfirmed delivery, or unavailable governance fail closed. New snapshots are
+  bounded by the continuation dispatch timestamp, so old conversation activity cannot appear as
+  new-run evidence. Tombstone retention and `completed_unverified` versus outcome proof remain unchanged.
+  Wrapped system jobs that cannot belong to one Work item remain available in the collapsed
+  Settings diagnostics section. Missing expected ledger evidence is rendered as a warning rather than a healthy
+  state. Backend deletion-retention coverage remains in the full suite; the current source suite
+  passes 390 Python and 40 frontend tests; ruff, mypy,
   TypeScript, and the packaged Vite build are green. Rebuilt source-console acceptance showed the
   honest empty Agent-run state and eight real wrapped-automation rows; 1964px desktop and 390x844
   mobile had zero document overflow, the wide automation table scrolled only inside its panel, and
@@ -217,6 +341,13 @@ blocked by the current open gates below.
 - M6 is recruitment-ready but intentionally has no product code. The paid-design-partner
   gate, data boundary, implementation order, and success evidence are fixed in
   [M6-PILOT-GATE.md](M6-PILOT-GATE.md).
+
+### Non-blocking console follow-up
+
+- Rename Today's **Task Teams** heading to **Active Work / 正在推进** and make each summary card
+  navigate directly to the corresponding `Work -> Team` view. The current cards are honest,
+  read-only summaries and the action queue can route active work, but the cards themselves are not
+  yet navigation controls. This is a discoverability gap, not a separate data model or evidence gap.
 
 ## Open gates (blocking, in order)
 
@@ -268,7 +399,7 @@ The former M3 and AionUi blockers are closed without weakening their acceptance 
   mounted: its pinned package exposes approval writes and a generic API escape hatch without
   a server-enforced read-only mode. Approval decisions now use Quarterdeck's fixed local facade.
 - That eight-tool acceptance remains valid for the evidence console. ADR-0004 subsequently
-  added three allowlisted launch tools. Their direct eleven-tool handshake, isolated workflow,
+  added three allowlisted launch tools. Their direct then-eleven-tool handshake, isolated workflow,
   and live AionUi Manual Task now pass. Built-in Claude cron was found to force
   `bypassPermissions`, so it was rejected and deleted before execution. The accepted task uses
   a connection-tested guarded Claude ACP agent with `yolo_id=default`, grants only the individual
@@ -281,7 +412,7 @@ The former M3 and AionUi blockers are closed without weakening their acceptance 
   Session recreation can require the two tool confirmations again, and AionUi upgrades require
   revalidating the guarded agent's versioned ACP runtime path.
 - ADR-0005 subsequently added a separate two-tool metadata-only mail profile while preserving
-  the normal eleven-tool ops surface. `gws 0.22.5` is installed under the user-owned Quarterdeck
+  the normal thirteen-tool ops surface. `gws 0.22.5` is installed under the user-owned Quarterdeck
   prefix, but mail remains disabled, OAuth status is unauthenticated, no Gmail request was made,
   and no daily schedule was created. AionUi connection
   `mcp_019f5d9b-b884-7831-b991-eda395e98cb6` passed a two-tool test but remains disabled. These
@@ -347,6 +478,23 @@ own independent acceptance gates.
   tool_use_id, expiry, approval id, decision, decider, resume/consume outcome.
 - Paperclip database loss ⇒ pending calls stay denied; every past decision remains
   auditable from the local ledger.
+- AionUi execution confirmations follow the same truth split: AionUi pauses the tool, Paperclip
+  stores the single-owner decision, and Quarterdeck binds and consumes it once. The adapter rejects
+  permanent allow, unknown option sets, request-hash drift, and duplicate approval markers.
+- `automatic` does not remove this truth split: the approval object and evidence chain remain, and
+  the snapshotted plan policy supplies the allow-once decision. Existing `automatic_safe` records
+  continue using their fixed exact-name policy. `manual_all` requires the local click for execution
+  tools. Operator-input notifications are exempt because they perform no external side effect and
+  otherwise could deadlock before the question becomes visible.
+- Paperclip v2026.707.0 requires a board actor for approve/reject. The local console uses the
+  service-agent token for reads and projections, then strips authorization only for the fixed
+  decision request after proving the exact API base is loopback and `/api/health` reports
+  `deploymentMode=local_trusted`. Remote or authenticated deployments fail closed.
+- Live 2026-07-15 acceptance reproduced the former service-agent `403`, installed the repaired
+  client, and reconciled the operator's exact pending allow-once decision. Paperclip records
+  `local-board`, the original AionUi call has one finished tool record, and the ledger has exactly
+  one delivery request and one delivery finish. The resumed Agent then raised a new, distinct
+  knowledge-base inspection approval; it remains pending and was not implicitly approved.
 
 ## Next task
 

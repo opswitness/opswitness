@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from quarterdeck.config import Settings, resolve_api_key
+from quarterdeck.console.provider_credentials import managed_anthropic_api_key_helper
 from quarterdeck.fsutil import atomic_write
 from quarterdeck.gate import (
     GateState,
@@ -125,7 +126,11 @@ def validate_user_args(argv: list[str]) -> list[str]:
     return cleaned
 
 
-def gate_settings_payload(qd_bin: Path) -> dict[str, Any]:
+def gate_settings_payload(
+    qd_bin: Path,
+    *,
+    api_key_helper: Path | None = None,
+) -> dict[str, Any]:
     hook = {"type": "command", "command": str(qd_bin), "args": ["gate", "hook"]}
     post_ok = {
         "type": "command",
@@ -137,7 +142,7 @@ def gate_settings_payload(qd_bin: Path) -> dict[str, Any]:
         "command": str(qd_bin),
         "args": ["gate", "hook", "--post", "failure"],
     }
-    return {
+    payload: dict[str, Any] = {
         "disableBypassPermissionsMode": "disable",
         "permissions": {
             "defaultMode": "dontAsk",
@@ -153,6 +158,9 @@ def gate_settings_payload(qd_bin: Path) -> dict[str, Any]:
             ],
         },
     }
+    if api_key_helper is not None:
+        payload["apiKeyHelper"] = str(api_key_helper)
+    return payload
 
 
 def install_gate_settings(settings: Settings) -> Path:
@@ -163,9 +171,16 @@ def install_gate_settings(settings: Settings) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     os.chmod(root, 0o700)
     target = root / "claude-settings.json"
+    api_key_helper = managed_anthropic_api_key_helper(settings)
     atomic_write(
         target,
-        (json.dumps(gate_settings_payload(qd_bin), indent=2) + "\n").encode(),
+        (
+            json.dumps(
+                gate_settings_payload(qd_bin, api_key_helper=api_key_helper),
+                indent=2,
+            )
+            + "\n"
+        ).encode(),
         mode=0o600,
     )
     return target

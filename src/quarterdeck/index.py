@@ -1,10 +1,13 @@
 """Disposable SQLite index over the ledger — rebuilt on demand, never authoritative."""
 
 import json
+import os
 import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Any
 
+from quarterdeck.fsutil import fsync_dir
 from quarterdeck.ledger import Ledger
 from quarterdeck.projector import pending_events
 
@@ -53,16 +56,19 @@ def rebuild(
     *,
     events: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Rebuild the index from the ledger. Returns {runs, pending_projection}."""
+    """Build a complete private index, then atomically publish it."""
     events = ledger.read_all() if events is None else events
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(db_path)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=db_path.parent,
+        prefix=f".{db_path.name}.",
+        suffix=".qd-index-tmp",
+    )
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    con = sqlite3.connect(tmp_path)
     try:
-        con.executescript(
-            "DROP TABLE IF EXISTS runs;"
-            "DROP TABLE IF EXISTS artifacts;"
-            "DROP TABLE IF EXISTS artifact_outcomes;" + _SCHEMA
-        )
+        con.executescript(_SCHEMA)
         for e in events:
             p = e.get("payload", {})
             degraded = 1 if e.get("degraded") else 0
@@ -125,8 +131,19 @@ def rebuild(
         con.commit()
         n_runs = con.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
         n_artifacts = con.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0]
+        check = con.execute("PRAGMA quick_check").fetchone()[0]
+        if check != "ok":
+            raise sqlite3.DatabaseError(f"rebuilt index failed quick_check: {check}")
+        con.close()
+        with tmp_path.open("rb") as handle:
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, db_path)
+        fsync_dir(db_path.parent)
     finally:
         con.close()
+        tmp_path.unlink(missing_ok=True)
+        for suffix in ("-journal", "-shm", "-wal"):
+            Path(f"{tmp_path}{suffix}").unlink(missing_ok=True)
     return {
         "runs": n_runs,
         "artifacts": n_artifacts,

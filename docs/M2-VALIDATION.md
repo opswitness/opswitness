@@ -178,7 +178,7 @@ time and does not move the earliest 24-hour canary gate from approximately 17:32
 - A threat review then hardened the adapter before installation: every call revalidates the
   pinned gws version, encrypted credentials, live token, and least-privilege Gmail scope;
   model calls require an explicit consent bit; full gws output is bounded; and the normal
-  11-tool MCP is structurally separate from the 2-tool mail profile.
+  current 13-tool MCP is structurally separate from the 2-tool mail profile.
 - The same maintenance discipline was repeated. There was no active `qd wrap` or
   `qd gated-claude`; projector, watchdog, gate-recovery, and register-trigger were booted out;
   the committed wheel at `ee2499a` was installed with the MCP extra; then all four original

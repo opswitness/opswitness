@@ -25,10 +25,23 @@ account, vendor proxy, artificial run quota, or paid server. It includes the cap
 that make Quarterdeck credible:
 
 - local append-only ledger, evidence review, export, and backup/restore paths;
-- fail-closed approval boundary and honest health/coverage reporting;
+- plan-confirmed Auto execution, an audited in-Work Auto/manual switch for future calls, opt-in
+  per-tool manual approval, durable approval evidence, and honest health/coverage reporting;
+- one task-local attention surface for manual approval and Agent questions, with the global queue
+  retained for cross-task triage rather than sold as a usability upgrade;
+- fixed, state-honest Start/Continue, Pause, and End controls for supported local Aion work, with
+  second confirmation and evidence retention included in the free core;
 - chat-first plan-before-execution, hash confirmation, versioned plan revision, evidence-preserving
-  task deletion, graphical team/loop editing, run history, and basic daily digest;
+  task deletion, independent provenance-bound Work forks, graphical team/loop editing, immutable
+  run history with guarded same-context Aion continuation, and basic daily digest;
+- one Work identity across the Today active summary and the full Work detail; no duplicate team
+  registry or paid global-employee directory is required for the single-owner product;
 - user-owned connections to supported local runtimes and existing automation;
+- per-Agent runtime and advertised-model selection with immutable hash binding and no silent fallback;
+- plan-bound live stage telemetry from structured runtime work items, with safe activity metadata
+  and an explicit separation between Agent-reported execution and verified business outcomes;
+- fixed-loopback Ollama and LM Studio discovery/connection through the hidden local adapter, with
+  no vendor proxy, remote endpoint, or Quarterdeck token markup;
 - core AionUi, Paperclip, Claude Code, and Codex adapter boundaries.
 
 Safety, evidence, data export, and the ability to leave the product are not upsell levers.

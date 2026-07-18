@@ -4,6 +4,7 @@ import os
 import respx
 from httpx import Response
 
+from quarterdeck.artifacts import register_console_artifact
 from quarterdeck.ledger import Ledger
 from quarterdeck.paperclip import PaperclipClient
 from quarterdeck.projector import Projector, pending_events, qd_metadata
@@ -79,6 +80,37 @@ def test_lost_ack_is_reconciled_without_repost(tmp_path):
     assert stats["reconciled"] == 2 and stats["projected"] == 0
     assert posted.call_count == 0  # crash-window duplicates healed, not reposted
     assert stats["pending_after"] == 0
+
+
+@respx.mock
+def test_console_artifact_projects_to_bound_work_issue(tmp_path):
+    led = Ledger(tmp_path / "ledger")
+    source = tmp_path / "report.pdf"
+    source.write_bytes(b"report")
+    event = register_console_artifact(
+        led,
+        source,
+        plan_id="01PLAN",
+        logical_name="report.pdf",
+        paperclip_issue_id="work-issue-1",
+    )
+    listed_issues = respx.get(f"{BASE}/api/companies/c1/issues").mock(
+        return_value=Response(200, json={"issues": []})
+    )
+    respx.get(f"{BASE}/api/issues/work-issue-1/work-products").mock(
+        return_value=Response(200, json={"workProducts": []})
+    )
+    posted = respx.post(f"{BASE}/api/issues/work-issue-1/work-products").mock(
+        return_value=Response(200, json={"id": "product-1"})
+    )
+
+    stats = Projector(led, _client(), tmp_path / "lease").drain()
+
+    assert stats["projected"] == 1
+    assert stats["pending_after"] == 0
+    assert listed_issues.call_count == 0
+    assert posted.call_count == 1
+    assert event["event_id"] in posted.calls[0].request.content.decode()
 
 
 @respx.mock

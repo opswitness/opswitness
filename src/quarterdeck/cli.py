@@ -34,7 +34,7 @@ app.add_typer(mail_app, name="mail", help="Audit metadata-only Gmail reply check
 soak_app = typer.Typer(no_args_is_help=True)
 app.add_typer(soak_app, name="soak", help="Append-only canary and production soak gates")
 console_app = typer.Typer(no_args_is_help=True)
-app.add_typer(console_app, name="console", help="Run the loopback total console")
+app.add_typer(console_app, name="console", help="Run and pair the local-first total console")
 
 
 def _load_settings_cli() -> "Settings":
@@ -234,19 +234,28 @@ def console_serve(
     port: int = typer.Option(0, "--port", min=1024, max=65535),
     open_browser: bool = typer.Option(False, "--open", help="Open the console after startup"),
 ) -> None:
-    """Serve the total console on 127.0.0.1 only."""
+    """Serve the console locally, or over configured private HTTPS."""
     import threading
     import webbrowser
 
     import uvicorn
 
+    from quarterdeck.console.access import console_public_url, validate_private_tls
     from quarterdeck.console.app import create_app
     from quarterdeck.console.service import ConsoleService, ConsoleUnavailable
 
     settings = _load_settings_cli()
     selected_port = port or settings.console.port
-    console = settings.console.model_copy(update={"host": "127.0.0.1", "port": selected_port})
+    console = settings.console.model_copy(update={"port": selected_port})
     settings = settings.model_copy(update={"console": console})
+    certfile = None
+    keyfile = None
+    if console.exposure == "private" and console.private_transport == "direct_tls":
+        try:
+            certfile, keyfile = validate_private_tls(console)
+        except ValueError as exc:
+            typer.echo(f"private console refused: {exc}", err=True)
+            raise typer.Exit(code=2) from None
     service = ConsoleService(settings)
     try:
         service.acquire_instance_lease()
@@ -257,17 +266,94 @@ def console_serve(
     try:
         if open_browser:
             threading.Timer(
-                0.8, lambda: webbrowser.open(f"http://127.0.0.1:{selected_port}")
+                0.8, lambda: webbrowser.open(console_public_url(console))
             ).start()
         uvicorn.run(
             create_app(settings, service=service),
-            host="127.0.0.1",
+            host=console.host,
             port=selected_port,
             log_level="info",
             access_log=False,
+            proxy_headers=False,
+            ssl_certfile=str(certfile) if certfile is not None else None,
+            ssl_keyfile=str(keyfile) if keyfile is not None else None,
         )
     finally:
         service.close()
+
+
+@console_app.command("pair")
+def console_pair() -> None:
+    """Create one short-lived, single-use device pairing code."""
+    from quarterdeck.console.access import console_public_url
+    from quarterdeck.console.pairing import DevicePairingStore, PairingStateError
+
+    settings = _load_settings_cli()
+    if settings.console.exposure != "private":
+        typer.echo("private console exposure is disabled", err=True)
+        raise typer.Exit(code=2)
+    store = DevicePairingStore(
+        settings.console.state_dir / "pairing",
+        code_ttl_seconds=settings.console.pairing_code_ttl_seconds,
+        session_days=settings.console.device_session_days,
+    )
+    try:
+        invitation = store.create_invitation()
+    except (OSError, PairingStateError) as exc:
+        typer.echo(f"pairing unavailable: {exc}", err=True)
+        raise typer.Exit(code=2) from None
+    typer.echo(f"Open: {console_public_url(settings.console)}/pair")
+    typer.echo(f"Pairing code: {invitation.code}")
+    typer.echo(f"Expires: {invitation.expires_at.isoformat()}")
+
+
+@console_app.command("devices")
+def console_devices() -> None:
+    """List paired devices without exposing credential hashes."""
+    import json
+
+    from quarterdeck.console.pairing import DevicePairingStore, PairingStateError
+
+    settings = _load_settings_cli()
+    store = DevicePairingStore(
+        settings.console.state_dir / "pairing",
+        code_ttl_seconds=settings.console.pairing_code_ttl_seconds,
+        session_days=settings.console.device_session_days,
+    )
+    try:
+        rows = [device.public_dict() for device in store.list_devices()]
+    except (OSError, PairingStateError) as exc:
+        typer.echo(f"pairing unavailable: {exc}", err=True)
+        raise typer.Exit(code=2) from None
+    typer.echo(json.dumps(rows, ensure_ascii=False, indent=2))
+
+
+@console_app.command("revoke")
+def console_revoke(
+    device_id: str,
+    confirmed: bool = typer.Option(False, "--yes", help="Confirm device revocation"),
+) -> None:
+    """Revoke one paired device credential."""
+    from quarterdeck.console.pairing import DevicePairingStore, PairingStateError
+
+    if not confirmed:
+        typer.echo("refusing to revoke without --yes", err=True)
+        raise typer.Exit(code=2)
+    settings = _load_settings_cli()
+    store = DevicePairingStore(
+        settings.console.state_dir / "pairing",
+        code_ttl_seconds=settings.console.pairing_code_ttl_seconds,
+        session_days=settings.console.device_session_days,
+    )
+    try:
+        revoked = store.revoke(device_id)
+    except (OSError, PairingStateError) as exc:
+        typer.echo(f"pairing unavailable: {exc}", err=True)
+        raise typer.Exit(code=2) from None
+    if not revoked:
+        typer.echo("paired device not found", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"revoked {device_id}")
 
 
 @telegram_app.command("configure")

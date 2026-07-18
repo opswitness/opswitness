@@ -170,12 +170,14 @@ def test_gate_bounds_large_redacted_input(tmp_path):
 
 
 def test_gate_settings_have_no_allow_rule_for_governed_tools(tmp_path):
-    payload = gate_settings_payload(tmp_path / "qd")
+    helper = tmp_path / "anthropic-api-key-helper"
+    payload = gate_settings_payload(tmp_path / "qd", api_key_helper=helper)
     assert payload["permissions"]["defaultMode"] == "dontAsk"
     assert payload["disableBypassPermissionsMode"] == "disable"
     assert payload["permissions"]["allow"] == ["Read", "Glob", "Grep"]
     matcher = payload["hooks"]["PreToolUse"][0]["matcher"]
     assert "Bash" in matcher and "mcp__.*" in matcher
+    assert payload["apiKeyHelper"] == str(helper)
 
 
 def test_version_and_forbidden_argument_gates(tmp_path, monkeypatch):
@@ -454,3 +456,63 @@ def test_paperclip_approval_api_shapes():
         "type": "request_board_approval",
         "payload": {"qdRequestId": "req-1"},
     }
+
+
+@respx.mock
+def test_paperclip_local_trusted_approval_resolution_uses_implicit_board():
+    base = "http://127.0.0.1:3100"
+    approval_id = "22222222-2222-4222-8222-222222222222"
+    client = PaperclipClient(base, "service-agent-key", "company-1")
+    health = respx.get(f"{base}/api/health").mock(
+        return_value=Response(
+            200,
+            json={"status": "ok", "deploymentMode": "local_trusted"},
+        )
+    )
+    resolved = respx.post(f"{base}/api/approvals/{approval_id}/approve").mock(
+        return_value=Response(200, json={"id": approval_id, "status": "approved"})
+    )
+
+    result = client.resolve_approval(approval_id, "approve")
+
+    assert result["status"] == "approved"
+    assert "authorization" not in health.calls[0].request.headers
+    assert "authorization" not in resolved.calls[0].request.headers
+
+
+@respx.mock
+def test_paperclip_local_board_resolution_rejects_authenticated_deployment():
+    base = "http://127.0.0.1:3100"
+    approval_id = "22222222-2222-4222-8222-222222222222"
+    client = PaperclipClient(base, "service-agent-key", "company-1")
+    respx.get(f"{base}/api/health").mock(
+        return_value=Response(
+            200,
+            json={"status": "ok", "deploymentMode": "authenticated"},
+        )
+    )
+    resolved = respx.post(f"{base}/api/approvals/{approval_id}/approve").mock(
+        return_value=Response(200, json={"id": approval_id, "status": "approved"})
+    )
+
+    with pytest.raises(PaperclipError, match="local_trusted"):
+        client.resolve_approval(approval_id, "approve")
+
+    assert not resolved.called
+
+
+def test_paperclip_local_board_resolution_rejects_non_loopback_api_base():
+    client = PaperclipClient("https://paperclip.example", "service-agent-key", "company-1")
+
+    with pytest.raises(PaperclipError, match="loopback"):
+        client.resolve_approval("22222222-2222-4222-8222-222222222222", "approve")
+
+
+@respx.mock
+def test_paperclip_local_board_resolution_rejects_invalid_health_json():
+    base = "http://127.0.0.1:3100"
+    client = PaperclipClient(base, "service-agent-key", "company-1")
+    respx.get(f"{base}/api/health").mock(return_value=Response(200, text="not-json"))
+
+    with pytest.raises(PaperclipError, match="invalid JSON"):
+        client.resolve_approval("22222222-2222-4222-8222-222222222222", "approve")

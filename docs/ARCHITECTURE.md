@@ -14,13 +14,86 @@ where ungoverned reality gets connected to governance, with the evidence held lo
 > **本地优先的 AI Workforce 总工作台：把已有的 Claude、Codex、AionUi、Paperclip 和自动化任务，变成一个可规划、可确认、可看见、可审计的团队。**
 
 This is a product-door statement, not a claim that Quarterdeck replaces every layer underneath it.
-The loopback console is the one ordinary place where an operator can describe an outcome, review
+The local-first console is the one ordinary place where an operator can describe an outcome, review
 the proposed task plan and reporting hierarchy, confirm the immutable plan hash, watch active
-work, graphically set bounded collaboration loops, make approval decisions, and read evidence-backed
-daily summaries. It delegates planning and execution to AionUi and other replaceable adapters,
-governance state to Paperclip, and retains
+work, graphically set bounded collaboration loops, make task-bound approval decisions inline, and read evidence-backed
+daily summaries. The chat-first Workspace remains the default top-level entry for every session.
+The optional Today action view is temporarily hidden from navigation; its summary model remains
+available for later restoration, and any legacy Today target resolves to Workspace. Confirmation
+never redirects away from the chatbox. Work keeps the
+goal, task-scoped team, current activity, immutable run history, outputs, and settings together. System automation history
+that has no Work owner is folded into Settings diagnostics. Workspace itself holds the three
+reusable starting points: common presets, private task templates, and team blueprints. It
+does not create a second team identity for Today: the active-team panel is a read-only projection of
+the same plan ids shown in Work, restricted to active states and bounded observation data. All
+organization and lifecycle mutations remain under the selected Work item. It
+may fork any reviewed plan into a separate top-level Work. The fork copies only the immutable plan,
+team, and settings; its source id/hash become part of a new confirmation hash. It never inherits a
+run, approval, operator reply, artifact, or outcome state, and it does not use the parent revision
+link that collapses ordinary revisions into one Work. It
+defaults its product chrome to English, and keeps the optional English/中文 preference browser-local
+so language selection cannot mutate plans, hashes, governance state, or evidence. It delegates
+planning and execution to AionUi and other replaceable adapters, governance state to Paperclip, and retains
 only the evidence boundary locally. Users should not need to routinely operate Paperclip or AionUi
 to use Quarterdeck; advanced diagnostics may reveal those adapters when troubleshooting requires it.
+The default exposure remains loopback. An explicitly configured private HTTPS surface may be used
+from Safari or Chrome only after device pairing; this changes the product door, not the internal
+adapter boundary. AionUi and Paperclip remain unreachable through Quarterdeck's network listener.
+
+The Work overview's live-progress surface is a bounded projection of public adapter telemetry, not a
+second workflow state machine. It refreshes the active execution every 2.5 seconds and may expose an
+exactly mapped Agent slot, elapsed duration, blocked/slow state, safe tool identifier and status,
+response marker, timestamp, and repeated-event count. It never returns tool arguments, tool output,
+message bodies, chain-of-thought, or an inferred completion percentage. Until an executor provides a
+public verifiable stage primitive, the stage list is the confirmed plan order rather than a progress
+claim; outcome status remains owned by artifacts, evals, and sign-off.
+
+The Work **History** surface is a projection of the immutable plan/run chain, not a mutable chat log.
+For an ended Aion run, Quarterdeck may continue the exact mapped team and conversations as a new
+child run. The new child's parent is the current Work leaf, while `continued_from_plan_id` and the
+source plan hash bind the operator-selected historical run. The follow-up body crosses only the
+local Aion adapter; Quarterdeck persists its hash and lifecycle metadata, not the body. A new plan
+hash, governance issue, and append-only requested/delivered/dispatched evidence are mandatory before
+the child becomes running. Missing identity, active Work, lost un-reconciled delivery, Paperclip
+failure, or unsupported workflow execution fails closed with no fallback runtime. Because the Aion
+conversation is shared, continuation snapshots accept only activity at or after the child's
+`dispatched_at`; prior replies and stage records never count as evidence for the child.
+
+The confirmed plan also snapshots its execution approval mode. New plans and reviewed reruns
+default to `automatic`: after exact plan-hash confirmation, every AionUi tool confirmation receives
+an evidence-backed, single-use automatic decision. The operator may switch the plan to
+`manual_all`, where each execution tool stops for a human decision. Existing
+`automatic_safe` records retain their original versioned exact-name read-only allowlist, while
+legacy records without a stored mode remain manual. Every automatic decision still has a
+Paperclip approval object and local requested/decided/delivered policy evidence. Failure to create,
+record, or deliver that decision still blocks the call.
+
+The confirmed plan mode is an immutable initial-policy snapshot. For an active Aion team,
+`ExecutionState.approval_mode` is the current policy and Work may change it through an optimistic
+compare-and-set API. Tightening to `manual_all` applies immediately. Loosening to `automatic`
+requires a separate operator confirmation and applies only to confirmations created afterward;
+each approval stores its request-time mode and automatic-decision reason, so an already-paused call
+cannot be approved retroactively. The transition writes requested and committed ledger events and
+does not rewrite the plan or hash. Startup recovery folds an incomplete transition to the more
+restrictive old/new mode.
+
+In `manual_all`, the actionable approval card is exposed only on the Work item whose locally
+validated `plan_id` matches the Quarterdeck-created Aion approval payload. Approve/reject, the
+optional note, and the explicit review acknowledgement remain in that task's attention surface;
+the global Approval view is an aggregate queue, not a required navigation hop. A decided card is
+removed before the same Work item resumes or presents its next bounded input request.
+
+Active Aion team work uses one fixed-position lifecycle control group in Work: Start/Continue,
+Pause, and End. The stable positions make controls discoverable without changing their semantics.
+Start/Continue is enabled only after Aion has confirmed `paused`; it never bypasses initial plan/hash
+confirmation. Approval/input waits cannot be resumed by the lifecycle control. End retains explicit
+second confirmation and remains pending until Aion proves the run inactive or terminal.
+
+When required task data is missing, the running AionUi team may create one bounded
+`qd_request_input`. Quarterdeck stores the question only in the private plan record and stores its
+hash in the append-only ledger. The operator's answer is likewise hash-audited, tagged for
+idempotent reconciliation, and sent back to the same confirmed team. This is a resumable input
+channel, not a new planner, chat history, or permission to expand the confirmed plan.
 
 The distinction is essential: Paperclip remains the bought control plane, AionUi and vendor CLIs
 remain execution adapters, and Quarterdeck remains the local trust/evidence bridge plus the simple
@@ -60,7 +133,7 @@ flowchart BT
         A2["OpenAI / Anthropic vendor login CLIs"]
     end
     subgraph C["Operator surface"]
-        C0["Quarterdeck console<br/>(workspace · tasks · teams · approvals · history · connections)"]
+        C0["Quarterdeck console<br/>(workspace · today · tasks · teams · history · connections)"]
         C1["qd CLI + Telegram fallback"]
     end
     subgraph V["Vertical case layer (P5, paid)"]
@@ -84,7 +157,10 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
    receives *projections* — at-least-once with reconciliation, never claimed as
    exactly-once. If Paperclip dies, the evidence chain is intact. See
    [ADR-0001](adr/0001-run-ledger-write-model.md).
-2. **Fail closed, everywhere.** No approval decision means no. Unreachable API means no.
+2. **Fail closed, everywhere.** No approval decision means no. `automatic` is a snapshotted policy
+   that produces a real allow-once decision only after exact plan confirmation; `automatic_safe`
+   preserves the older fixed exact-name policy. Both are recorded before delivery, not runtime
+   bypasses. Unreachable API means no.
    Unsupported schedule renders red, never silently green. Absence of coverage is
    reported as absence — "no schedules" is never "0 missed"; coverage counts only
    *active* monitoring, over *every* job the ledger has ever seen. Retirement and
@@ -115,7 +191,7 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
    administrator-owned metadata query. Quarterdeck persists `mail_check_requested` before
    access and `mail_check_finished` before returning sender/subject/date/message-id fields;
    neither event stores those fields. No body, draft, send, delete, label mutation, or runtime
-   query exists in the CLI or MCP surface. The normal 11-tool MCP excludes mail entirely;
+   query exists in the CLI or MCP surface. The normal 13-tool MCP excludes mail entirely;
    `qd mcp --profile mail` exposes only status/check, and model transmission additionally
    requires an explicit local consent bit. Before login, the loopback console requires a valid
    Google Desktop OAuth client at gws's fixed location with `0700` directory and `0600` file
@@ -138,13 +214,29 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
     confirmation; it never edits the reviewed parent in place. User-facing deletion is likewise
     append-only: one `task_plan_deleted` tombstone hides an inert plan while its private record and
     evidence remain intact. Active work cannot be deleted, and version parents require child-first
-    deletion. The graphical Team view folds each plan into one acyclic reporting tree and a separate
-    set of bounded collaboration loops. Organization edits create hash-bound child versions and pass
-    the effective hierarchy plus loop contracts to Paperclip governance and AionUi execution;
+    deletion. Task adjustments are chat-first: an operator describes the intended change, including
+    a bounded collaboration-loop change, and Quarterdeck creates a fresh plan revision for review.
+    The Team tab inside the unified Work view folds each plan into one acyclic reporting tree and a separate set of
+    bounded collaboration loops; its direct editor is an explicit advanced path for precise manual
+    edits. Organization edits create hash-bound child versions and pass the effective hierarchy plus
+    loop contracts to Paperclip governance and AionUi execution;
     Quarterdeck stores no second employee directory. The current AionUi adapter has no verifiable
     round-limit primitive, so these loops are plan-level constraints rather than runtime proof.
-    Completion remains
-    `completed_unverified` until outcome evidence exists. See
+    Completion remains `completed_unverified` until outcome evidence exists. A runtime or model
+    change is a structured child-plan revision: every Agent's runtime and model id are validated
+    against sanitized local capability state, receive a fresh plan hash, and cannot silently
+    downgrade or fall back at execution time. Exact ids, rolling aliases, and the runtime default
+    remain visibly distinct. Runtime control follows the same evidence-first rule. For Aion team
+    executions, Quarterdeck fsyncs pause/resume/cancel requests before calling the public adapter
+    API. Pause is accepted only after all active slots report paused; resume binds a fixed marker
+    to the same confirmed plan; cancel remains requested until the exact run is observed inactive
+    or terminal. These controls are not shown for workflow adapters that cannot prove equivalent
+    transitions. A reusable team blueprint is a private, versioned planning input containing only
+    role topology, reporting edges, collaboration edges, and runtime preference. It is manually
+    saved from a non-active task, never creates an employee directory, and is never automatically
+    enabled or overwritten. The UI may show only adapter-observable member states such as activity
+    observed, response observed, unobserved, or unavailable; those signals never prove a business
+    outcome. See
     [ADR-0007](adr/0007-local-operator-console.md).
 11. **Notification setup is narrow, local, and evidence-first.** The console is not a generic
     secret editor. It accepts only Telegram token/chat ID into password fields, writes through the
@@ -199,7 +291,10 @@ v2026.707.0 surface includes approval decisions, other mutations, and a general 
 escape hatch, with no documented read-only mode or scoped read-only token. Prompt-level
 instructions are not an authorization boundary. Quarterdeck therefore exposes only a fixed
 approve/reject facade over the Paperclip API and keeps the general Paperclip MCP unavailable to
-the model. AionUi receives Quarterdeck's evidence-oriented MCP surface.
+the model. On the pinned loopback-only `local_trusted` deployment, that facade verifies the health
+deployment mode and uses Paperclip's implicit local board actor only for the fixed decision call;
+ordinary projection calls retain the service-agent token. AionUi receives Quarterdeck's
+evidence-oriented MCP surface.
 
 ## Entry doctrine: Quarterdeck is the door
 
@@ -240,10 +335,10 @@ paid users ultimately see the vertical workbench, not the generic operations sur
 | canary / soak evidence gate | `src/quarterdeck/soak.py` | ✅ append-only contract + CLI |
 | bootstrap (candidates, two-file model) | `src/quarterdeck/bootstrap.py` | ✅ P2 |
 | adopt (dry-run plist wrapping) | `src/quarterdeck/adopt.py` | ✅ P2 (`--apply` gated on install) |
-| MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ 11-tool ops + isolated 2-tool mail profile |
+| MCP console surface | `src/quarterdeck/mcp_server.py` | ✅ 13-tool ops (including safe package metadata and bounded operator input) + isolated 2-tool mail profile |
 | allowlisted workflow launcher | `src/quarterdeck/workflows.py`, `workflow_worker.py` | ✅ code + tests + live AionUi one-click acceptance |
 | metadata-only mail monitor | `src/quarterdeck/mail.py`, `console/`, `console-ui/` | ✅ adapter + setup/revoke UI; live OAuth and AionUi schedule pending |
-| local operator console | `src/quarterdeck/console/`, `console-ui/` | ✅ sole operator surface + provider login/status + chat-first planning/progress + versioned revisions/deletion + graphical hierarchy/bounded loops + ledger-folded run history + approval facade + Gmail/Telegram + responsive UI; production install pending canary |
+| local operator console | `src/quarterdeck/console/`, `console-ui/` | ✅ sole operator surface + default Workspace chatbox with presets/templates/blueprints + optional Today + unified Work details + immutable runtime revisions + independent hash-bound Work forks + evidence-only member observation, bounded live activity, and plan-bound AionUi team-task stage telemetry + evidence-first Aion pause/continue/terminate controls + provider account/Console login, one-time OpenAI CLI stdin handoff, Anthropic Keychain + apiKeyHelper, DeepSeek/xAI Keychain connections, official Grok account flow, and fixed-loopback Ollama/LM Studio discovery plus hidden AionUi registration + planning/progress + graphical hierarchy/bounded loops + ledger-folded run history + approval facade + Gmail/Telegram + responsive UI; real run-control acceptance, DeepSeek/Grok execution adapters, local-model live acceptance, and production canary remain pending |
 | install doctor / secure services / disaster recovery | `src/quarterdeck/doctor.py`, `service.py`, `backup.py` | ✅ five secret-free templates + installed-command drift check; soak pending |
 | gate (PreToolUse `defer` → Paperclip approval → resume) | `gate.py`, `gated_claude.py` | ✅ M3 code + two live approval/resume drills |
 | artifacts (ledger events + content-addressed projection) | `artifacts.py`, `index.py` | ✅ M4 code + live projection |

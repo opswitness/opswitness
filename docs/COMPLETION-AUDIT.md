@@ -1,7 +1,7 @@
 # Quarterdeck Completion Audit
 
 Operational snapshot: 2026-07-13 21:24 PDT. The source-only console updates below were recorded
-through 2026-07-14 11:08 PDT without changing production state. This document maps the approved M0-M6
+through 2026-07-15 02:18 PDT without changing production state. This document maps the approved M0-M6
 plan to evidence and remaining gates. [READINESS.md](READINESS.md) remains the single operational
 snapshot.
 
@@ -16,12 +16,114 @@ snapshot.
 | M4 artifact/eval/signoff | Atomic CAS, ledger authority, live projection/reconciliation and restore evidence | Complete |
 | M5 open-source v0.1 | CI/release/SBOM/provenance code, tracked-only distribution verification, showcase, wheel and first-run evidence exist | Blocked by brand decision and real Git remote/Actions |
 | M6 paid practitioner Pilot | Offer, privacy contract, technical boundary and success criteria exist | Blocked by written paid commitment/deposit; product code intentionally absent |
-| Local total console | Default chat-first Workspace, AI-expanded execution brief, persisted planning stages and time range, provider connection facade, versioned plan revision, evidence-preserving deletion, graphical hierarchy and bounded collaboration loops, approvals, ledger-folded run history, hash-bound confirmation, atomic dispatch/recovery, fixed-error privacy boundary, single-instance lease, per-request private AionUi workspaces, responsive UI and packaged assets | Complete in source; stable install/KeepAlive service waits for canary maintenance window |
+| Local total console | Default chat-first Workspace, AI-expanded execution brief, persisted planning stages and time range, provider connection facade, versioned plan revision, independent hash-bound Work forks, evidence-preserving deletion, graphical hierarchy and bounded collaboration loops, evidence-backed Auto/manual approval modes with task-local decisions, resumable runtime operator questions, plan-bound AionUi team-task stage telemetry, ledger-folded immutable run history with exact-context continuation, hash-bound confirmation, atomic dispatch/recovery, fixed-error privacy boundary, single-instance lease, per-request private AionUi workspaces, responsive UI and packaged assets | Complete in source; stable install/KeepAlive service waits for canary maintenance window |
 
 ## Source console change record
 
-These commits are the complete source-only operator-console sequence after the initial total-console
-baseline. They changed no production plist, schedule, mailbox permission, or confirmed task execution.
+2026-07-16 Work-history continuation update: Work now owns a dedicated History tab that follows the
+immutable parent chain and exposes each run's evidence timeline. An ended Aion run can be selected
+and continued only when its exact team and Agent conversation mappings remain available and the
+current Work leaf is terminal. Continuation creates a new child plan/hash, Paperclip issue, and run;
+its parent remains the latest leaf while source id/hash bind the selected historical run. The
+follow-up body is delivered only to the same Aion team and only its SHA-256 is stored in the ledger.
+ACK loss is reconciled by an idempotent marker, and old shared-conversation activity is excluded by
+the new dispatch timestamp. Workflow runs, active Work, missing mappings, or unconfirmed delivery
+fail closed with no new-team or runtime fallback. Full source verification passes 390 Python tests,
+40 frontend tests, Ruff, mypy, TypeScript, and the Vite build.
+
+2026-07-16 live-stage update: Work now folds AionUi's built-in structured team-task records into
+the confirmed stage list. Each stage can display pending/running/blocked/completed/failed plus a
+bounded safe activity list. Task descriptions, message text, raw tool arguments/output, and hidden
+reasoning stay behind the adapter boundary. Completion is explicitly labeled Agent-reported
+execution telemetry and cannot satisfy artifact/eval/signoff outcome gates.
+
+2026-07-16 Work-fork update: any intact reviewed Work now exposes `Fork work`. After an explicit
+confirmation it creates a separate version-1 Work with copied plan/team/settings and source id/hash
+bound into a distinct plan hash. `task_plan_forked` records metadata only. The fork carries no source
+execution, approval, operator input, artifact, or outcome state and must pass ordinary Workspace
+review before execution. It intentionally has no `parent_plan_id`, so revisions continue to collapse
+inside one Work while forks remain independently visible.
+
+2026-07-16 lifecycle-control visibility update: active Aion team Work now keeps Start/Continue,
+Pause, and End in three stable positions. Running, paused, gated, and pending states enable only the
+actions the existing evidence-first state machine accepts; pending transitions remain explicit.
+Start/Continue resumes only a runtime-confirmed pause and cannot bypass initial plan/hash review.
+End retains the existing second confirmation and unconfirmed-stop semantics.
+
+2026-07-15 task-local attention update: manual Aion approvals no longer require a jump from Work
+to the global Approval page. Approval cards carry a locally validated source `plan_id`; only exact
+matches render inside the corresponding Work overview. Tool request, risks, approve/reject,
+optional note, and explicit acknowledgement are completed inline. After allow-once delivery, a
+resulting `qd_request_input` question replaces the approval in the same slot with its suggested
+answers. The global Approval view remains available as a cross-task queue and recovery surface.
+
+2026-07-15 run-control update: active Aion team work now exposes Pause and explicitly confirmed Stop;
+paused work exposes Continue. Quarterdeck records every request before the side effect, resumes only
+the same immutable plan/hash with a fixed marker, and keeps pause/cancel in requested states until
+Aion confirms the outcome. A cancel RPC acknowledgement alone is not treated as process termination.
+Partial outputs and evidence survive cancellation but remain unverified. Workflow controls are hidden.
+Source/fake-runtime acceptance passed without operating the user's live task; real run-control
+acceptance remains a readiness item.
+
+2026-07-15 rerun update: failed and `completed_unverified` Work items now expose a visible
+`Run again` action beside `Open full plan`. The action idempotently prepares the same reviewed plan
+as a new immutable child version, resets its review default to `automatic`, records only
+hash/provenance metadata, and returns to Workspace review. Manual approval remains selectable; it
+cannot dispatch until the new hash is explicitly confirmed.
+
+2026-07-15 approval-identity repair: Paperclip v2026.707.0 rejects approve/reject calls made with a
+service-agent bearer because those routes require a board actor. Quarterdeck now keeps that bearer
+for ordinary reads and projections, but uses Paperclip's implicit local board only after proving the
+exact API base is loopback and health reports `local_trusted`. Live acceptance reconciled the
+operator's existing allow-once intent exactly once; the next distinct tool request remains pending.
+
+2026-07-15 navigation-semantics update: Today's Task Teams panel is documented as a read-only
+projection of active Work records, not a second team registry. Work remains the sole owner of the
+goal, plan-version team, hierarchy, activity, outputs, runtime/model selection, and lifecycle
+controls. The current summary cards do not yet navigate directly to `Work -> Team`; the label and
+direct-navigation improvement remain a non-blocking UI follow-up in READINESS.
+
+2026-07-15 approval-and-input update: new plan confirmation now defaults to `automatic`, while the
+review switch can require manual approval for every execution tool. Auto supplies an audited
+single-use decision for each AionUi confirmation after exact plan-hash confirmation; historical
+`automatic_safe` records retain their old read-only allowlist. Automatic decisions still create
+Paperclip approval objects and local requested/decided/delivered policy evidence. The AionUi team
+can now ask one bounded runtime question; Work/Today show `awaiting_input`, the answer resumes the
+same confirmed team idempotently, and the ledger retains hashes rather than question or answer
+plaintext. The ops MCP grows from eleven to thirteen tools; the isolated mail profile remains two.
+
+2026-07-16 active-approval-mode update: supported Aion Work now displays one inline Auto-mode
+switch beside its lifecycle controls. Disabling Auto immediately selects `manual_all`; enabling it
+requires a second confirmation and affects only later tool requests. Pending calls retain the
+policy captured when they were created. The change is compare-and-set, append-only, and confined to
+the execution state, so the reviewed plan/hash remains immutable; interrupted changes recover to
+the more restrictive mode.
+
+2026-07-15 hierarchy clarification: the validated plan contract accepts one to five Agents with one
+lead and an acyclic complete reporting tree. Reassigning existing managers can therefore turn the
+current two-level Bazi organization into a valid three-level chain, while adding or removing an
+Agent still requires a chat-first immutable plan revision and fresh hash confirmation.
+
+2026-07-15 source update: Settings added DeepSeek API Key, xAI API Key, and the official Grok Build
+account flow. Persistent keys are validated at fixed Models endpoints and stored in separate
+Keychain items without touching AionUi; Grok account login requires the official CLI. Credential
+readiness remains separate from Agent runtime readiness, so neither provider is advertised as
+executable before adapter acceptance. No real key or account login was used in source validation.
+
+2026-07-15 local-model update: Settings added Ollama and LM Studio with fixed loopback discovery,
+explicit service-start confirmation, bounded model enumeration, and idempotent hidden-AionUi
+provider registration using non-secret placeholders. No custom endpoint or real local-model key is
+accepted. `runtime_ready` stays false until service, model, provider registration, and local
+Assistant readiness all agree. Source acceptance did not start either installed local server.
+
+2026-07-15 model-version update: every planned Agent can now select a runtime and one model from a
+secret-free live catalog. Exact ids, rolling aliases, and runtime default are labelled separately;
+the selected value is hash-bound in an immutable child plan, revalidated before dispatch, and passed
+unchanged to AionUi. Legacy plan hashes remain stable because absent model fields are omitted from
+their canonical payload.
+
+These source changes extend the operator-console sequence after the initial total-console baseline.
+They changed no production plist, schedule, mailbox permission, or confirmed task execution.
 
 | Commit | Recorded update | Evidence boundary |
 |---|---|---|

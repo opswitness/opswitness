@@ -10,9 +10,10 @@ import stat
 import tempfile
 import time
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
-from urllib.parse import urlsplit
+from typing import Any, Callable, Literal
+from urllib.parse import quote, urlsplit
 
 import httpx
 from pydantic import ValidationError
@@ -20,6 +21,7 @@ from pydantic import ValidationError
 from quarterdeck.config import ConsoleConfig
 from quarterdeck.console.schemas import PlanRequest, TaskPlan
 from quarterdeck.fsutil import atomic_write
+from quarterdeck.redact import redact_text
 
 
 class AionUiError(RuntimeError):
@@ -29,6 +31,31 @@ class AionUiError(RuntimeError):
 _EPHEMERAL_MARKER = ".quarterdeck-session.json"
 _EPHEMERAL_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _TEAM_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
+_TOOL_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_.:-]{0,119}")
+_MESSAGE_CURSOR = re.compile(r"[A-Za-z0-9._-]{1,1024}")
+_TEAM_TASK_CREATE = "mcp__aionui-team__team_task_create"
+_TEAM_TASK_UPDATE = "mcp__aionui-team__team_task_update"
+_TEAM_TASK_TOOLS = frozenset({_TEAM_TASK_CREATE, _TEAM_TASK_UPDATE})
+_TERMINAL_SLOT_STATES = frozenset(
+    {"cancelled", "canceled", "completed", "complete", "failed", "finished", "succeeded"}
+)
+_CONFIRMATION_ALLOW_VALUES = frozenset({"allow", "allow_once", "approve", "proceed_once"})
+_CONFIRMATION_REJECT_VALUES = frozenset({"cancel", "deny", "reject"})
+LocalProviderName = Literal["ollama", "lmstudio"]
+_LOCAL_PROVIDERS: dict[LocalProviderName, dict[str, str]] = {
+    "ollama": {
+        "id": "quarterdeck-ollama",
+        "name": "Ollama (Quarterdeck)",
+        "base_url": "http://127.0.0.1:11434/v1",
+        "api_key": "ollama",
+    },
+    "lmstudio": {
+        "id": "quarterdeck-lmstudio",
+        "name": "LM Studio (Quarterdeck)",
+        "base_url": "http://127.0.0.1:1234/v1",
+        "api_key": "lm-studio",
+    },
+}
 
 
 def _emit_progress(
@@ -82,11 +109,483 @@ def _message_text(item: dict[str, Any]) -> str | None:
     return None
 
 
+def _observed_at(value: object) -> str | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        seconds = float(value) / 1000 if value > 10_000_000_000 else float(value)
+        try:
+            return datetime.fromtimestamp(seconds, UTC).isoformat()
+        except (OSError, OverflowError, ValueError):
+            return None
+    if isinstance(value, str) and value.strip() == value and len(value) <= 64:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC).isoformat()
+    return None
+
+
+def _message_observed_at(item: dict[str, Any]) -> str | None:
+    for key in ("updated_at", "created_at", "timestamp"):
+        observed = _observed_at(item.get(key))
+        if observed is not None:
+            return observed
+    return None
+
+
+def _runtime_activity_status(value: object) -> str:
+    normalized = str(value or "").lower()
+    if normalized in {"failed", "error", "cancelled"}:
+        return "failed"
+    if normalized in {"completed", "complete", "finish", "finished", "success", "succeeded"}:
+        return "completed"
+    if normalized in {"pending", "queued", "running", "work", "in_progress"}:
+        return "running"
+    return "observed"
+
+
+def _runtime_activities(
+    agent_name: str,
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    activities: list[dict[str, Any]] = []
+    for item in messages:
+        activity_id = item.get("id")
+        observed_at = _message_observed_at(item)
+        if (
+            not isinstance(activity_id, str)
+            or not _TEAM_ID.fullmatch(activity_id)
+            or observed_at is None
+        ):
+            continue
+        if item.get("type") == "acp_tool_call":
+            content = item.get("content")
+            content = content if isinstance(content, dict) else {}
+            update = content.get("update")
+            update = update if isinstance(update, dict) else {}
+            raw_name = update.get("title")
+            tool_name = (
+                raw_name
+                if isinstance(raw_name, str) and _TOOL_NAME.fullmatch(raw_name)
+                else None
+            )
+            activities.append(
+                {
+                    "activity_id": activity_id,
+                    "agent_name": agent_name,
+                    "kind": "tool_call",
+                    "status": _runtime_activity_status(
+                        update.get("status") or item.get("status")
+                    ),
+                    "tool_name": tool_name,
+                    "observed_at": observed_at,
+                    "count": 1,
+                }
+            )
+        elif (
+            item.get("type") == "text"
+            and item.get("position") == "left"
+            and item.get("status") in {"finish", "finished", "completed"}
+        ):
+            activities.append(
+                {
+                    "activity_id": activity_id,
+                    "agent_name": agent_name,
+                    "kind": "response",
+                    "status": "observed",
+                    "observed_at": observed_at,
+                    "count": 1,
+                }
+            )
+    activities.sort(key=lambda row: str(row["observed_at"]))
+    collapsed: list[dict[str, Any]] = []
+    for activity in activities:
+        if collapsed and all(
+            collapsed[-1].get(key) == activity.get(key)
+            for key in ("agent_name", "kind", "status", "tool_name")
+        ):
+            collapsed[-1]["activity_id"] = activity["activity_id"]
+            collapsed[-1]["observed_at"] = activity["observed_at"]
+            collapsed[-1]["count"] = min(int(collapsed[-1]["count"]) + 1, 100)
+        else:
+            collapsed.append(activity)
+    return collapsed
+
+
+def _team_task_event(item: dict[str, Any]) -> dict[str, Any] | None:
+    """Extract only task identity/state metadata from one completed AionUi tool record."""
+    activity_id = item.get("id")
+    observed_at = _message_observed_at(item)
+    content = item.get("content")
+    content = content if isinstance(content, dict) else {}
+    update = content.get("update")
+    update = update if isinstance(update, dict) else {}
+    title = update.get("title")
+    if (
+        item.get("type") != "acp_tool_call"
+        or not isinstance(activity_id, str)
+        or not _TEAM_ID.fullmatch(activity_id)
+        or observed_at is None
+        or title not in _TEAM_TASK_TOOLS
+        or _runtime_activity_status(update.get("status") or item.get("status")) != "completed"
+    ):
+        return None
+    raw_input = update.get("raw_input")
+    if not isinstance(raw_input, dict):
+        return None
+    if title == _TEAM_TASK_UPDATE:
+        task_id = raw_input.get("task_id")
+        if not isinstance(task_id, str) or not _TEAM_ID.fullmatch(task_id):
+            return None
+        raw_status = raw_input.get("status")
+        status = str(raw_status).lower() if isinstance(raw_status, str) else None
+        raw_blocked = raw_input.get("blocked_by")
+        blocked_by = (
+            [value for value in raw_blocked if isinstance(value, str) and _TEAM_ID.fullmatch(value)]
+            if isinstance(raw_blocked, list)
+            else []
+        )
+        if status is None and not blocked_by:
+            return None
+        return {
+            "event_id": activity_id,
+            "kind": "update",
+            "observed_at": observed_at,
+            "task_id": task_id,
+            "status": status,
+            "blocked_by": blocked_by[:8],
+        }
+
+    subject = raw_input.get("subject")
+    raw_output = update.get("raw_output")
+    if (
+        not isinstance(subject, str)
+        or not subject.strip()
+        or subject.strip() != subject
+        or len(subject) > 200
+        or not isinstance(raw_output, list)
+    ):
+        return None
+    task: dict[str, Any] | None = None
+    for output in raw_output[:4]:
+        if not isinstance(output, dict):
+            continue
+        text = output.get("text")
+        if not isinstance(text, str) or len(text) > 20_000:
+            continue
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            continue
+        candidate = parsed.get("task") if isinstance(parsed, dict) else None
+        if isinstance(candidate, dict) and parsed.get("status") == "ok":
+            task = candidate
+            break
+    if task is None:
+        return None
+    task_id = task.get("task_id")
+    task_subject = task.get("subject")
+    owner = task.get("owner")
+    if (
+        not isinstance(task_id, str)
+        or not _TEAM_ID.fullmatch(task_id)
+        or task_subject != subject
+        or not isinstance(owner, str)
+        or not owner.strip()
+        or owner.strip() != owner
+        or len(owner) > 80
+    ):
+        return None
+    raw_status = task.get("status")
+    status = str(raw_status).lower() if isinstance(raw_status, str) else "pending"
+    raw_blocked = task.get("blocked_by")
+    blocked_by = (
+        [value for value in raw_blocked if isinstance(value, str) and _TEAM_ID.fullmatch(value)]
+        if isinstance(raw_blocked, list)
+        else []
+    )
+    return {
+        "event_id": activity_id,
+        "kind": "create",
+        "observed_at": observed_at,
+        "task_id": task_id,
+        "subject": subject,
+        "owner": owner,
+        "status": status,
+        "blocked_by": blocked_by[:8],
+    }
+
+
+def _normalise_stage_label(value: str) -> str:
+    return re.sub(r"[\W_]+", "", value.casefold(), flags=re.UNICODE)
+
+
+def _match_stage(subject: str, stages: list[dict[str, Any]]) -> int | None:
+    folded = subject.casefold()
+    tagged = [
+        int(stage["order"])
+        for stage in stages
+        if f"[qd-stage:{stage['order']}]" in folded
+    ]
+    if len(tagged) == 1:
+        return tagged[0]
+    normalized_subject = _normalise_stage_label(subject)
+    matches = [
+        (len(_normalise_stage_label(str(stage["title"]))), int(stage["order"]))
+        for stage in stages
+        if len(_normalise_stage_label(str(stage["title"]))) >= 3
+        and _normalise_stage_label(str(stage["title"])) in normalized_subject
+    ]
+    if not matches:
+        return None
+    matches.sort(reverse=True)
+    if len(matches) > 1 and matches[0][0] == matches[1][0]:
+        return None
+    return matches[0][1]
+
+
+def _stage_status(value: object) -> str | None:
+    normalized = str(value or "").lower()
+    if normalized in {"pending", "queued", "todo", "not_started"}:
+        return "pending"
+    if normalized in {"in_progress", "running", "active", "work"}:
+        return "running"
+    if normalized in {"blocked", "waiting"}:
+        return "blocked"
+    if normalized in {"completed", "complete", "done", "finished", "succeeded"}:
+        return "completed"
+    if normalized in {"failed", "error", "cancelled", "canceled"}:
+        return "failed"
+    return None
+
+
+def _stage_progress(
+    planned_stages: list[dict[str, Any]],
+    events: list[dict[str, Any]],
+    recent_activity: list[dict[str, Any]],
+    existing: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    stages: list[dict[str, Any]] = [
+        {
+            "order": int(stage["order"]),
+            "title": str(stage["title"]),
+            "owner": str(stage["owner"]),
+        }
+        for stage in planned_stages
+        if isinstance(stage, dict)
+        and isinstance(stage.get("order"), int)
+        and not isinstance(stage.get("order"), bool)
+        and 1 <= int(stage["order"]) <= 20
+        and isinstance(stage.get("title"), str)
+        and 0 < len(str(stage["title"])) <= 100
+        and isinstance(stage.get("owner"), str)
+        and 0 < len(str(stage["owner"])) <= 80
+    ]
+    stages.sort(key=lambda row: int(row["order"]))
+    existing_by_order = {
+        int(row["stage_order"]): row
+        for row in existing
+        if isinstance(row, dict)
+        and isinstance(row.get("stage_order"), int)
+        and not isinstance(row.get("stage_order"), bool)
+    }
+    progress: dict[int, dict[str, Any]] = {}
+    task_candidates: dict[int, set[str]] = {}
+    for stage in stages:
+        order = int(stage["order"])
+        previous = existing_by_order.get(order, {})
+        previous_task = previous.get("task_id")
+        task_id = (
+            previous_task
+            if isinstance(previous_task, str) and _TEAM_ID.fullmatch(previous_task)
+            else None
+        )
+        progress[order] = {
+            "stage_order": order,
+            "agent_name": stage["owner"],
+            "status": previous.get("status", "not_started"),
+            "source": previous.get("source", "unobserved"),
+            "task_id": task_id,
+            "blocked_by": list(previous.get("blocked_by") or [])[:8],
+            "started_at": previous.get("started_at"),
+            "updated_at": previous.get("updated_at"),
+            "completed_at": previous.get("completed_at"),
+            "recent_activity": list(previous.get("recent_activity") or [])[:8],
+            "_blocked_task_ids": [],
+            "_explicit_blocked": False,
+        }
+        if task_id:
+            task_candidates[order] = {task_id}
+
+    for event in sorted(events, key=lambda row: str(row.get("observed_at") or "")):
+        if event.get("kind") != "create" or not isinstance(event.get("subject"), str):
+            continue
+        matched_order = _match_stage(str(event["subject"]), stages)
+        task_id = event.get("task_id")
+        if matched_order is None or not isinstance(task_id, str):
+            continue
+        task_candidates.setdefault(matched_order, set()).add(task_id)
+
+    # Older AionUi runs predate the exact QD-STAGE subject contract. Bind them by order only
+    # when the complete task set and every exact owner line up one-for-one with the plan.
+    ordered_creates = [
+        event
+        for event in sorted(events, key=lambda row: str(row.get("observed_at") or ""))
+        if event.get("kind") == "create"
+        and isinstance(event.get("task_id"), str)
+        and isinstance(event.get("owner"), str)
+    ]
+    unique_create_ids = {str(event["task_id"]) for event in ordered_creates}
+    ordered_fallback_safe = (
+        len(ordered_creates) == len(stages)
+        and len(unique_create_ids) == len(stages)
+        and all(
+            str(event["owner"]) == str(stage["owner"])
+            and _match_stage(str(event.get("subject") or ""), stages)
+            in {None, int(stage["order"])}
+            for stage, event in zip(stages, ordered_creates, strict=True)
+        )
+    )
+    if ordered_fallback_safe:
+        for stage, event in zip(stages, ordered_creates, strict=True):
+            task_candidates.setdefault(int(stage["order"]), set()).add(str(event["task_id"]))
+
+    task_to_order: dict[str, int] = {}
+    for order, row in progress.items():
+        candidates = task_candidates.get(order, set())
+        if len(candidates) > 1:
+            row.update(status="unknown", source="aion_team_task", task_id=None)
+            continue
+        if candidates:
+            row.update(source="aion_team_task", task_id=next(iter(candidates)))
+        task_id = row.get("task_id")
+        if isinstance(task_id, str):
+            task_to_order[task_id] = order
+
+    for event in sorted(events, key=lambda row: str(row.get("observed_at") or "")):
+        task_id = event.get("task_id")
+        event_order = task_to_order.get(str(task_id))
+        if event_order is None:
+            continue
+        row = progress[event_order]
+        observed_at = str(event.get("observed_at") or "") or None
+        next_status = _stage_status(event.get("status"))
+        if next_status is not None:
+            current_status = str(row.get("status") or "not_started")
+            if current_status in {"completed", "failed"} and next_status != current_status:
+                row["status"] = "unknown"
+            else:
+                row["status"] = next_status
+            row["_explicit_blocked"] = next_status == "blocked"
+            if next_status == "running" and row.get("started_at") is None:
+                row["started_at"] = observed_at
+            if next_status == "completed":
+                row["completed_at"] = observed_at
+        blocked_by = event.get("blocked_by")
+        if isinstance(blocked_by, list) and blocked_by:
+            row["_blocked_task_ids"] = list(blocked_by)[:8]
+        if observed_at:
+            row["updated_at"] = observed_at
+
+    for order, row in progress.items():
+        blocked_orders = sorted(
+            {
+                task_to_order[task_id]
+                for task_id in row.pop("_blocked_task_ids", [])
+                if task_id in task_to_order
+            }
+        )
+        row["blocked_by"] = blocked_orders
+        unresolved = [
+            dependency
+            for dependency in blocked_orders
+            if progress[dependency].get("status") != "completed"
+        ]
+        explicit_blocked = bool(row.pop("_explicit_blocked", False))
+        if row.get("status") in {"not_started", "pending", "blocked"}:
+            row["status"] = "blocked" if explicit_blocked or unresolved else (
+                "pending" if row.get("source") == "aion_team_task" else "not_started"
+            )
+
+        lower = row.get("started_at")
+        upper = row.get("completed_at")
+        activity_by_id: dict[str, dict[str, Any]] = {
+            str(activity["activity_id"]): activity
+            for activity in row.get("recent_activity", [])
+            if isinstance(activity, dict) and isinstance(activity.get("activity_id"), str)
+        }
+        if isinstance(lower, str):
+            for activity in recent_activity:
+                activity_id = activity.get("activity_id")
+                observed_at = activity.get("observed_at")
+                if (
+                    not isinstance(activity_id, str)
+                    or activity.get("agent_name") != row["agent_name"]
+                    or not isinstance(observed_at, str)
+                    or observed_at < lower
+                    or (isinstance(upper, str) and observed_at > upper)
+                    or activity.get("tool_name") in _TEAM_TASK_TOOLS
+                ):
+                    continue
+                activity_by_id[activity_id] = activity
+        row["recent_activity"] = sorted(
+            activity_by_id.values(),
+            key=lambda activity: str(activity.get("observed_at") or ""),
+            reverse=True,
+        )[:8]
+
+    return [progress[int(stage["order"])] for stage in stages]
+
+
+def _unfinished_mapped_stage_orders(
+    planned_stages: list[dict[str, Any]] | None,
+    stage_rows: list[dict[str, Any]],
+) -> list[int]:
+    """Return unfinished stages only when every plan stage has an exact AionUi task binding."""
+    planned = planned_stages or []
+    expected_orders = {
+        int(stage["order"])
+        for stage in planned
+        if isinstance(stage, dict)
+        and isinstance(stage.get("order"), int)
+        and not isinstance(stage.get("order"), bool)
+        and 1 <= int(stage["order"]) <= 20
+    }
+    if not expected_orders or len(expected_orders) != len(planned) or len(stage_rows) != len(expected_orders):
+        return []
+
+    rows_by_order: dict[int, dict[str, Any]] = {}
+    for row in stage_rows:
+        order = row.get("stage_order")
+        task_id = row.get("task_id")
+        if (
+            not isinstance(order, int)
+            or isinstance(order, bool)
+            or order not in expected_orders
+            or order in rows_by_order
+            or row.get("source") != "aion_team_task"
+            or not isinstance(task_id, str)
+            or _TEAM_ID.fullmatch(task_id) is None
+        ):
+            return []
+        rows_by_order[order] = row
+    if set(rows_by_order) != expected_orders:
+        return []
+    return sorted(
+        order for order, row in rows_by_order.items() if row.get("status") != "completed"
+    )
+
+
 class AionUiClient:
     def __init__(self, config: ConsoleConfig, *, client: httpx.Client | None = None) -> None:
         self.config = config
         self.base = _loopback_base(config.aionui_base)
         self._client = client or httpx.Client(base_url=self.base, timeout=15.0)
+        self._message_page_meta: dict[str, dict[str, Any]] = {}
 
     def _request(
         self,
@@ -121,6 +620,118 @@ class AionUiClient:
     def list_assistants(self) -> list[dict[str, Any]]:
         data = self._request("GET", "/api/assistants", timeout=5.0)
         return data if isinstance(data, list) else []
+
+    def list_managed_agents(self) -> list[dict[str, Any]]:
+        """Read adapter capabilities; callers must expose only secret-free fields."""
+        data = self._request("GET", "/api/agents/management", timeout=5.0)
+        if not isinstance(data, list):
+            raise AionUiError("AionUi managed agent list returned an invalid object")
+        return [row for row in data if isinstance(row, dict)]
+
+    def list_providers(self) -> list[dict[str, Any]]:
+        data = self._request("GET", "/api/providers", timeout=5.0)
+        if not isinstance(data, list):
+            raise AionUiError("AionUi provider list returned an invalid object")
+        return [row for row in data if isinstance(row, dict)]
+
+    @staticmethod
+    def _local_models(models: list[str]) -> list[str]:
+        clean: list[str] = []
+        for model in models[:100]:
+            if (
+                isinstance(model, str)
+                and 0 < len(model) <= 200
+                and model.strip() == model
+                and not any(ord(character) < 32 for character in model)
+                and model not in clean
+            ):
+                clean.append(model)
+        if not clean:
+            raise AionUiError("local provider has no usable models")
+        return clean
+
+    def local_provider_registered(self, provider: LocalProviderName) -> bool:
+        spec = _LOCAL_PROVIDERS[provider]
+        for row in self.list_providers():
+            if (
+                row.get("base_url") == spec["base_url"]
+                and row.get("platform") == "custom"
+                and row.get("enabled") is not False
+                and isinstance(row.get("models"), list)
+                and bool(row["models"])
+            ):
+                return True
+        return False
+
+    def ensure_local_provider(
+        self,
+        provider: LocalProviderName,
+        models: list[str],
+    ) -> str:
+        """Register only fixed loopback providers with non-secret placeholder credentials."""
+        spec = _LOCAL_PROVIDERS[provider]
+        clean_models = self._local_models(models)
+        existing = self.list_providers()
+        selected = next((row for row in existing if row.get("id") == spec["id"]), None)
+        if selected is not None and (
+            selected.get("base_url") != spec["base_url"]
+            or selected.get("platform") != "custom"
+        ):
+            raise AionUiError("AionUi local provider id is already used by another endpoint")
+        if selected is None:
+            selected = next(
+                (
+                    row
+                    for row in existing
+                    if row.get("base_url") == spec["base_url"]
+                    and row.get("platform") == "custom"
+                ),
+                None,
+            )
+
+        provider_id = spec["id"] if selected is None else selected.get("id")
+        if not isinstance(provider_id, str) or not provider_id or len(provider_id) > 160:
+            raise AionUiError("AionUi local provider has an invalid id")
+        prior_models = selected.get("models") if selected is not None else []
+        merged_models = list(clean_models)
+        if isinstance(prior_models, list):
+            for model in prior_models:
+                if isinstance(model, str) and model not in merged_models and len(model) <= 200:
+                    merged_models.append(model)
+        protocols = {
+            model: "openai"
+            for model in merged_models
+        }
+        payload = {
+            "platform": "custom",
+            "name": (
+                selected.get("name")
+                if selected is not None and isinstance(selected.get("name"), str)
+                else spec["name"]
+            ),
+            "base_url": spec["base_url"],
+            "api_key": spec["api_key"],
+            "models": merged_models,
+            "enabled": True,
+            "model_protocols": protocols,
+        }
+        if selected is None:
+            data = self._request(
+                "POST",
+                "/api/providers",
+                timeout=15.0,
+                json={"id": provider_id, **payload},
+            )
+        else:
+            data = self._request(
+                "PUT",
+                f"/api/providers/{quote(provider_id, safe='')}",
+                timeout=15.0,
+                json=payload,
+            )
+        if isinstance(data, dict) and data.get("id") not in {None, provider_id}:
+            raise AionUiError("AionUi registered an unexpected local provider")
+        return provider_id
 
     def list_teams(self) -> list[dict[str, Any]]:
         data = self._request("GET", "/api/teams", timeout=5.0)
@@ -179,13 +790,332 @@ class AionUiClient:
         data = self._request("GET", f"/api/teams/{team_id}/run-state", timeout=5.0)
         return data if isinstance(data, dict) else {}
 
+    @staticmethod
+    def _control_id(value: object, label: str) -> str:
+        if not isinstance(value, str) or not _TEAM_ID.fullmatch(value):
+            raise AionUiError(f"AionUi run control has an invalid {label}")
+        return value
+
+    @classmethod
+    def _run_control_state(
+        cls,
+        state: dict[str, Any],
+        expected_run_id: str | None,
+    ) -> dict[str, Any]:
+        active = state.get("active_run")
+        if not isinstance(active, dict):
+            return {
+                "status": "inactive",
+                "active_run_id": None,
+                "active_slot_ids": [],
+                "slot_states": [],
+            }
+        raw_run_id = next(
+            (
+                active.get(key)
+                for key in ("team_run_id", "run_id", "id")
+                if isinstance(active.get(key), str)
+            ),
+            None,
+        )
+        active_run_id = (
+            cls._control_id(raw_run_id, "active run id") if raw_run_id is not None else None
+        )
+        if expected_run_id and active_run_id and active_run_id != expected_run_id:
+            return {
+                "status": "different_run",
+                "active_run_id": active_run_id,
+                "active_slot_ids": [],
+                "slot_states": [],
+            }
+
+        slot_states: list[dict[str, str]] = []
+        raw_slot_work_value = active.get("slot_work")
+        if not isinstance(raw_slot_work_value, list):
+            raw_slot_work_value = state.get("slot_work")
+        raw_slot_work: list[Any] = (
+            raw_slot_work_value if isinstance(raw_slot_work_value, list) else []
+        )
+        for row in raw_slot_work:
+            if not isinstance(row, dict):
+                continue
+            raw_slot_id = row.get("slot_id")
+            if not isinstance(raw_slot_id, str) or not _TEAM_ID.fullmatch(raw_slot_id):
+                continue
+            slot_states.append(
+                {
+                    "slot_id": raw_slot_id,
+                    "state": str(row.get("state") or "unknown").lower(),
+                }
+            )
+        controllable = [row for row in slot_states if row["state"] not in _TERMINAL_SLOT_STATES]
+        raw_status = str(active.get("status") or "running").lower()
+        if raw_status in {"cancelled", "canceled"}:
+            status = "cancelled"
+        elif raw_status in {"failed", "error"}:
+            status = "failed"
+        elif raw_status in {"completed", "complete", "finished", "succeeded", "success"}:
+            status = "completed_unverified"
+        elif raw_status == "paused" or (
+            controllable and all(row["state"] == "paused" for row in controllable)
+        ):
+            status = "paused"
+        else:
+            status = "running"
+        return {
+            "status": status,
+            "active_run_id": active_run_id,
+            "active_slot_ids": [row["slot_id"] for row in controllable],
+            "slot_states": slot_states,
+        }
+
+    def run_control_state(self, team_id: str, expected_run_id: str | None) -> dict[str, Any]:
+        team_id = self._control_id(team_id, "team id")
+        if expected_run_id:
+            expected_run_id = self._control_id(expected_run_id, "run id")
+        return self._run_control_state(self.team_run_state(team_id), expected_run_id)
+
+    def pause_team_run(self, team_id: str, run_id: str) -> dict[str, Any]:
+        """Request a cooperative pause for every currently active AionUi team slot."""
+        team_id = self._control_id(team_id, "team id")
+        run_id = self._control_id(run_id, "run id")
+        before = self.run_control_state(team_id, run_id)
+        if before["status"] == "paused":
+            return before
+        if before["status"] != "running":
+            raise AionUiError("AionUi run is not in a pausable state")
+        slot_ids = list(
+            dict.fromkeys(
+                row["slot_id"]
+                for row in before["slot_states"]
+                if row["state"] not in _TERMINAL_SLOT_STATES | {"paused"}
+            )
+        )
+        if not slot_ids:
+            raise AionUiError("AionUi run has no verifiable active slots to pause")
+        for slot_id in slot_ids:
+            self._request(
+                "POST",
+                (
+                    f"/api/teams/{quote(team_id, safe='')}/runs/{quote(run_id, safe='')}"
+                    f"/agents/{quote(slot_id, safe='')}/pause"
+                ),
+                timeout=10.0,
+                json={"reason": "quarterdeck_user_pause"},
+            )
+        after = self.run_control_state(team_id, run_id)
+        return {**after, "requested_slot_ids": slot_ids}
+
+    def cancel_team_run(self, team_id: str, run_id: str) -> dict[str, Any]:
+        """Request whole-run cancellation; the caller must separately confirm termination."""
+        team_id = self._control_id(team_id, "team id")
+        run_id = self._control_id(run_id, "run id")
+        self._request(
+            "POST",
+            f"/api/teams/{quote(team_id, safe='')}/runs/{quote(run_id, safe='')}/cancel",
+            timeout=10.0,
+            json={"reason": "quarterdeck_user_terminate"},
+        )
+        return self.run_control_state(team_id, run_id)
+
+    def resume_team_run(
+        self,
+        team_id: str,
+        *,
+        marker: str,
+        plan_id: str,
+        plan_sha256: str,
+    ) -> dict[str, Any]:
+        """Continue the same confirmed team without creating a new plan or team."""
+        team_id = self._control_id(team_id, "team id")
+        if not re.fullmatch(r"\[qd-resume:[0-9A-HJKMNP-TV-Z]{26}\]", marker):
+            raise AionUiError("AionUi resume marker is invalid")
+        if not _EPHEMERAL_ID.fullmatch(plan_id) or not re.fullmatch(r"[0-9a-f]{64}", plan_sha256):
+            raise AionUiError("AionUi resume plan identity is invalid")
+        ack = self.send_team_message(
+            team_id,
+            (
+                f"{marker}\n"
+                "Continue only the same previously confirmed Quarterdeck plan. Do not broaden its "
+                "scope, tools, recipients, or data access. Preserve all approval and evidence "
+                "requirements; ask Quarterdeck for bounded operator input if essential information "
+                "is missing.\n"
+                f"plan_id: {plan_id}\nplan_sha256: {plan_sha256}"
+            ),
+        )
+        raw_run = ack.get("run")
+        run = raw_run if isinstance(raw_run, dict) else {}
+        raw_run_id = run.get("team_run_id")
+        run_id = self._control_id(raw_run_id, "resumed run id")
+        return {"team_run_id": run_id, "enqueue_status": ack.get("enqueue_status")}
+
     def messages(self, conversation_id: str) -> list[dict[str, Any]]:
         data = self._request("GET", f"/api/conversations/{conversation_id}/messages", timeout=5.0)
         if isinstance(data, dict) and isinstance(data.get("items"), list):
+            self._message_page_meta[conversation_id] = {
+                "has_more_before": data.get("has_more_before") is True,
+                "oldest_cursor": data.get("oldest_cursor"),
+            }
             return [item for item in data["items"] if isinstance(item, dict)]
         if isinstance(data, list):
             return [item for item in data if isinstance(item, dict)]
         return []
+
+    def message_history(
+        self,
+        conversation_id: str,
+        initial: list[dict[str, Any]],
+        *,
+        max_items: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Read bounded older pages only when a stage-task mapping must be recovered."""
+        items = list(initial[:max_items])
+        seen = {
+            str(item["id"])
+            for item in items
+            if isinstance(item.get("id"), str)
+        }
+        meta = self._message_page_meta.get(conversation_id, {})
+        pages = 1
+        while meta.get("has_more_before") is True and len(items) < max_items and pages < 4:
+            cursor = meta.get("oldest_cursor")
+            if not isinstance(cursor, str) or not _MESSAGE_CURSOR.fullmatch(cursor):
+                break
+            data = self._request(
+                "GET",
+                f"/api/conversations/{conversation_id}/messages",
+                timeout=5.0,
+                params={"before": cursor},
+            )
+            if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+                break
+            page = [item for item in data["items"] if isinstance(item, dict)]
+            for item in page:
+                item_id = item.get("id")
+                if isinstance(item_id, str) and item_id in seen:
+                    continue
+                if isinstance(item_id, str):
+                    seen.add(item_id)
+                items.append(item)
+                if len(items) >= max_items:
+                    break
+            meta = {
+                "has_more_before": data.get("has_more_before") is True,
+                "oldest_cursor": data.get("oldest_cursor"),
+            }
+            pages += 1
+        return items
+
+    def conversation_contains_marker(self, conversation_id: str, marker: str) -> bool:
+        """Reconcile one outbound operator answer without exposing message bodies upstream."""
+        if not marker or len(marker) > 100:
+            raise ValueError("invalid message marker")
+        return any(marker in (_message_text(item) or "") for item in self.messages(conversation_id))
+
+    @staticmethod
+    def _confirmation_id(value: object, label: str) -> str:
+        if not isinstance(value, str) or not _TEAM_ID.fullmatch(value):
+            raise AionUiError(f"AionUi confirmation has an invalid {label}")
+        return value
+
+    @staticmethod
+    def _confirmation_text(value: object, fallback: str, limit: int) -> str:
+        if not isinstance(value, str) or not value.strip():
+            return fallback
+        return redact_text(value.strip())[:limit]
+
+    def list_confirmations(self, conversation_id: str) -> list[dict[str, str]]:
+        """Return only decision material needed by Quarterdeck's approval bridge."""
+        conversation_id = self._confirmation_id(conversation_id, "conversation id")
+        data = self._request(
+            "GET",
+            f"/api/conversations/{quote(conversation_id, safe='')}/confirmations",
+            timeout=5.0,
+        )
+        if not isinstance(data, list):
+            raise AionUiError("AionUi confirmation list returned an invalid object")
+        confirmations: list[dict[str, str]] = []
+        for row in data:
+            if not isinstance(row, dict):
+                raise AionUiError("AionUi confirmation list returned an invalid row")
+            message_id = self._confirmation_id(row.get("id"), "message id")
+            call_id = self._confirmation_id(row.get("call_id"), "call id")
+            raw_options = row.get("options")
+            if not isinstance(raw_options, list):
+                raise AionUiError("AionUi confirmation options are unavailable")
+            values: set[str] = set()
+            for option in raw_options:
+                if not isinstance(option, dict):
+                    continue
+                value = option.get("value")
+                if isinstance(value, str):
+                    values.add(value)
+            allow = sorted(values & _CONFIRMATION_ALLOW_VALUES)
+            reject = sorted(values & _CONFIRMATION_REJECT_VALUES)
+            if len(allow) != 1 or len(reject) != 1:
+                raise AionUiError("AionUi confirmation does not support allow-once and reject")
+            confirmations.append(
+                {
+                    "message_id": message_id,
+                    "call_id": call_id,
+                    "title": self._confirmation_text(
+                        row.get("title"),
+                        "Runtime tool request",
+                        1200,
+                    ),
+                    "description": self._confirmation_text(
+                        row.get("description"),
+                        "This runtime operation needs human approval.",
+                        600,
+                    ),
+                    "command_type": self._confirmation_text(
+                        row.get("command_type"),
+                        "tool",
+                        80,
+                    ),
+                    "allow_value": allow[0],
+                    "reject_value": reject[0],
+                }
+            )
+        return confirmations
+
+    def resolve_confirmation(
+        self,
+        conversation_id: str,
+        call_id: str,
+        decision: Literal["approve", "reject"],
+    ) -> dict[str, str]:
+        """Consume one live AionUi confirmation without granting a persistent permission."""
+        if decision not in {"approve", "reject"}:
+            raise ValueError("unsupported AionUi confirmation decision")
+        conversation_id = self._confirmation_id(conversation_id, "conversation id")
+        call_id = self._confirmation_id(call_id, "call id")
+        matches = [
+            row for row in self.list_confirmations(conversation_id) if row["call_id"] == call_id
+        ]
+        if len(matches) != 1:
+            raise AionUiError("AionUi confirmation is missing or ambiguous")
+        confirmation = matches[0]
+        value = confirmation["allow_value" if decision == "approve" else "reject_value"]
+        self._request(
+            "POST",
+            (
+                f"/api/conversations/{quote(conversation_id, safe='')}/confirmations/"
+                f"{quote(call_id, safe='')}/confirm"
+            ),
+            timeout=10.0,
+            json={
+                "msg_id": confirmation["message_id"],
+                "data": value,
+                "always_allow": False,
+            },
+        )
+        return {
+            "conversation_id": conversation_id,
+            "call_id": call_id,
+            "decision": decision,
+            "value": value,
+        }
 
     def send_team_message(self, team_id: str, content: str) -> dict[str, Any]:
         data = self._request(
@@ -439,6 +1369,8 @@ class AionUiClient:
         assistant_id: str | None = None,
         previous_plan: TaskPlan | None = None,
         revision_instruction: str = "",
+        runtime_capabilities: list[dict[str, Any]] | None = None,
+        blueprint: dict[str, Any] | None = None,
     ) -> TaskPlan:
         _emit_progress(progress, "preparing", 10)
         planner_id = assistant_id or self.config.planner_assistant_id
@@ -473,6 +1405,8 @@ class AionUiClient:
                 workflow_catalog,
                 previous_plan=previous_plan,
                 revision_instruction=revision_instruction,
+                runtime_capabilities=runtime_capabilities or [],
+                blueprint=blueprint,
             )
             _emit_progress(progress, "generating_plan", 30)
             text = self._run_and_wait(
@@ -563,7 +1497,7 @@ class AionUiClient:
                 {
                     "name": agent.name,
                     "role": "lead" if agent.role == "lead" else "teammate",
-                    "model": "default",
+                    "model": agent.model or "default",
                     "assistant_id": assistant_id,
                 }
             )
@@ -580,7 +1514,23 @@ class AionUiClient:
                 "hash-bound collaboration_loops entry as a bounded plan contract: stop early when its "
                 "acceptance condition is met, never exceed max_iterations, and stop with an unresolved "
                 "status when the limit is reached. AionUi does not expose a verifiable hard runtime cutoff, "
-                "so do not describe prompt compliance as deterministic enforcement. "
+                "so do not describe prompt compliance as deterministic enforcement. Before execution, "
+                "create exactly one built-in AionUi team task for every confirmed plan stage. Its subject "
+                "must be exactly '[QD-STAGE:<order>] <stage title>'; do not put task data, output, personal "
+                "information, or secrets in the subject. Preserve plan order and stage dependencies. Mark "
+                "the exact task in_progress before stage work, completed only after that stage process has "
+                "ended, and blocked or failed honestly. This is execution telemetry, never proof that the "
+                "business outcome is correct. Before ending the team run, call team_task_list and verify "
+                "every QD-STAGE is completed. Do not end as complete while any QD-STAGE is pending, "
+                "blocked, unknown, or failed; continue runnable work in plan order or surface the blocking "
+                "condition honestly. When operator-provided "
+                "information is required, call mcp__quarterdeck__qd_request_input with this exact plan_id, "
+                "your exact planned agent name, one focused question, and optional bounded choices; after it "
+                "is accepted, stop work until Quarterdeck sends the tagged operator answer back to this team. "
+                "Never put credentials or secret values in a question. Use "
+                "mcp__quarterdeck__qd_python_package_status for dependency presence checks instead of shell "
+                "commands. Missing software installation, file writes, sends, deletes, credentials, and "
+                "external publication always remain approval-gated. "
                 "Paperclip issue: "
                 f"{paperclip_issue_id}.\n"
                 + json.dumps(
@@ -604,42 +1554,318 @@ class AionUiClient:
             raise
         raw_run: Any = ack.get("run")
         run: dict[str, Any] = raw_run if isinstance(raw_run, dict) else {}
+        assistants = [row for row in team.get("assistants", []) if isinstance(row, dict)]
         conversations = [
             str(row.get("conversation_id"))
-            for row in team.get("assistants", [])
-            if isinstance(row, dict) and isinstance(row.get("conversation_id"), str)
+            for row in assistants
+            if isinstance(row.get("conversation_id"), str)
         ]
+        planned_names = {agent.name for agent in plan.agents}
+        by_name: dict[str, str] = {}
+        for row in assistants:
+            name = row.get("name")
+            conversation_id = row.get("conversation_id")
+            if (
+                isinstance(name, str)
+                and isinstance(conversation_id, str)
+                and name in planned_names
+                and name not in by_name
+            ):
+                by_name[name] = conversation_id
+        # The adapter only persists an individual mapping when AionUi gives an exact name match.
+        # Positional guesses would make a person-shaped UI lie about who is active.
+        sessions = (
+            [
+                {"agent_name": agent.name, "conversation_id": by_name[agent.name]}
+                for agent in plan.agents
+            ]
+            if set(by_name) == planned_names
+            else []
+        )
         return {
             "team_id": str(team["id"]),
             "team_run_id": str(run.get("team_run_id", "")),
             "conversation_ids": conversations,
+            "agent_sessions": sessions,
             "enqueue_status": ack.get("enqueue_status"),
         }
 
-    def execution_snapshot(self, team_id: str, conversation_ids: list[str]) -> dict[str, Any]:
+    def execution_snapshot(
+        self,
+        team_id: str,
+        conversation_ids: list[str],
+        *,
+        agent_sessions: list[dict[str, str]] | None = None,
+        planned_stages: list[dict[str, Any]] | None = None,
+        existing_stage_progress: list[dict[str, Any]] | None = None,
+        observed_after: str | None = None,
+    ) -> dict[str, Any]:
         team = self.team(team_id)
-        pending = sum(
-            int(row.get("pending_confirmations", 0) or 0)
-            for row in team.get("assistants", [])
-            if isinstance(row, dict)
-        )
+        assistants = [row for row in team.get("assistants", []) if isinstance(row, dict)]
+        pending = sum(int(row.get("pending_confirmations", 0) or 0) for row in assistants)
         state = self.team_run_state(team_id)
         active = state.get("active_run")
-        if pending:
-            return {"status": "awaiting_approval", "pending_approvals": pending}
+        control_state = self._run_control_state(state, None)
+        observed_now = datetime.now(UTC).isoformat()
+        observed_after_normalized = _observed_at(observed_after)
+        if observed_after is not None and observed_after_normalized is None:
+            raise ValueError("AionUi observation boundary is invalid")
+
+        def current_run_messages(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            if observed_after_normalized is None:
+                return rows
+            return [
+                row
+                for row in rows
+                if (observed := _message_observed_at(row)) is not None
+                and observed >= observed_after_normalized
+            ]
+        assistant_by_conversation = {
+            str(row.get("conversation_id")): row
+            for row in assistants
+            if isinstance(row.get("conversation_id"), str)
+        }
+        session_name_by_conversation = {
+            str(row["conversation_id"]): str(row["agent_name"])
+            for row in (agent_sessions or [])
+            if isinstance(row.get("agent_name"), str)
+            and isinstance(row.get("conversation_id"), str)
+        }
+        name_by_slot: dict[str, str] = {}
+        for assistant_row in assistants:
+            conversation_id = assistant_row.get("conversation_id")
+            slot_id = assistant_row.get("slot_id")
+            name = assistant_row.get("name")
+            if (
+                isinstance(conversation_id, str)
+                and isinstance(slot_id, str)
+                and isinstance(name, str)
+                and session_name_by_conversation.get(conversation_id) == name
+            ):
+                name_by_slot[slot_id] = name
+
+        raw_slot_work: object = []
         if isinstance(active, dict):
-            status = str(active.get("status", "running"))
-            if status in {"failed", "cancelled"}:
-                return {"status": "failed", "error": f"AionUi team run {status}"}
-            return {"status": "running"}
-        has_response = any(
-            any(
-                item.get("position") == "left" and _message_text(item)
-                for item in self.messages(cid)
+            raw_slot_work = active.get("slot_work", [])
+        elif isinstance(state.get("slot_work"), list):
+            raw_slot_work = state["slot_work"]
+        active_members: list[dict[str, Any]] = []
+        active_by_name: dict[str, dict[str, Any]] = {}
+        if isinstance(raw_slot_work, list):
+            for row in raw_slot_work:
+                if not isinstance(row, dict):
+                    continue
+                agent_name = name_by_slot.get(str(row.get("slot_id")))
+                if agent_name is None:
+                    continue
+                raw_state = str(row.get("state", "")).lower()
+                if row.get("blocked_reason"):
+                    member_state = "blocked"
+                elif raw_state in {"running", "active", "work", "in_progress"}:
+                    member_state = "running"
+                elif raw_state in {"queued", "pending"}:
+                    member_state = "queued"
+                else:
+                    continue
+                elapsed_ms = row.get("active_turn_elapsed_ms")
+                elapsed_seconds = (
+                    min(int(elapsed_ms / 1000), 2_678_400)
+                    if isinstance(elapsed_ms, (int, float)) and not isinstance(elapsed_ms, bool)
+                    else None
+                )
+                member = {
+                    "agent_name": agent_name,
+                    "state": member_state,
+                    "started_at": _observed_at(row.get("active_turn_started_at_ms")),
+                    "elapsed_seconds": elapsed_seconds,
+                    "slow": bool(row.get("active_turn_slow")),
+                }
+                active_members.append(member)
+                active_by_name[agent_name] = member
+
+        observations: list[dict[str, Any]] = []
+        recent_activity: list[dict[str, Any]] = []
+        team_task_events: list[dict[str, Any]] = []
+        planned_stage_orders = {
+            int(stage["order"])
+            for stage in (planned_stages or [])
+            if isinstance(stage, dict)
+            and isinstance(stage.get("order"), int)
+            and not isinstance(stage.get("order"), bool)
+        }
+        bound_stage_orders = {
+            int(row["stage_order"])
+            for row in (existing_stage_progress or [])
+            if isinstance(row, dict)
+            and isinstance(row.get("stage_order"), int)
+            and not isinstance(row.get("stage_order"), bool)
+            and isinstance(row.get("task_id"), str)
+            and _TEAM_ID.fullmatch(str(row["task_id"]))
+        }
+        recover_stage_history = bool(planned_stage_orders - bound_stage_orders)
+        response_seen = False
+        for session in agent_sessions or []:
+            agent_name = session.get("agent_name")
+            conversation_id = session.get("conversation_id")
+            if not isinstance(agent_name, str) or not isinstance(conversation_id, str):
+                continue
+            mapped_assistant = assistant_by_conversation.get(conversation_id)
+            raw_latest_messages = self.messages(conversation_id)
+            latest_messages = current_run_messages(raw_latest_messages)
+            stage_messages = current_run_messages(
+                self.message_history(conversation_id, raw_latest_messages)
+                if recover_stage_history
+                else raw_latest_messages
             )
-            for cid in conversation_ids
-        )
-        return {"status": "completed_unverified" if has_response else "queued"}
+            for item in stage_messages:
+                event = _team_task_event(item)
+                if event is None:
+                    continue
+                raw_owner = event.get("owner")
+                if isinstance(raw_owner, str):
+                    event["owner"] = name_by_slot.get(raw_owner, raw_owner)
+                team_task_events.append(event)
+            member_activity = _runtime_activities(agent_name, latest_messages)
+            recent_activity.extend(member_activity)
+            # Team-level running still proves nothing about an individual. Exact slot identity,
+            # a member-scoped confirmation, response, or tool record does.
+            if mapped_assistant and int(mapped_assistant.get("pending_confirmations", 0) or 0):
+                observations.append(
+                    {
+                        "agent_name": agent_name,
+                        "state": "activity_observed",
+                        "observed_at": observed_now,
+                        "source": "adapter",
+                    }
+                )
+                continue
+            active_member = active_by_name.get(agent_name)
+            if active_member is not None:
+                observations.append(
+                    {
+                        "agent_name": agent_name,
+                        "state": "activity_observed",
+                        "observed_at": active_member.get("started_at") or observed_now,
+                        "source": "adapter",
+                    }
+                )
+                continue
+            finished = [
+                item
+                for item in latest_messages
+                if item.get("position") == "left" and item.get("status") == "finish"
+                and item.get("type") in {None, "text"}
+            ]
+            if finished:
+                response_seen = True
+                newest = finished[-1]
+                observations.append(
+                    {
+                        "agent_name": agent_name,
+                        "state": "response_observed",
+                        "observed_at": _message_observed_at(newest) or observed_now,
+                        "source": "adapter",
+                    }
+                )
+            elif member_activity:
+                observations.append(
+                    {
+                        "agent_name": agent_name,
+                        "state": "activity_observed",
+                        "observed_at": member_activity[-1]["observed_at"],
+                        "source": "adapter",
+                    }
+                )
+            else:
+                observations.append(
+                    {
+                        "agent_name": agent_name,
+                        "state": "unobserved",
+                        "source": "adapter",
+                    }
+                )
+        recent_activity.sort(key=lambda row: str(row["observed_at"]), reverse=True)
+        progress = {
+            "available": True,
+            "observed_at": observed_now,
+            "active_members": active_members,
+            "recent_activity": recent_activity[:20],
+        }
+        if planned_stages is not None:
+            stage_rows = _stage_progress(
+                planned_stages,
+                team_task_events,
+                recent_activity,
+                existing_stage_progress or [],
+            )
+            progress["stages"] = stage_rows
+            progress["stage_history_recovered"] = recover_stage_history or all(
+                isinstance(row.get("task_id"), str) for row in stage_rows
+            )
+            progress["stage_mapping_version"] = 1
+        else:
+            stage_rows = []
+        unfinished_stage_orders = _unfinished_mapped_stage_orders(planned_stages, stage_rows)
+        if pending:
+            return {
+                "status": "awaiting_approval",
+                "pending_approvals": pending,
+                "member_observations": observations,
+                "progress": progress,
+            }
+        if isinstance(active, dict):
+            status = str(control_state["status"])
+            if status == "failed":
+                return {
+                    "status": "failed",
+                    "error": "AionUi team run failed",
+                    "member_observations": observations,
+                    "progress": progress,
+                }
+            if status == "completed_unverified" and unfinished_stage_orders:
+                return {
+                    "status": "failed",
+                    "terminal_reason": "unfinished_stages",
+                    "unfinished_stage_orders": unfinished_stage_orders,
+                    "member_observations": observations,
+                    "progress": progress,
+                }
+            if status in {"cancelled", "completed_unverified", "paused"}:
+                return {
+                    "status": status,
+                    "member_observations": observations,
+                    "progress": progress,
+                }
+            return {
+                "status": "running",
+                "member_observations": observations,
+                "progress": progress,
+            }
+        if not agent_sessions:
+            # Legacy executions retain their terminal check without claiming member-level data.
+            response_seen = any(
+                any(
+                    item.get("position") == "left"
+                    and item.get("status") == "finish"
+                    and item.get("type") in {None, "text"}
+                    for item in current_run_messages(self.messages(cid))
+                )
+                for cid in conversation_ids
+            )
+        status = "completed_unverified" if response_seen else "queued"
+        if status == "completed_unverified" and unfinished_stage_orders:
+            return {
+                "status": "failed",
+                "terminal_reason": "unfinished_stages",
+                "unfinished_stage_orders": unfinished_stage_orders,
+                "member_observations": observations,
+                "progress": progress,
+            }
+        return {
+            "status": status,
+            "member_observations": observations,
+            "progress": progress,
+        }
 
 
 _ZH_BRIEF_LABELS = (
@@ -730,8 +1956,7 @@ def _validate_plan_brief(plan: TaskPlan, request: PlanRequest) -> None:
         raise ValueError("fortune-telling demo requires exactly three agents")
     agent_names = {_normalized_intent(agent.name) for agent in plan.agents}
     expected_agents = {
-        _normalized_intent(name)
-        for name in ("解读 Agent", "引用核验 Agent", "报告编辑 Agent")
+        _normalized_intent(name) for name in ("解读 Agent", "引用核验 Agent", "报告编辑 Agent")
     }
     if agent_names != expected_agents:
         raise ValueError("fortune-telling demo requires the three named agent roles")
@@ -741,7 +1966,9 @@ def _validate_plan_brief(plan: TaskPlan, request: PlanRequest) -> None:
         raise ValueError("fortune-telling demo approvals must require human signoff")
     artifact_text = " ".join(plan.artifacts)
     missing_artifacts = [
-        item for item in ("命盘 JSON", "引用清单", "审核结果", "PDF 报告") if item not in artifact_text
+        item
+        for item in ("命盘 JSON", "引用清单", "审核结果", "PDF 报告")
+        if item not in artifact_text
     ]
     if missing_artifacts:
         raise ValueError(f"fortune-telling demo artifacts are incomplete: {missing_artifacts}")
@@ -758,6 +1985,8 @@ def _planning_prompt(
     *,
     previous_plan: TaskPlan | None = None,
     revision_instruction: str = "",
+    runtime_capabilities: list[dict[str, Any]] | None = None,
+    blueprint: dict[str, Any] | None = None,
 ) -> str:
     catalog = [
         {
@@ -774,7 +2003,10 @@ def _planning_prompt(
         "constraints": request.constraints,
         "preferred_cadence": request.preferred_cadence,
         "available_workflows": catalog,
+        "available_runtimes": runtime_capabilities or [],
     }
+    if blueprint is not None:
+        envelope["team_blueprint"] = blueprint
     revision_contract = ""
     if previous_plan is not None:
         envelope["previous_plan"] = previous_plan.model_dump(mode="json")
@@ -793,7 +2025,9 @@ def _planning_prompt(
         "for user-facing text when the objective is Chinese. Schema: "
         '{"schema_version":1,"title":"...","summary":"...","execution_mode":"aion_team|workflow",'
         '"workflow_id":null,"agents":[{"name":"...","role":"lead|researcher|operator|reviewer|reporter|specialist",'
-        '"responsibility":"...","runtime":"claude_code|codex_cli|aion_cli","reports_to":null}],'
+        '"responsibility":"...","runtime":"claude_code|codex_cli|aion_cli",'
+        '"model":"exact advertised model id or default",'
+        '"runtime_reason":"brief reason for this available runtime","reports_to":null}],'
         '"collaboration_loops":[{"source_agent":"exact agent name","target_agent":"exact agent name",'
         '"condition":"acceptance or return condition","max_iterations":2}],'
         '"stages":[{"order":1,"title":"...","owner":"exact agent name","outcome":"...","checkpoint":true}],'
@@ -815,6 +2049,13 @@ def _planning_prompt(
         "Excluded:. Fill in safe defaults for underspecified work, including inputs, data boundaries, "
         "deterministic versus AI responsibilities, agent roles, approvals, evidence artifacts, delivery "
         "behavior, and explicit exclusions. Do not claim a required dependency is installed. "
+        "Choose every agent runtime only from INPUT.available_runtimes entries whose available field is "
+        "true. For that runtime, choose model only from the same entry's models list and copy its id "
+        "exactly; prefer an exact model when the task justifies it, otherwise use default. Explain both "
+        "choices concisely in runtime_reason. Never silently substitute an unavailable runtime or model. "
+        "If INPUT.team_blueprint exists, treat it only as a reusable role, "
+        "reporting, loop, and runtime-preference input: generate a complete task-specific plan anyway; "
+        "do not treat the blueprint as a running employee directory or execution authorization. "
         "Choose workflow only when one ready catalog entry exactly matches; otherwise choose aion_team "
         "with workflow_id null."
         + revision_contract

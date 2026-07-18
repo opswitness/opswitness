@@ -1,4 +1,11 @@
 export type IntegrationStatus = 'online' | 'offline' | 'setup' | 'attention';
+export type AIProviderName =
+  | 'openai'
+  | 'anthropic'
+  | 'deepseek'
+  | 'xai'
+  | 'ollama'
+  | 'lmstudio';
 
 export type Integration = {
   status: IntegrationStatus;
@@ -9,15 +16,20 @@ export type Integration = {
 };
 
 export type AIProvider = Integration & {
-  provider: 'openai' | 'anthropic';
+  provider: AIProviderName;
   installed: boolean;
   authenticated: boolean;
-  auth_mode: 'none' | 'unknown' | 'chatgpt' | 'api_key' | 'account' | 'console';
+  auth_mode: 'none' | 'unknown' | 'chatgpt' | 'api_key' | 'account' | 'console' | 'local';
   runtime_ready: boolean;
+  server_online?: boolean;
+  adapter_registered?: boolean;
+  model_count?: number;
+  models?: string[];
 };
 
 export type ApprovalCard = {
   approval_id: string;
+  plan_id?: string | null;
   status: 'pending';
   kind: 'tool_call' | 'governance';
   title: string;
@@ -31,11 +43,15 @@ export type ApprovalCard = {
   can_decide: boolean;
 };
 
+export type ApprovalMode = 'automatic' | 'automatic_safe' | 'manual_all';
+
 export type PlannedAgent = {
   name: string;
   role: 'lead' | 'researcher' | 'operator' | 'reviewer' | 'reporter' | 'specialist';
   responsibility: string;
   runtime: 'claude_code' | 'codex_cli' | 'aion_cli';
+  model?: string | null;
+  runtime_reason: string;
   reports_to?: string | null;
 };
 
@@ -80,15 +96,115 @@ export type TaskPlan = {
   update_policy: string;
 };
 
+export type ActiveMemberProgress = {
+  agent_name: string;
+  state: 'queued' | 'running' | 'blocked';
+  started_at?: string | null;
+  elapsed_seconds?: number | null;
+  slow: boolean;
+};
+
+export type RuntimeActivity = {
+  activity_id: string;
+  agent_name: string;
+  kind: 'tool_call' | 'response';
+  status: 'running' | 'completed' | 'failed' | 'observed';
+  tool_name?: string | null;
+  observed_at: string;
+  count: number;
+};
+
+export type StageProgress = {
+  stage_order: number;
+  agent_name: string;
+  status: 'not_started' | 'pending' | 'running' | 'blocked' | 'completed' | 'failed' | 'unknown';
+  source: 'aion_team_task' | 'unobserved';
+  task_id?: string | null;
+  blocked_by: number[];
+  started_at?: string | null;
+  updated_at?: string | null;
+  completed_at?: string | null;
+  recent_activity: RuntimeActivity[];
+};
+
+export type ExecutionProgress = {
+  available: boolean;
+  observed_at: string;
+  stage_history_recovered: boolean;
+  stage_mapping_version: number;
+  active_members: ActiveMemberProgress[];
+  recent_activity: RuntimeActivity[];
+  stages: StageProgress[];
+};
+
+export type RuntimeInputRequest = {
+  request_id: string;
+  agent_name: string;
+  question: string;
+  choices: string[];
+  question_sha256: string;
+  requested_at: string;
+  status: 'pending' | 'answered';
+  answered_at?: string | null;
+  answer_sha256?: string | null;
+};
+
+export type RuntimeInputArtifact = {
+  name: string;
+  relative_path: string;
+  available: boolean;
+  sha256?: string | null;
+  size?: number | null;
+  mime?: string | null;
+  preview_supported: boolean;
+  artifact_type?: string | null;
+  status?: string | null;
+  item_count?: number | null;
+};
+
+export type RuntimeInputArtifactPreview = RuntimeInputArtifact & {
+  content: unknown;
+};
+
+export type PlanArtifact = RuntimeInputArtifact & {
+  evidence_status: 'workspace_unverified' | 'registered';
+  event_id?: string | null;
+  cas_uri?: string | null;
+};
+
+export type PlanArtifactPreview = PlanArtifact & {
+  content: unknown;
+};
+
 export type ExecutionState = {
   kind: 'aion_team' | 'workflow';
-  status: 'dispatching' | 'queued' | 'running' | 'awaiting_approval' | 'completed_unverified' | 'failed';
+  status:
+    | 'dispatching'
+    | 'queued'
+    | 'running'
+    | 'awaiting_approval'
+    | 'awaiting_input'
+    | 'pause_requested'
+    | 'paused'
+    | 'resuming'
+    | 'cancel_requested'
+    | 'cancelled'
+    | 'completed_unverified'
+    | 'failed';
+  approval_mode: ApprovalMode;
   paperclip_issue_id?: string | null;
   aion_team_id?: string | null;
   aion_team_run_id?: string | null;
   aion_conversation_ids: string[];
+  aion_agent_sessions?: Array<{ agent_name: string; conversation_id: string }>;
+  member_observations?: AgentObservation[];
+  progress?: ExecutionProgress | null;
+  input_requests: RuntimeInputRequest[];
   workflow_run_id?: string | null;
   error?: string | null;
+  control_error?: string | null;
+  control_marker?: string | null;
+  control_requested_at?: string | null;
   dispatched_at?: string | null;
   finished_at?: string | null;
   outcome_verified: boolean;
@@ -104,15 +220,24 @@ export type PlanRecord = {
     | 'dispatching'
     | 'running'
     | 'awaiting_approval'
+    | 'awaiting_input'
+    | 'pause_requested'
+    | 'paused'
+    | 'resuming'
+    | 'cancel_requested'
+    | 'cancelled'
     | 'completed_unverified'
     | 'failed';
   objective: string;
   constraints: string;
   workspace: string;
   preferred_cadence: string;
+  source_blueprint_id?: string | null;
+  source_blueprint_sha256?: string | null;
   created_at: string;
   updated_at: string;
   confirmed_at?: string | null;
+  approval_mode?: ApprovalMode | null;
   planning_progress?: {
     schema_version: 1;
     phase:
@@ -133,11 +258,119 @@ export type PlanRecord = {
   plan_sha256?: string | null;
   parent_plan_id?: string | null;
   parent_plan_sha256?: string | null;
+  forked_from_plan_id?: string | null;
+  forked_from_plan_sha256?: string | null;
+  continued_from_plan_id?: string | null;
+  continued_from_plan_sha256?: string | null;
+  continuation_message_sha256?: string | null;
   revision_number: number;
   revision_instruction: string;
   revision_instruction_sha256?: string | null;
   error?: string | null;
   execution?: ExecutionState | null;
+};
+
+export type AgentObservation = {
+  agent_name: string;
+  state: 'activity_observed' | 'response_observed' | 'unobserved' | 'unavailable';
+  observed_at?: string | null;
+  source: 'adapter' | 'unavailable';
+};
+
+export type TeamBlueprint = {
+  schema_version: 1;
+  blueprint_id: string;
+  name: string;
+  created_at: string;
+  archived_at?: string | null;
+  source_plan_id: string;
+  source_plan_sha256: string;
+  verification_status: 'unverified' | 'verified';
+  agents: Array<{
+    key: string;
+    role: PlannedAgent['role'];
+    reports_to_key?: string | null;
+    runtime: PlannedAgent['runtime'];
+  }>;
+  collaboration_loops: Array<{
+    source_key: string;
+    target_key: string;
+    max_iterations: number;
+  }>;
+  blueprint_sha256: string;
+};
+
+export type TaskTemplate = {
+  schema_version: 1;
+  template_id: string;
+  name: string;
+  objective: string;
+  created_at: string;
+  archived_at?: string | null;
+  template_sha256: string;
+};
+
+export type RuntimeCapability = {
+  runtime: PlannedAgent['runtime'];
+  label: string;
+  available: boolean;
+  reason: string;
+  default_model: string;
+  models: RuntimeModelOption[];
+};
+
+export type RuntimeModelOption = {
+  id: string;
+  label: string;
+  description: string;
+  pinning: 'default' | 'alias' | 'exact';
+};
+
+export type AgentRuntimeAssignment = {
+  agent_name: string;
+  runtime: PlannedAgent['runtime'];
+  model: string;
+};
+
+export type HomeAction = {
+  action_id: string;
+  kind: 'approval' | 'input_required' | 'task_blocked' | 'operational' | 'running' | 'info';
+  priority: number;
+  title: string;
+  summary: string;
+  target: 'approvals' | 'tasks' | 'team' | 'history' | 'connections' | 'workspace';
+  plan_id?: string | null;
+};
+
+export type HomeActiveTeam = {
+  plan_id: string;
+  title: string;
+  status:
+    | 'confirmed'
+    | 'dispatching'
+    | 'running'
+    | 'awaiting_approval'
+    | 'awaiting_input'
+    | 'pause_requested'
+    | 'paused'
+    | 'resuming'
+    | 'cancel_requested';
+  updated_at: string;
+  members: AgentObservation[];
+};
+
+export type HomeSummary = {
+  first_use: boolean;
+  has_unconfirmed_plan: boolean;
+  default_view: 'workspace' | 'today';
+  action_queue: HomeAction[];
+  active_teams: HomeActiveTeam[];
+  health: {
+    fleet_healthy: boolean;
+    coverage_status: 'full' | 'partial' | 'none';
+    pending_projection: number;
+    monitored_jobs: number;
+  };
 };
 
 export type RunRecord = {
@@ -156,10 +389,25 @@ export type TaskRunHistory = {
   run_id: string;
   plan_id: string;
   title: string;
-  status: 'confirmed' | 'dispatching' | 'running' | 'awaiting_approval' | 'completed_unverified' | 'failed';
+  status:
+    | 'confirmed'
+    | 'dispatching'
+    | 'running'
+    | 'awaiting_approval'
+    | 'awaiting_input'
+    | 'pause_requested'
+    | 'paused'
+    | 'resuming'
+    | 'cancel_requested'
+    | 'cancelled'
+    | 'completed_unverified'
+    | 'failed';
   execution_mode: 'aion_team' | 'workflow' | null;
   agent_count: number;
   revision_number: number;
+  parent_plan_id?: string | null;
+  continued_from_plan_id?: string | null;
+  continuation_available: boolean;
   started_at: string;
   updated_at: string;
   finished_at?: string | null;
@@ -170,11 +418,27 @@ export type TaskRunHistory = {
   events: Array<{
     event_id: string;
     kind:
+      | 'task_plan_continuation_requested'
       | 'task_plan_confirmed'
       | 'task_execution_requested'
       | 'task_execution_dispatched'
+      | 'task_plan_continuation_delivered'
       | 'task_execution_failed'
-      | 'task_execution_finished';
+      | 'task_execution_finished'
+      | 'task_input_requested'
+      | 'task_input_answered'
+      | 'task_input_delivered'
+      | 'task_execution_pause_requested'
+      | 'task_execution_paused'
+      | 'task_execution_resume_requested'
+      | 'task_execution_resumed'
+      | 'task_execution_cancel_requested'
+      | 'task_execution_cancelled'
+      | 'task_execution_control_failed'
+      | 'task_approval_mode_change_requested'
+      | 'task_approval_mode_changed'
+      | 'task_approval_mode_change_aborted'
+      | 'task_approval_mode_change_recovered';
     ts: string;
   }>;
 };
@@ -190,7 +454,7 @@ export type Bootstrap = {
   csrf_token: string;
   generated_at: string;
   integrations: Record<string, Integration>;
-  providers: Record<'openai' | 'anthropic', AIProvider>;
+  providers: Record<AIProviderName, AIProvider>;
   system: Record<'ai' | 'governance' | 'evidence', Integration>;
   fleet: {
     runs: number;
@@ -213,11 +477,37 @@ export type Bootstrap = {
   task_runs: TaskRunHistory[];
   recent_runs: RunRecord[];
   mail_ready: boolean;
+  home: HomeSummary;
+  task_templates: TaskTemplate[];
+  team_blueprints: TeamBlueprint[];
+  runtime_capabilities: RuntimeCapability[];
+  console_access: {
+    exposure: 'loopback' | 'private';
+    public_url: string;
+    paired: boolean;
+    can_manage_devices: boolean;
+  };
+};
+
+export type PairedDevice = {
+  device_id: string;
+  name: string;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+};
+
+export type PairingInvitation = {
+  invitation_id: string;
+  code: string;
+  expires_at: string;
+  public_url: string;
 };
 
 export type ProviderConnectionJob = {
   job_id: string;
-  provider: 'openai' | 'anthropic';
+  provider: AIProviderName;
+  method: 'account' | 'api' | 'api_key' | 'local';
   status: 'running' | 'ready' | 'failed';
   created_at: string;
   updated_at: string;

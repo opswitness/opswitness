@@ -172,6 +172,63 @@ def register_artifact(
     return event
 
 
+def register_console_artifact(
+    ledger: Ledger,
+    source: Path,
+    *,
+    plan_id: str,
+    logical_name: str,
+    labels: list[str] | None = None,
+    mime: str | None = None,
+    paperclip_issue_id: str | None = None,
+) -> dict[str, Any]:
+    """Capture one console-run output without pretending it is a wrapped job run."""
+    logical_name = logical_name.strip()
+    if not logical_name or len(logical_name) > 256:
+        raise ValueError("logical_name must contain 1-256 characters")
+    normalized_labels = sorted({label.strip() for label in labels or [] if label.strip()})
+    if len(normalized_labels) > 50 or any(len(label) > 100 for label in normalized_labels):
+        raise ValueError("artifact labels are limited to 50 values of 100 characters")
+    if paperclip_issue_id is not None and (
+        not paperclip_issue_id.strip() or len(paperclip_issue_id) > 160
+    ):
+        raise ValueError("paperclip_issue_id must contain 1-160 characters")
+
+    digest, size, _path = publish_blob(source, artifact_root(ledger))
+    events = ledger.read_all()
+    for existing_event in events:
+        payload = existing_event.get("payload", {})
+        if (
+            existing_event.get("kind") == "artifact_registered"
+            and existing_event.get("run_id") == plan_id
+            and payload.get("logical_name") == logical_name
+            and payload.get("sha256") == digest
+        ):
+            return existing_event
+
+    selected_mime = mime or mimetypes.guess_type(logical_name)[0] or "application/octet-stream"
+    recorded = ledger.append(
+        "artifact_registered",
+        plan_id,
+        {
+            "schema_version": 1,
+            "job": f"console:{plan_id}",
+            "plan_id": plan_id,
+            "logical_name": logical_name,
+            "sha256": digest,
+            "size": size,
+            "mime": selected_mime,
+            "labels": normalized_labels,
+            "cas_uri": f"cas+sha256://{digest}",
+            "paperclip_issue_id": paperclip_issue_id,
+        },
+        fsync=True,
+    )
+    if recorded is None:
+        raise OSError("could not durably record console artifact registration")
+    return recorded
+
+
 def evaluate_artifact(
     ledger: Ledger,
     artifact_event_id: str,

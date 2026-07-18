@@ -10,15 +10,25 @@ covers issues/projects/comments; Quarterdeck covers the external-fleet ledger,
 watchdog verdicts, and projection control.
 """
 
+import hashlib
+import importlib.metadata
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from quarterdeck.config import Settings, config_dir, resolve_api_key
+from quarterdeck.console.schemas import RuntimeInputRequest
+from quarterdeck.console.store import PlanStore
+from quarterdeck.ids import new_ulid
 from quarterdeck.index import job_summary, query_runs, rebuild
 from quarterdeck.ledger import Ledger
 from quarterdeck.projector import pending_events
+
+
+_PLAN_ID = re.compile(r"[0-9A-HJKMNP-TV-Z]{26}")
+_PACKAGE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
 
 
 def _settings() -> Settings:
@@ -75,6 +85,111 @@ def artifact_verify(event_id: str) -> dict[str, Any]:
         return verify_registration(ledger, event)
     except ValueError as exc:
         return {"ok": False, "error": str(exc), "event_id": event_id}
+
+
+def python_package_status(package: str) -> dict[str, Any]:
+    """Probe package metadata without importing it or spawning a shell."""
+    normalized = package.strip()
+    if not _PACKAGE_NAME.fullmatch(normalized):
+        return {"package": normalized[:100], "installed": False, "error": "invalid package name"}
+    try:
+        return {
+            "package": normalized,
+            "installed": True,
+            "version": importlib.metadata.version(normalized),
+        }
+    except importlib.metadata.PackageNotFoundError:
+        return {"package": normalized, "installed": False, "version": None}
+
+
+def request_runtime_input(
+    plan_id: str,
+    agent_name: str,
+    question: str,
+    choices: list[str] | None = None,
+) -> dict[str, Any]:
+    """Create one private, hash-audited operator question for an active AionUi task."""
+    if not _PLAN_ID.fullmatch(plan_id):
+        return {"accepted": False, "error": "invalid plan id"}
+    normalized_agent = agent_name.strip()
+    normalized_question = question.strip()
+    normalized_choices = [choice.strip() for choice in (choices or [])]
+    if not normalized_agent or len(normalized_agent) > 80:
+        return {"accepted": False, "error": "invalid agent name"}
+    if len(normalized_question) < 3 or len(normalized_question) > 1200:
+        return {"accepted": False, "error": "question must contain 3-1200 characters"}
+    request_sha256 = hashlib.sha256(
+        json.dumps(
+            {
+                "plan_id": plan_id,
+                "agent_name": normalized_agent,
+                "question": normalized_question,
+                "choices": normalized_choices,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    settings = _settings()
+    ledger = Ledger(settings.ledger_dir)
+    store = PlanStore(settings.console.state_dir)
+    created: RuntimeInputRequest | None = None
+
+    def add_request(record: Any) -> Any:
+        nonlocal created
+        if record.status not in {"running", "awaiting_approval", "awaiting_input"}:
+            raise ValueError("runtime input is only available while a task is active")
+        if record.execution is None or record.execution.kind != "aion_team":
+            raise ValueError("runtime input requires an active AionUi team")
+        if record.plan is None or normalized_agent not in {agent.name for agent in record.plan.agents}:
+            raise ValueError("agent name is not part of the confirmed plan")
+        pending = [item for item in record.execution.input_requests if item.status == "pending"]
+        if pending:
+            if len(pending) == 1 and pending[0].question_sha256 == request_sha256:
+                created = pending[0]
+                return record
+            raise ValueError("another operator question is already pending")
+        request_id = new_ulid()
+        candidate = RuntimeInputRequest(
+            request_id=request_id,
+            agent_name=normalized_agent,
+            question=normalized_question,
+            choices=normalized_choices,
+            question_sha256=request_sha256,
+        )
+        event = ledger.append(
+            "task_input_requested",
+            plan_id,
+            {
+                "schema_version": 1,
+                "request_id": request_id,
+                "agent_name": normalized_agent,
+                "question_sha256": request_sha256,
+                "choice_count": len(normalized_choices),
+            },
+            fsync=True,
+        )
+        if event is None:
+            raise ValueError("input request evidence could not be persisted")
+        record.execution.input_requests.append(candidate)
+        record.execution.status = "awaiting_input"
+        record.status = "awaiting_input"
+        created = candidate
+        return record
+
+    try:
+        store.mutate(plan_id, add_request)
+    except (OSError, ValueError) as exc:
+        return {"accepted": False, "error": str(exc)}
+    assert created is not None
+    return {
+        "accepted": True,
+        "request_id": created.request_id,
+        "status": created.status,
+        "question": created.question,
+        "choices": created.choices,
+    }
 
 
 def _count_by_job(events: list[dict[str, Any]]) -> dict[str, int]:
@@ -255,6 +370,45 @@ def build_server(profile: str = "full") -> Any:
     @server.tool(description="Hash-verify one content-addressed artifact registration")
     def qd_artifact_verify(event_id: str) -> str:
         return json.dumps(artifact_verify(event_id), ensure_ascii=False)
+
+    @server.tool(
+        description=(
+            "Check installed Python distribution metadata without importing code or running a shell"
+        ),
+        annotations=ToolAnnotations(
+            title="Check Python package",
+            readOnlyHint=True,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
+    def qd_python_package_status(package: str) -> str:
+        return json.dumps(python_package_status(package), ensure_ascii=False)
+
+    @server.tool(
+        description=(
+            "Pause one active Quarterdeck task and ask the operator one focused question. "
+            "Use only when required information is missing; never include secrets in the question."
+        ),
+        annotations=ToolAnnotations(
+            title="Ask the operator",
+            readOnlyHint=False,
+            destructiveHint=False,
+            idempotentHint=True,
+            openWorldHint=False,
+        ),
+    )
+    def qd_request_input(
+        plan_id: str,
+        agent_name: str,
+        question: str,
+        choices: list[str] | None = None,
+    ) -> str:
+        return json.dumps(
+            request_runtime_input(plan_id, agent_name, question, choices),
+            ensure_ascii=False,
+        )
 
     @server.tool(
         description="Watchdog verdict: overdue / never-run / unsupported schedules (fail-closed)"

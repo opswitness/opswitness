@@ -1,21 +1,47 @@
 import type {
   Bootstrap,
+  ApprovalMode,
+  AgentRuntimeAssignment,
   CollaborationLoop,
   MailAuthorizationJob,
   MailAuthorizationStatus,
   MailSummaryJob,
+  PairedDevice,
+  PairingInvitation,
+  PlanArtifact,
+  PlanArtifactPreview,
   PlanRecord,
   ProviderConnectionJob,
   ReportingLine,
+  RuntimeInputArtifact,
+  RuntimeInputArtifactPreview,
+  TaskTemplate,
+  TeamBlueprint,
   TelegramSetupStatus,
 } from './types';
+import {
+  DEFAULT_UI_LANGUAGE,
+  resolveUiLanguage,
+  translateApiError,
+  UI_LANGUAGE_STORAGE_KEY,
+} from './i18n.js';
 
 let csrfToken = '';
 
+function currentUiLanguage() {
+  if (typeof window === 'undefined') return DEFAULT_UI_LANGUAGE;
+  try {
+    return resolveUiLanguage(window.localStorage.getItem(UI_LANGUAGE_STORAGE_KEY));
+  } catch {
+    return DEFAULT_UI_LANGUAGE;
+  }
+}
+
 async function readError(response: Response): Promise<string> {
   try {
-    const payload = (await response.json()) as { detail?: string };
-    return payload.detail || `请求失败 (${response.status})`;
+    const payload = (await response.json()) as { code?: string; detail?: string };
+    const fallback = payload.detail || `请求失败 (${response.status})`;
+    return translateApiError(currentUiLanguage(), payload.code, fallback);
   } catch {
     return `请求失败 (${response.status})`;
   }
@@ -38,11 +64,30 @@ export async function loadBootstrap(): Promise<Bootstrap> {
   return payload;
 }
 
+export function getPairedDevices(): Promise<PairedDevice[]> {
+  return api('/api/v1/pairing/devices');
+}
+
+export function createPairingInvitation(): Promise<PairingInvitation> {
+  return api('/api/v1/pairing/invitations', {
+    method: 'POST',
+    body: JSON.stringify({ confirmed: true }),
+  });
+}
+
+export function revokePairedDevice(deviceId: string): Promise<{ device_id: string; revoked: true }> {
+  return api(`/api/v1/pairing/devices/${encodeURIComponent(deviceId)}/revoke`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmed: true }),
+  });
+}
+
 export function requestPlan(body: {
   objective: string;
   constraints: string;
   workspace: string;
   preferred_cadence: string;
+  blueprint_id?: string | null;
 }): Promise<PlanRecord> {
   return api('/api/v1/plans', { method: 'POST', body: JSON.stringify(body) });
 }
@@ -55,6 +100,52 @@ export function revisePlan(planId: string, instruction: string): Promise<PlanRec
   return api(`/api/v1/plans/${encodeURIComponent(planId)}/revise`, {
     method: 'POST',
     body: JSON.stringify({ instruction }),
+  });
+}
+
+export function preparePlanRerun(planId: string): Promise<PlanRecord> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/rerun`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmed: true }),
+  });
+}
+
+export function continuePlanRun(planId: string, message: string): Promise<PlanRecord> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/continue`, {
+    method: 'POST',
+    body: JSON.stringify({ message, confirmed: true }),
+  });
+}
+
+export function forkPlan(planId: string): Promise<PlanRecord> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/fork`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmed: true }),
+  });
+}
+
+export function controlPlan(
+  planId: string,
+  action: 'pause' | 'resume' | 'terminate',
+): Promise<PlanRecord> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/control`, {
+    method: 'POST',
+    body: JSON.stringify({ action, confirmed: true }),
+  });
+}
+
+export function changeExecutionApprovalMode(
+  planId: string,
+  approvalMode: 'automatic' | 'manual_all',
+  expectedCurrentMode: ApprovalMode,
+): Promise<PlanRecord> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/approval-mode`, {
+    method: 'POST',
+    body: JSON.stringify({
+      approval_mode: approvalMode,
+      expected_current_mode: expectedCurrentMode,
+      confirmed: true,
+    }),
   });
 }
 
@@ -73,6 +164,16 @@ export function revisePlanOrganization(
   });
 }
 
+export function revisePlanRuntimes(
+  planId: string,
+  assignments: AgentRuntimeAssignment[],
+): Promise<PlanRecord> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/runtimes`, {
+    method: 'POST',
+    body: JSON.stringify({ assignments, confirmed: true }),
+  });
+}
+
 export function deletePlan(planId: string): Promise<{
   plan_id: string;
   deleted: true;
@@ -85,19 +186,120 @@ export function deletePlan(planId: string): Promise<{
   });
 }
 
-export function confirmPlan(planId: string, planSha256: string): Promise<PlanRecord> {
-  return api(`/api/v1/plans/${encodeURIComponent(planId)}/confirm`, {
+export function getTeamBlueprints(includeArchived = false): Promise<TeamBlueprint[]> {
+  const query = includeArchived ? '?include_archived=true' : '';
+  return api(`/api/v1/team-blueprints${query}`);
+}
+
+export function saveTeamBlueprint(sourcePlanId: string, name: string): Promise<TeamBlueprint> {
+  return api('/api/v1/team-blueprints', {
     method: 'POST',
-    body: JSON.stringify({ plan_sha256: planSha256, confirmed: true }),
+    body: JSON.stringify({ source_plan_id: sourcePlanId, name, confirmed: true }),
   });
 }
 
+export function archiveTeamBlueprint(blueprintId: string): Promise<TeamBlueprint> {
+  return api(`/api/v1/team-blueprints/${encodeURIComponent(blueprintId)}/archive`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmed: true }),
+  });
+}
+
+export function getTaskTemplates(includeArchived = false): Promise<TaskTemplate[]> {
+  const query = includeArchived ? '?include_archived=true' : '';
+  return api(`/api/v1/task-templates${query}`);
+}
+
+export function saveTaskTemplate(name: string, objective: string): Promise<TaskTemplate> {
+  return api('/api/v1/task-templates', {
+    method: 'POST',
+    body: JSON.stringify({ name, objective, confirmed: true }),
+  });
+}
+
+export function archiveTaskTemplate(templateId: string): Promise<TaskTemplate> {
+  return api(`/api/v1/task-templates/${encodeURIComponent(templateId)}/archive`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmed: true }),
+  });
+}
+
+export function confirmPlan(
+  planId: string,
+  planSha256: string,
+  approvalMode: ApprovalMode = 'automatic',
+): Promise<PlanRecord> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/confirm`, {
+    method: 'POST',
+    body: JSON.stringify({
+      plan_sha256: planSha256,
+      approval_mode: approvalMode,
+      confirmed: true,
+    }),
+  });
+}
+
+export function answerRuntimeInput(
+  planId: string,
+  requestId: string,
+  answer: string,
+): Promise<PlanRecord> {
+  return api(
+    `/api/v1/plans/${encodeURIComponent(planId)}/input-requests/${encodeURIComponent(requestId)}/answer`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ answer, confirmed: true }),
+    },
+  );
+}
+
+export function getRuntimeInputArtifacts(
+  planId: string,
+  requestId: string,
+): Promise<RuntimeInputArtifact[]> {
+  return api(
+    `/api/v1/plans/${encodeURIComponent(planId)}/input-requests/${encodeURIComponent(requestId)}/artifacts`,
+  );
+}
+
+export function getRuntimeInputArtifact(
+  planId: string,
+  requestId: string,
+  artifactName: string,
+): Promise<RuntimeInputArtifactPreview> {
+  return api(
+    `/api/v1/plans/${encodeURIComponent(planId)}/input-requests/${encodeURIComponent(requestId)}/artifacts/${encodeURIComponent(artifactName)}`,
+  );
+}
+
+export function getPlanArtifacts(planId: string): Promise<PlanArtifact[]> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/artifacts`);
+}
+
+export function getPlanArtifact(
+  planId: string,
+  artifactName: string,
+): Promise<PlanArtifactPreview> {
+  return api(
+    `/api/v1/plans/${encodeURIComponent(planId)}/artifacts/${encodeURIComponent(artifactName)}`,
+  );
+}
+
 export function connectProvider(
-  provider: 'openai' | 'anthropic',
+  provider: 'openai' | 'anthropic' | 'deepseek' | 'xai' | 'ollama' | 'lmstudio',
+  method: 'account' | 'api' | 'api_key' | 'local' = 'account',
+  apiKey?: string,
 ): Promise<ProviderConnectionJob> {
+  const body: {
+    method: 'account' | 'api' | 'api_key' | 'local';
+    api_key?: string;
+    confirmed?: true;
+  } = { method };
+  if (apiKey) body.api_key = apiKey;
+  if (method === 'api_key' || method === 'local') body.confirmed = true;
   return api(`/api/v1/providers/${provider}/connect`, {
     method: 'POST',
-    body: '{}',
+    body: JSON.stringify(body),
   });
 }
 
