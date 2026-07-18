@@ -12,6 +12,8 @@ import zipfile
 from email.parser import Parser
 from pathlib import Path, PurePosixPath
 
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+
 
 class DistributionError(ValueError):
     pass
@@ -178,9 +180,16 @@ def verify_wheel(path: Path, *, pyproject: Path = Path("pyproject.toml")) -> Non
         raise DistributionError(f"wheel metadata has unexpected Name: {metadata.get('Name')}")
     if metadata.get("Version") != version:
         raise DistributionError(f"wheel metadata has unexpected Version: {metadata.get('Version')}")
-    if metadata.get("Requires-Python") != ">=3.12,<3.13":
+    requires_python = metadata.get("Requires-Python")
+    try:
+        parsed_requires_python = SpecifierSet(requires_python or "")
+    except InvalidSpecifier as exc:
         raise DistributionError(
-            f"wheel metadata has unexpected Requires-Python: {metadata.get('Requires-Python')}"
+            f"wheel metadata has invalid Requires-Python: {requires_python}"
+        ) from exc
+    if parsed_requires_python != SpecifierSet(">=3.12,<3.13"):
+        raise DistributionError(
+            f"wheel metadata has unexpected Requires-Python: {requires_python}"
         )
     expected_entries = {
         "opswitness = opswitness.cli:app",

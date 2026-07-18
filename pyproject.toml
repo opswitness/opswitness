@@ -30,7 +30,14 @@ dependencies = [
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.0"]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5", "mypy>=1.10", "respx>=0.21"]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+  "ruff>=0.5",
+  "mypy>=1.10",
+  "respx>=0.21",
+  "packaging>=24",
+]
 
 [project.scripts]
 opswitness = "opswitness.cli:app"

@@ -75,13 +75,19 @@ def test_sdist_rejects_non_file_entries(tmp_path):
         verify_sdist(path, tracked=set(SDIST_REQUIRED))
 
 
-def _wheel(path: Path, *, entries: str | None = None, name: str = "opswitness") -> None:
+def _wheel(
+    path: Path,
+    *,
+    entries: str | None = None,
+    name: str = "opswitness",
+    requires_python: str = ">=3.12,<3.13",
+) -> None:
     dist_info = "opswitness-0.1.0a1.dist-info"
     metadata = (
         "Metadata-Version: 2.4\n"
         f"Name: {name}\n"
         "Version: 0.1.0a1\n"
-        "Requires-Python: >=3.12,<3.13\n\n"
+        f"Requires-Python: {requires_python}\n\n"
     )
     scripts = entries or (
         "[console_scripts]\n"
@@ -109,6 +115,25 @@ def test_wheel_requires_primary_and_compatibility_clis(tmp_path):
     _wheel(wheel)
 
     verify_wheel(wheel, pyproject=pyproject)
+
+
+def test_wheel_accepts_normalized_requires_python_order(tmp_path):
+    wheel = tmp_path / "opswitness-0.1.0a1-py3-none-any.whl"
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "opswitness"\nversion = "0.1.0a1"\n')
+    _wheel(wheel, requires_python="<3.13,>=3.12")
+
+    verify_wheel(wheel, pyproject=pyproject)
+
+
+def test_wheel_rejects_different_python_range(tmp_path):
+    wheel = tmp_path / "opswitness-0.1.0a1-py3-none-any.whl"
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "opswitness"\nversion = "0.1.0a1"\n')
+    _wheel(wheel, requires_python=">=3.11,<3.13")
+
+    with pytest.raises(DistributionError, match="Requires-Python"):
+        verify_wheel(wheel, pyproject=pyproject)
 
 
 def test_wheel_rejects_missing_compatibility_cli(tmp_path):
