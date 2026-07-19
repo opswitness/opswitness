@@ -166,7 +166,7 @@ def test_retired_config_is_rejected_with_migration_path(tmp_path):
     cfg = tmp_path / "conf"
     cfg.mkdir()
     (cfg / USER_NAME).write_text("retired: [old-job]\n")
-    with pytest.raises(ValueError, match="qd retire"):
+    with pytest.raises(ValueError, match="opswitness retire"):
         load_effective_schedules(cfg)
 
 

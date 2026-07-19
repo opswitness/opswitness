@@ -221,7 +221,10 @@ def watchdog_verdict(schedules_file: str = "") -> dict[str, Any]:
         schedules, meta = eff["schedules"], eff["meta"]
     if not schedules:
         return {
-            "error": "nothing enrolled — run qd init, then add labels to enroll: in schedules.yaml",
+            "error": (
+                "nothing enrolled — run opswitness init, then add labels to enroll: "
+                "in schedules.yaml"
+            ),
             "coverage": False,
             **meta,
         }

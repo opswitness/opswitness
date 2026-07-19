@@ -145,8 +145,10 @@ ProviderLogin = Callable[[ProviderName], bool]
 ProviderApiLogin = Callable[[ProviderName, str | None], bool]
 ProviderKeyLogin = Callable[[ProviderName, str | None], bool]
 ProviderLocalConnect = Callable[[LocalProviderName], bool]
-MAIL_SUMMARY_FAILURE = "mail summary failed; run qd mail status locally"
-MAIL_AUTHORIZATION_FAILURE = "Gmail readonly authorization failed; inspect qd mail status locally."
+MAIL_SUMMARY_FAILURE = "mail summary failed; run opswitness mail status locally"
+MAIL_AUTHORIZATION_FAILURE = (
+    "Gmail readonly authorization failed; inspect opswitness mail status locally."
+)
 MAIL_OAUTH_CLIENT_REJECTED = "Google Desktop OAuth client JSON was rejected."
 TELEGRAM_CONFIGURATION_REJECTED = "Telegram credentials were rejected or already configured."
 TELEGRAM_ENVIRONMENT_CONTROLLED = "Telegram credentials are controlled outside the console."
@@ -177,7 +179,7 @@ EXECUTION_CONTROL_UNCONFIRMED_DETAIL = (
     "Run control was requested, but the runtime has not confirmed the resulting state."
 )
 SCHEDULE_CONFIGURATION_INVALID_DETAIL = (
-    "schedule configuration is invalid; run qd init or qd watchdog locally"
+    "schedule configuration is invalid; run opswitness init or opswitness watchdog locally"
 )
 PLANNING_INTERRUPTED = "planning_interrupted_by_restart"
 DISPATCH_INTERRUPTED = "execution_dispatch_interrupted"

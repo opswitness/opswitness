@@ -1,4 +1,4 @@
-"""qd adopt — wrap launchd jobs under the ledger. Dry-run by default.
+"""OpsWitness adopt — wrap launchd jobs under the ledger. Dry-run by default.
 
 Doctrine: never mutate a plist without --apply; every apply keeps a .qd-bak backup
 (first backup wins — it always holds the pristine pre-OpsWitness state); rollback
@@ -25,15 +25,15 @@ def job_name_from_label(label: str) -> str:
 
 
 def resolve_qd_bin(explicit: str = "") -> str:
-    """Resolve qd to a verified absolute executable — launchd has no cwd/PATH to lean on."""
-    candidate = explicit or shutil.which("qd") or sys.argv[0]
+    """Resolve OpsWitness to an absolute executable; retain qd as a fallback."""
+    candidate = explicit or shutil.which("opswitness") or shutil.which("qd") or sys.argv[0]
     p = Path(candidate).expanduser()
     if not p.is_absolute():
         p = p.resolve()
     if not (p.is_file() and os.access(p, os.X_OK)):
         raise ValueError(
-            f"cannot resolve qd to an absolute executable (got {candidate!r}); "
-            f"pass --qd-bin /abs/path/to/qd"
+            f"cannot resolve OpsWitness to an absolute executable (got {candidate!r}); "
+            "pass --opswitness-bin /abs/path/to/opswitness"
         )
     return str(p)
 
@@ -67,7 +67,8 @@ def _command_of(data: dict[str, Any]) -> list[str] | None:
 
 def is_wrapped(data: dict[str, Any]) -> bool:
     cmd = _command_of(data) or []
-    return any(part.endswith("qd") for part in cmd[:1]) and "wrap" in cmd[:3]
+    executable = Path(cmd[0]).name if cmd else ""
+    return executable in {"opswitness", "qd"} and "wrap" in cmd[:3]
 
 
 def scan(dir_path: Path) -> list[dict[str, Any]]:

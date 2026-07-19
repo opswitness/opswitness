@@ -42,6 +42,18 @@ def test_plan_wraps_command_and_is_idempotent(tmp_path):
     assert plan(p, "/opt/qd", "sox-monitor") is None
 
 
+def test_opswitness_wrapper_is_also_idempotent(tmp_path):
+    p = _write_plist(tmp_path, "com.t.opswitness-monitor")
+    planned = plan(p, "/opt/opswitness", "com.t.opswitness-monitor")
+    assert planned is not None
+    _old, new_bytes, _diff = planned
+    data = plistlib.loads(new_bytes)
+    assert data["ProgramArguments"][0] == "/opt/opswitness"
+    assert is_wrapped(data)
+    p.write_bytes(new_bytes)
+    assert plan(p, "/opt/opswitness", "com.t.opswitness-monitor") is None
+
+
 def test_dry_run_never_writes_apply_backs_up_rollback_restores(tmp_path):
     p = _write_plist(tmp_path, "com.t.demo")
     pristine = p.read_bytes()

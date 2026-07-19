@@ -1,4 +1,4 @@
-"""qd wrap — run a job under the ledger without ever breaking it (ADR-0001 v2).
+"""OpsWitness wrap — run a job under the ledger without breaking it (ADR-0001 v2).
 
 Invariants:
 - run_started is fsync'd to the ledger BEFORE the child is spawned;

@@ -280,7 +280,7 @@ def test_legacy_schedules_validation_matrix(tmp_path):
 
     retired = tmp_path / "retired.yaml"
     retired.write_text("retired: [old-job]\n")
-    with pytest.raises(ValueError, match="qd retire"):
+    with pytest.raises(ValueError, match="opswitness retire"):
         load_legacy_schedules(retired)
 
 

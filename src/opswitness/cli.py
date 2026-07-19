@@ -1,10 +1,10 @@
-"""qd — the OpsWitness CLI.
+"""OpsWitness CLI. The legacy `qd` executable invokes this same app.
 
 Subcommand map (build order):
-  qd wrap  -- <cmd...>   run a job under the ledger (P2)
-  qd gate  install       write Claude Code PreToolUse hook settings (P3)
-  qd artifacts register  snapshot immutable outcome evidence (P4)
-  qd status              fleet at a glance
+  opswitness wrap  -- <cmd...>   run a job under the ledger (P2)
+  opswitness gate  install       write Claude Code PreToolUse hook settings (P3)
+  opswitness artifacts register  snapshot immutable outcome evidence (P4)
+  opswitness status              fleet at a glance
 """
 
 from typing import TYPE_CHECKING
@@ -58,7 +58,7 @@ def workflow_register(
     cwd: str = typer.Option(..., "--cwd", help="Absolute working directory"),
     replace: bool = typer.Option(False, "--replace"),
 ) -> None:
-    """Register a fixed command: qd workflow register ID --cwd DIR -- /abs/cmd args."""
+    """Register a fixed command: opswitness workflow register ID --cwd DIR -- /abs/cmd args."""
     from pathlib import Path
 
     from opswitness.workflows import register_workflow
@@ -133,7 +133,7 @@ def service_exec(
         "run", "--paperclip-mode", help="Paperclip only: run, onboard, or backup"
     ),
 ) -> None:
-    """Read secrets in-process, then replace qd with the requested service."""
+    """Read secrets in-process, then replace OpsWitness with the requested service."""
     from opswitness.service import exec_service
 
     try:
@@ -843,14 +843,18 @@ def wrap(
     ctx: typer.Context,
     job: str = typer.Option(..., "--job", help="Stable job name (e.g. feed-monitor)"),
 ) -> None:
-    """Run a command under the ledger: qd wrap --job NAME -- cmd args..."""
+    """Run a command under the ledger: opswitness wrap --job NAME -- cmd args..."""
     from opswitness.wrap.runner import run_wrapped
 
     argv = list(ctx.args)
     if argv and argv[0] == "--":
         argv = argv[1:]
     if not argv:
-        typer.echo("qd wrap: no command given (usage: qd wrap --job NAME -- cmd ...)", err=True)
+        typer.echo(
+            "opswitness wrap: no command given "
+            "(usage: opswitness wrap --job NAME -- cmd ...)",
+            err=True,
+        )
         raise typer.Exit(code=2)
     code = run_wrapped(job, argv)
     if code < 0:
@@ -973,7 +977,7 @@ def project() -> None:
     api_key = resolve_api_key(settings)
     if not api_key or not settings.paperclip.company_id:
         typer.echo(
-            "qd project: need paperclip.api_key (secrets.yaml or "
+            "opswitness project: need paperclip.api_key (secrets.yaml or "
             f"{settings.paperclip.api_key_env} env) and paperclip.company_id "
             "(config.yaml or OPSWITNESS_PAPERCLIP__COMPANY_ID)",
             err=True,
@@ -1034,7 +1038,12 @@ def adopt_launchd(
     dir: str = typer.Option(
         str(__import__("pathlib").Path.home() / "Library" / "LaunchAgents"), "--dir"
     ),
-    qd_bin: str = typer.Option("", "--qd-bin", help="Path to qd (must resolve to absolute)"),
+    qd_bin: str = typer.Option(
+        "",
+        "--opswitness-bin",
+        "--qd-bin",
+        help="Path to opswitness (legacy --qd-bin remains supported)",
+    ),
     job_override: str = typer.Option(
         "", "--job", help="Override the ledger job ID (default: the full label — stable forever)"
     ),
@@ -1097,7 +1106,7 @@ def watchdog(
     if not once:
         typer.echo(
             "watchdog --loop is not implemented yet (lands with the P2 soak); "
-            "schedule `qd watchdog --once` via launchd/cron instead",
+            "schedule `opswitness watchdog --once` via launchd/cron instead",
             err=True,
         )
         raise typer.Exit(code=2)
@@ -1122,7 +1131,7 @@ def watchdog(
             m = eff["meta"]
             typer.echo(
                 f"nothing enrolled ({m['candidates']} candidates, {m['services']} services) — "
-                f"run `qd init`, then add labels/globs to enroll: in "
+                f"run `opswitness init`, then add labels/globs to enroll: in "
                 f"{config_dir() / 'schedules.yaml'}",
                 err=True,
             )
@@ -1192,11 +1201,13 @@ def init(
         typer.echo(f"⚠️ unreadable plist: {err['path']}: {err['error']}")
     typer.echo(
         "\nready now (zero further config):\n"
-        "  qd wrap --job NAME -- <cmd>  ·  qd status / runs / digest\n"
+        "  opswitness wrap --job NAME -- <cmd>  ·  "
+        "opswitness status / runs / digest\n"
         "to monitor jobs, enroll them ONCE (human confirmation by design):\n"
         f'  edit {config_dir() / "schedules.yaml"} → enroll: ["com.yourprefix.*"]\n'
-        "  then: qd watchdog --once\n"
-        "later, each with explicit approval: qd adopt launchd <label> · INSTALL-PAPERCLIP.md"
+        "  then: opswitness watchdog --once\n"
+        "later, each with explicit approval: "
+        "opswitness adopt launchd <label> · INSTALL-PAPERCLIP.md"
     )
 
 

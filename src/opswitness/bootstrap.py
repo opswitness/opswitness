@@ -1,4 +1,4 @@
-"""qd init v2 — discover, classify, and generate CANDIDATES; enrollment is a human act.
+"""OpsWitness init — discover, classify, and generate candidates for human enrollment.
 
 Product doctrine (review-hardened):
 - Auto-discover, auto-generate candidates; a job is monitored only after one explicit
@@ -7,7 +7,7 @@ Product doctrine (review-hardened):
 - Canonical ID = the full launchd label. Short names are display sugar and may collide
   (real machines have two `gateway`s); collisions are reported, never silently dropped.
 - Two files: `schedules.generated.yaml` is machine-owned and rebuilt atomically on every
-  init; `schedules.yaml` is user-owned and NEVER rewritten by qd — runtime merges the two.
+  init; `schedules.yaml` is user-owned and NEVER rewritten by OpsWitness.
 - Classification is three-way: interval / calendar / service. A KeepAlive login item is
   not a "calendar job"; it is an unscheduled service and is never auto-enrolled.
 - Zero external services and zero initial configuration required — not "zero
@@ -87,7 +87,7 @@ def load_legacy_schedules(path: Path) -> list[dict[str, Any]]:
         raise ValueError(f"{path}: expected a mapping at top level")
     if "retired" in raw:
         raise ValueError(
-            f"{path}: `retired:` was removed; use `qd retire JOB --reason ...` "
+            f"{path}: `retired:` was removed; use `opswitness retire JOB --reason ...` "
             "so retirement remains in the append-only ledger"
         )
     try:
@@ -100,7 +100,7 @@ GENERATED_NAME = "schedules.generated.yaml"
 USER_NAME = "schedules.yaml"
 
 DEFAULT_CONFIG = """\
-# OpsWitness config (created by `qd init` — safe to edit, init never overwrites)
+# OpsWitness config (created by `opswitness init` — safe to edit, init never overwrites)
 # paperclip:
 #   api_base: http://127.0.0.1:3100
 #   company_id: <set after Paperclip install>
@@ -109,7 +109,7 @@ DEFAULT_CONFIG = """\
 """
 
 USER_TEMPLATE = """\
-# OpsWitness user overrides — qd NEVER rewrites this file.
+# OpsWitness user overrides — OpsWitness NEVER rewrites this file.
 # Enroll candidates from schedules.generated.yaml by label (exact or glob):
 enroll: []
 #  - "com.tianyuzhou.*"
@@ -218,7 +218,7 @@ def init_workspace(config_dir: Path, launchagents_dir: Path) -> dict[str, Any]:
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            raise RuntimeError("another qd init is running (init lock held)") from None
+            raise RuntimeError("another opswitness init is running (init lock held)") from None
 
         summary: dict[str, Any] = {"created": [], "regenerated": []}
         config_yaml = config_dir / "config.yaml"
@@ -242,7 +242,8 @@ def init_workspace(config_dir: Path, launchagents_dir: Path) -> dict[str, Any]:
         atomic_write(
             gen_path,
             (
-                "# MACHINE-OWNED — rebuilt by `qd init`; put your edits in schedules.yaml\n"
+                "# MACHINE-OWNED — rebuilt by `opswitness init`; "
+                "put your edits in schedules.yaml\n"
                 + yaml.safe_dump(generated, allow_unicode=True, sort_keys=False)
             ).encode(),
             mode=0o600,
@@ -273,7 +274,7 @@ def load_effective_schedules(config_dir: Path) -> dict[str, Any]:
     if "retired" in raw_user:
         raise ValueError(
             f"{config_dir / USER_NAME}: `retired:` was removed; use "
-            "`qd retire JOB --reason ...` so retirement remains auditable"
+            "`opswitness retire JOB --reason ...` so retirement remains auditable"
         )
     try:
         user = UserSchedulesConfig.model_validate(raw_user)
