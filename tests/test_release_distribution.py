@@ -246,7 +246,25 @@ def test_release_tag_gate_precedes_build_and_attestation():
     assert "pytest -q" in quality_runs
     assert any("check_release_identity.py" in run for run in quality_runs)
     assert any("check_dco.py" in step.get("run", "") for step in jobs["dco"]["steps"])
-    assert any("gitleaks-action" in step.get("uses", "") for step in jobs["gitleaks"]["steps"])
+    gitleaks_steps = jobs["gitleaks"]["steps"]
+    install_gitleaks = next(
+        step for step in gitleaks_steps if step.get("name") == "Install gitleaks"
+    )
+    setup_go = next(
+        step for step in gitleaks_steps if step.get("uses", "").startswith("actions/setup-go@")
+    )
+    assert setup_go["uses"].endswith("@924ae3a1cded613372ab5595356fb5720e22ba16")
+    assert setup_go["with"] == {"go-version": "1.24.11", "cache": "false"}
+    assert install_gitleaks["env"]["GITLEAKS_VERSION"] == "v8.30.1"
+    assert (
+        "github.com/zricethezav/gitleaks/v8@${GITLEAKS_VERSION}"
+        in install_gitleaks["run"]
+    )
+    scan_history = next(
+        step for step in gitleaks_steps if step.get("name") == "Scan full git history"
+    )
+    assert "gitleaks\" git --redact --no-banner --verbose ." in scan_history["run"]
+    assert "GITLEAKS_LICENSE" not in str(jobs["gitleaks"])
     assert build["permissions"] == {"contents": "read"}
     assert not any(
         step.get("uses", "").startswith("actions/attest@") for step in build["steps"]

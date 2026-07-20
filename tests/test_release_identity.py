@@ -1,4 +1,5 @@
 import importlib.util
+import re
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -46,5 +47,7 @@ def test_primary_cli_help_uses_opswitness_examples():
     result = CliRunner().invoke(app, ["wrap", "--help"])
 
     assert result.exit_code == 0
-    assert "opswitness wrap --job NAME" in result.output
-    assert "qd wrap --job NAME" not in result.output
+    plain_output = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", result.output)
+    normalized_output = " ".join(plain_output.split())
+    assert "opswitness wrap --job NAME" in normalized_output
+    assert "qd wrap --job NAME" not in normalized_output
