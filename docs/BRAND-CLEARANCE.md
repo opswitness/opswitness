@@ -1,10 +1,13 @@
 # OpsWitness Brand Clearance Gate
 
-Snapshot refreshed: 2026-07-18 America/Los_Angeles
+Snapshot refreshed: 2026-07-20 America/Los_Angeles
 
-Status: **candidate approved for source migration; identifier reservation and final legal review
-remain release blockers.** No GitHub organization, package, domain, or trademark right is created by
-this document.
+Status: **source migration and identifier reservation complete; professional confusing-similarity
+review remains a public-release blocker.** The `opswitness` GitHub organization,
+`opswitness/opswitness` private repository, and `opswitness.com` domain are now controlled by the
+operator. Domain registration is independently visible through Verisign RDAP with a 2026-07-19
+registration date. Reservation establishes control of identifiers only; it does not create a
+trademark right or prove freedom to operate.
 
 ## Why the former name was rejected
 
@@ -19,9 +22,10 @@ On 2026-07-18, the exact lowercase identifier was checked through the public end
 GitHub's shared user/organization namespace, npm, and Verisign `.com` RDAP. Each returned HTTP 404.
 Earlier exact and broader USPTO searches recorded no result for the joined or spaced name.
 
-A 404 means only that the endpoint did not expose a matching registration at that moment. It does
-not reserve the identifier, establish priority, or prove freedom to operate. Search results can
-change before publication.
+A 404 meant only that the endpoint did not expose a matching registration at that moment. The
+subsequent organization, repository, and domain reservations close availability risk for those
+specific identifiers, but do not establish trademark priority or freedom to operate. Package and
+trademark search results can still change before publication.
 
 ## Product fit
 
@@ -32,12 +36,13 @@ change before publication.
 
 ## Hard release gate
 
-Before any public tag or announcement, all of the following must be true:
+Before any public tag or announcement, all of the following must be true. Items 3 and 4 are now
+complete; all other items remain live gates until evidence says otherwise:
 
 1. repeat exact-name package, web, GitHub, domain, and relevant trademark searches;
 2. complete a qualified confusing-similarity review for the intended markets;
-3. reserve the exact `opswitness` GitHub organization and intended domain;
-4. create `opswitness/opswitness` as a private repository first;
+3. reserve the exact `opswitness` GitHub organization and intended domain — **complete**;
+4. create `opswitness/opswitness` as a private repository first — **complete**;
 5. enable private vulnerability reporting, Dependabot, minimum Actions permissions, and required
    checks on `main`;
 6. run the release workflow in validation mode against the private remote, where it builds and

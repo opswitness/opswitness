@@ -81,6 +81,23 @@ measured quality, accountable support, and a workbench shaped around a buyer's d
 
 ## Later paid offers
 
+### Founder Pro
+
+Introduce Founder Pro only after Community operators repeatedly ask OpsWitness to operate the
+local installation for them. It is a convenience and continuity layer for a one-person company,
+not a license unlock for the trusted core. Candidate paid capabilities are:
+
+- tested automatic upgrades with rollback;
+- scheduled encrypted backups and isolated recovery verification;
+- guided private-network access and device onboarding;
+- maintained advanced connectors and compatibility updates; and
+- priority installation, migration, and incident support.
+
+Founder Pro must not impose Agent, Work, execution, token, ledger, Artifact, History, export,
+restore, or approval limits on Community. Do not publish an experimental Founder Pro price until
+repeated demand and delivery cost are observed; keep internal price tests out of the public
+repository.
+
 ### Team / Business
 
 Introduce only after several similar paying customers demonstrate the same recurring need.
@@ -97,6 +114,10 @@ Price the Team offer primarily per active organization/workspace plus the suppor
 not price by raw agent count, model tokens, or every execution: customers already pay model
 providers directly, and a low-value high-frequency job should not be punished more than a
 high-value low-frequency workflow.
+
+Team price experiments also remain internal until the repeated buyer and support boundary are
+real. The public repository should explain value and packaging without anchoring an unvalidated
+price range.
 
 ### Managed operations
 

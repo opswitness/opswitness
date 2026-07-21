@@ -1,12 +1,16 @@
 # OpsWitness Completion Audit
 
-Community Alpha update, 2026-07-18: the release candidate is being normalized as
+Community Alpha update, 2026-07-20: the release candidate is normalized as
 `OpsWitness v0.1.0-alpha.1` / Python `0.1.0a1`. The package/module rename preserves compatibility at
 the CLI, configuration, data-root, launchd, and known Keychain boundaries without rewriting any
 historical evidence or hash. Release engineering now requires a clean checkout, exact identity
 mapping, dual CLI verification, Linux/macOS quality gates, full-history DCO/gitleaks, checksums,
-build manifest, SPDX SBOM, and GitHub attestation. Publication remains blocked on the external
-brand/remote gates and final RC acceptance recorded in READINESS.
+build manifest, SPDX SBOM, and GitHub attestation. The GitHub organization, private repository, and
+domain are reserved; Draft PR #1 is green on Linux, macOS, DCO, and gitleaks. Publication remains
+blocked on private Release validation, production RC migration, a new 24-hour Alpha canary,
+professional brand review, physical iPhone acceptance, and final public-main Release acceptance as
+recorded in READINESS. The legacy `m2-canary` permanently failed its frozen cadence contract
+(`50,171s > 25,920s`) and is retained as failure evidence, never promoted to Alpha evidence.
 
 Operational snapshot: 2026-07-13 21:24 PDT. The source-only console updates below were recorded
 through 2026-07-15 02:18 PDT without changing production state. This document maps the approved M0-M6
@@ -19,10 +23,10 @@ snapshot.
 |---|---|---|
 | M0 trusted baseline | Process-tree supervisor, shared schedule classification, append-only lifecycle, full tests | Complete |
 | M1 install and recovery tooling | Doctor, secure service exec, encrypted backup/isolated restore, five secret-free launchd templates | Complete in source |
-| M2 permanent install and soak | Postgres/Paperclip/services installed; live matrix, recovery, doctor checks and canary ledger contract exist | In progress: elapsed canary, stable-tool upgrade, then seven-day soak |
+| M2 permanent install and soak | Postgres/Paperclip/services and recovery tooling exist; the legacy canary failure is retained | In progress: verified RC migration, independent Alpha canary, then feed/SOX seven-day Stable soak |
 | M3 Claude gate | Two live defer/approval/resume/consume drills and 60-second recovery service | Complete for non-interactive `qd gated-claude` only |
 | M4 artifact/eval/signoff | Atomic CAS, ledger authority, live projection/reconciliation and restore evidence | Complete |
-| M5 Community Alpha | CI/release/SBOM/provenance code, tracked-only distribution verification, compatibility migration, showcase, wheel and first-run evidence exist | Release candidate: blocked by identifier reservation, real Git remote/Actions, final RC tests and canary |
+| M5 Community Alpha | Private remote and green PR CI exist; release/SBOM/provenance code, tracked-only distribution verification, compatibility migration, showcase, wheel and first-run source evidence exist | Release candidate: blocked by private Release run, production RC migration, new Alpha canary, professional review, physical iPhone acceptance and public-main release gates |
 | M6 paid practitioner Pilot | Offer, privacy contract, technical boundary and success criteria exist | Blocked by written paid commitment/deposit; product code intentionally absent |
 | Local total console | Default chat-first Workspace, AI-expanded execution brief, persisted planning stages and time range, provider connection facade, versioned plan revision, independent hash-bound Work forks, evidence-preserving deletion, graphical hierarchy and bounded collaboration loops, evidence-backed Auto/manual approval modes with task-local decisions, resumable runtime operator questions, plan-bound AionUi team-task stage telemetry, ledger-folded immutable run history with exact-context continuation, hash-bound confirmation, atomic dispatch/recovery, fixed-error privacy boundary, single-instance lease, per-request private AionUi workspaces, responsive UI and packaged assets | Complete in source; stable install/KeepAlive service waits for canary maintenance window |
 
@@ -145,7 +149,12 @@ They changed no production plist, schedule, mailbox permission, or confirmed tas
 | `f42e10d` | History unified Agent executions and wrapped automation | Ledger commit order is authoritative; process completion remains distinct from outcome proof |
 | `0f1cc8f` | Team view gained graphically editable bounded collaboration loops | Self-review/cycles allowed separately from management; 1-10 iteration cap is plan-level, not a verified runtime cutoff |
 
-## Live evidence at this snapshot
+## Historical live evidence (2026-07-13 snapshot)
+
+The observations below are retained for audit and are superseded for Alpha readiness. In
+particular, the then-pending `m2-canary` later failed because its 50,171-second observed cadence gap
+exceeded the immutable 25,920-second allowance. The failure remains in the append-only ledger and
+must not be reset or reused as `alpha-rc-1`.
 
 - Current-HEAD `qd soak status m2-canary --json`: `pending`; only blocker is
   `minimum_duration`, with 64,757 seconds remaining at 21:24 PDT. The tracked job has two starts,
@@ -245,20 +254,21 @@ They changed no production plist, schedule, mailbox permission, or confirmed tas
 
 ## Safe remaining sequence
 
-1. Do not touch the stable uv tool or canary before 2026-07-14 15:23:32 PDT.
-2. At the checkpoint, recompute soak, doctor, status, watchdog, digest, projector backlog, backup,
-   and canary evidence. Append a checkpoint only if the derived verdict passes.
-3. Enter one quiesced maintenance window: ensure no active `qd wrap`/`qd gated-claude`; boot out
-   qd periodic services and canary; gracefully stop the manual source console without deleting its
-   persistent lease file; install the current wheel; verify stable `qd soak` and `qd console`;
-   render/lint/install the console plist; bootstrap all services; require current doctor, runtime
-   state, watchdog, digest, and backlog to pass.
-4. Adopt feed-monitor and sox-monitor only from their hash-locked idle-PID preflight, then start
-   the seven-day append-only soak.
-5. Configure Telegram only through local hidden input. Enable mail only after explicit metadata
-   transmission consent and Gmail readonly OAuth.
-6. Obtain the brand decision before creating a Git remote or public release. Begin M6 product code
-   only after a written paid commitment or deposit.
+1. Validate the private Release workflow and its exact downloadable artifacts; smoke-install the
+   downloaded wheel in a blank uv-tool root.
+2. In one quiesced maintenance window, back up state plus the legacy uv tool/symlink, install only
+   that verified wheel, retain legacy data and plist identities, restore all five services, and
+   require real-user-domain doctor to pass or roll back immediately.
+3. Create the isolated 15-minute `com.opswitness.alpha-canary`, enroll only its exact label, and
+   start the append-only `alpha-rc-1` contract for at least 24 awake hours. Never reset or relabel
+   the failed `m2-canary`.
+4. Complete professional confusing-similarity review and physical iPhone Safari/Chrome acceptance.
+5. Only after those gates pass, merge privately, publish the repository, enable required checks and
+   security controls, validate public main, approve one exact annotated tag, and inspect the
+   resulting prerelease assets/attestation from a blank install.
+6. Adopt feed-monitor and sox-monitor only for the later seven-day Stable soak. Configure optional
+   Telegram/mail integrations only through their existing consent and secret boundaries. Begin M6
+   product code only after written paid commitment or deposit.
 
 Project completion requires every row above to be complete. A green repository test suite, one
 manual run, or a source-only console does not substitute for elapsed production, public release,

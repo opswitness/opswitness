@@ -1,6 +1,6 @@
 # OpsWitness Readiness
 
-## Community Alpha release-candidate update (2026-07-18)
+## Community Alpha release-candidate update (2026-07-20)
 
 The approved source migration targets `v0.1.0-alpha.1` (`0.1.0a1` in Python metadata) with
 `opswitness` as the distribution, module, and primary CLI. The `qd` CLI, `QD_*` environment
@@ -8,12 +8,20 @@ aliases, former data roots, launchd labels, and known Keychain services remain b
 compatibility surfaces. Conflicts between old and new state fail closed, and no historical
 ledger, CAS, plan hash, artifact hash, protocol marker, or validation record is rewritten.
 
-This is not yet a public-release verdict. The exact GitHub organization/domain are not reserved,
-no remote Actions run exists, the append-only 24-48 hour release canary is not complete, and
-physical iPhone Safari/Chrome Beta acceptance has not been recorded. Alpha may publish only after
-private remote checks, distribution verification, wheel smoke installation, the browser journey,
-synthetic failure drills, canary evidence, and manual Release-asset inspection all pass. Stable
-remains blocked on the seven-day soak and recovery/adoption gates recorded below.
+The `opswitness` GitHub organization, private `opswitness/opswitness` repository, and
+`opswitness.com` domain are reserved. Draft PR #1 has passed Linux, macOS, DCO, and full-history
+gitleaks checks. These facts close identifier reservation and ordinary PR CI only; they do not
+constitute legal clearance or a public-release verdict.
+
+The private Release workflow has not yet completed a validation run. The production installation
+is still the legacy `quarterdeck 0.0.1` uv tool, the new `alpha-rc-1` canary has not started, and
+physical iPhone Safari/Chrome Beta acceptance has not been recorded. The former `m2-canary` is a
+permanent failed record: its observed cadence gap reached 50,171 seconds against a frozen
+25,920-second allowance. It must not be deleted, rewritten, reset into a pass, or cited as Alpha
+canary evidence. Alpha publication remains blocked until the private RC build/install/migration,
+new append-only canary, browser acceptance, professional confusing-similarity review, public-main
+checks, and final Release-asset inspection pass. Stable remains blocked on the seven-day soak and
+recovery/adoption gates recorded below.
 
 The private remote is a validation stage, not a publication stage: its manual workflow builds and
 verifies artifacts with read-only repository permissions. GitHub documents
@@ -380,34 +388,40 @@ blocked by the current open gates below.
 
 ## Open gates (blocking, in order)
 
-1. **Canary elapsed time** — `qd soak status m2-canary` must remain non-green until at least
-   2026-07-14 15:23:32 PDT, then pass together with the independent production checks;
-   register-trigger must remain healthy for 24–48 hours.
-2. **Stable-tool and console service upgrade** — after the canary passes, quiesce every qd
-   consumer, install the current wheel, verify stable `qd soak`/`qd console`, install the optional
-   console plist, rebootstrap services, and require current-HEAD doctor to return fully green.
-3. **Seven-day soak** — only after the canary and stable-tool upgrade pass may feed-monitor and sox-monitor
-   be adopted; M2 remains incomplete until seven days pass.
-4. **Telegram digest** — secure hidden-input CLI and total-console setup/test/disable tooling is
+1. **Private Release validation** — run `release.yml` manually on the Alpha branch, inspect its
+   wheel, sdist, checksums, manifest, SPDX SBOM, commit, and clean-tree evidence, then install that
+   exact wheel into a blank uv-tool root and pass both CLIs plus synthetic core smoke tests.
+2. **Rollback-safe production RC migration** — quiesce the five existing services, create an
+   encrypted state backup and an exact archive of the legacy uv tool/symlink, install only the
+   verified wheel, retain the legacy data roots and plist labels in place, restore single-instance
+   services, and require real-user-domain doctor to pass. Any failure restores the old tool.
+3. **Independent Alpha canary** — create only `com.opswitness.alpha-canary`, enroll that exact
+   label, and run the append-only `alpha-rc-1` contract for at least 24 hours with the Mac awake.
+   The failed `m2-canary` remains immutable historical evidence and is not reset or reused.
+4. **Professional brand review** — the exact organization, private repository, and domain are
+   reserved, but a qualified confusing-similarity review for intended markets remains required.
+5. **Physical mobile acceptance** — desktop and responsive-browser acceptance do not substitute
+   for a real iPhone Safari and Chrome pairing/PWA/write/revoke test. If it fails, hide the mobile
+   entry and retain private HTTPS/PWA as Beta.
+6. **Public-main release sequence** — merge only after private gates pass, make the repository
+   public, immediately enable required checks/security settings, validate the exact main SHA,
+   create an approved annotated Alpha tag, and verify the resulting prerelease assets and
+   attestation from a blank install. `PUBLIC_RELEASE_APPROVED` must be absent at every earlier step.
+7. **Seven-day stable soak** — Alpha does not satisfy Stable. Feed-monitor and sox-monitor adoption,
+   isolated recovery acceptance, and seven elapsed days remain required for `v0.1.0`.
+8. **Telegram digest** — secure hidden-input CLI and total-console setup/test/disable tooling is
    implemented, atomically writes only the `0600` secret file, refuses silent replacement, hides
    validation inputs, and records no credential values. Production credentials are still absent
    and the separately confirmed fixed delivery probe must be exercised during soak without
    exposing or copying tokens into chat, repo, argv, logs, or plists.
-5. **Daily mail consent and OAuth** — before enabling the adapter or creating the hidden
+9. **Daily mail consent and OAuth** — before enabling the adapter or creating the hidden
    09:00 America/Los_Angeles task, the operator must create and privately import a Google Desktop
    OAuth client, then explicitly approve Gmail readonly OAuth
    and sending sender/subject/date/message-id metadata to the selected model provider,
    set `mail.model_metadata_consent: true`, and bind a separate internal assistant only to the
    mail profile. Then run one real metadata-only acceptance check; automatic
    send/draft/delete/label mutation remains out of scope.
-6. **Brand gate** — `QUARTERDECK` has an active US class-42 software registration and
-   substantial software-name usage. `OpsWitness` is the preliminary recommended replacement,
-   and its exact/broader official USPTO queries plus live package, GitHub, and domain checks
-   are clear at the recorded snapshot. No rename or reservation has been approved. Evidence:
-   [BRAND-CLEARANCE.md](BRAND-CLEARANCE.md).
-7. **No git remote** — GitHub Actions, attestations, private vulnerability reporting,
-   and the release workflow have never actually run.
-8. **M6 commercial gate** — no practitioner UI or private product repository until a
+10. **M6 commercial gate** — no practitioner UI or private product repository until a
    design partner gives a written paid commitment or deposit.
 
 ## Resumption update (2026-07-13 11:59 PDT)
@@ -527,12 +541,10 @@ own independent acceptance gates.
 
 ## Next task
 
-Keep register-trigger under observation until `qd soak status m2-canary` can be evaluated no
-earlier than 2026-07-14 15:23:32 PDT.
-Approve or reject the `OpsWitness` candidate before starting the atomic rename. Revalidate the
-hidden guarded AionUi adapter after any AionUi upgrade.
-Do not adopt feed-monitor/sox-monitor, publish a release, or build the practitioner UI before
-their respective gates pass.
+Complete private Release validation, perform the rollback-safe RC tool migration, and start the
+separate `alpha-rc-1` canary. Keep the failed `m2-canary` and every legacy ledger/CAS object intact.
+Do not make the repository public, set `PUBLIC_RELEASE_APPROVED`, create a tag, adopt
+feed-monitor/sox-monitor, or build the practitioner UI before their independent gates pass.
 
 ---
 
