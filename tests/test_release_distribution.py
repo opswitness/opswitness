@@ -286,6 +286,10 @@ def test_release_tag_gate_precedes_build_and_attestation():
         step.get("uses", "").startswith("actions/attest@")
         for step in publish["steps"]
     )
+    create_release = next(
+        step for step in publish["steps"] if step.get("name") == "Create GitHub release"
+    )
+    assert "--prerelease" in create_release["run"]
     assert not any("public-release gate" in step.get("name", "").casefold() for step in build["steps"])
 
 
