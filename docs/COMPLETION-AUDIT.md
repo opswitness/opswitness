@@ -6,10 +6,12 @@ the CLI, configuration, data-root, launchd, and known Keychain boundaries withou
 historical evidence or hash. Release engineering now requires a clean checkout, exact identity
 mapping, dual CLI verification, Linux/macOS quality gates, full-history DCO/gitleaks, checksums,
 build manifest, SPDX SBOM, and GitHub attestation. The GitHub organization, private repository, and
-domain are reserved; Draft PR #1 is green on Linux, macOS, DCO, and gitleaks. Publication remains
-blocked on private Release validation, production RC migration, a new 24-hour Alpha canary,
-professional brand review, physical iPhone acceptance, and final public-main Release acceptance as
-recorded in READINESS. The legacy `m2-canary` permanently failed its frozen cadence contract
+domain are reserved; Draft PR #1 is green on Linux, macOS, DCO, and gitleaks. Private Release
+validation and rollback-safe production migration now pass, and the independent `alpha-rc-1`
+contract is running with one successful start and zero projection backlog. Publication remains
+blocked on its unelapsed 24-hour minimum, professional brand review, physical iPhone acceptance,
+and final public-main Release acceptance as recorded in READINESS. The legacy `m2-canary`
+permanently failed its frozen cadence contract
 (`50,171s > 25,920s`) and is retained as failure evidence, never promoted to Alpha evidence.
 
 Operational snapshot: 2026-07-13 21:24 PDT. The source-only console updates below were recorded
@@ -23,10 +25,10 @@ snapshot.
 |---|---|---|
 | M0 trusted baseline | Process-tree supervisor, shared schedule classification, append-only lifecycle, full tests | Complete |
 | M1 install and recovery tooling | Doctor, secure service exec, encrypted backup/isolated restore, five secret-free launchd templates | Complete in source |
-| M2 permanent install and soak | Postgres/Paperclip/services and recovery tooling exist; the legacy canary failure is retained | In progress: verified RC migration, independent Alpha canary, then feed/SOX seven-day Stable soak |
+| M2 permanent install and soak | Postgres/Paperclip/services run OpsWitness `0.1.0a1`; real doctor is fully green; the legacy canary failure is retained; `alpha-rc-1` has started | In progress: Alpha duration gate, then feed/SOX seven-day Stable soak |
 | M3 Claude gate | Two live defer/approval/resume/consume drills and 60-second recovery service | Complete for non-interactive `qd gated-claude` only |
 | M4 artifact/eval/signoff | Atomic CAS, ledger authority, live projection/reconciliation and restore evidence | Complete |
-| M5 Community Alpha | Private remote and green PR CI exist; release/SBOM/provenance code, tracked-only distribution verification, compatibility migration, showcase, wheel and first-run source evidence exist | Release candidate: blocked by private Release run, production RC migration, new Alpha canary, professional review, physical iPhone acceptance and public-main release gates |
+| M5 Community Alpha | Private remote/PR CI, private Release validation, verified downloadable artifacts, blank install, production RC migration, browser smoke, and a running independent Alpha canary exist | Release candidate: blocked by 24-hour canary completion, professional review, physical iPhone acceptance and public-main release gates |
 | M6 paid practitioner Pilot | Offer, privacy contract, technical boundary and success criteria exist | Blocked by written paid commitment/deposit; product code intentionally absent |
 | Local total console | Default chat-first Workspace, AI-expanded execution brief, persisted planning stages and time range, provider connection facade, versioned plan revision, independent hash-bound Work forks, evidence-preserving deletion, graphical hierarchy and bounded collaboration loops, evidence-backed Auto/manual approval modes with task-local decisions, resumable runtime operator questions, plan-bound AionUi team-task stage telemetry, ledger-folded immutable run history with exact-context continuation, hash-bound confirmation, atomic dispatch/recovery, fixed-error privacy boundary, single-instance lease, per-request private AionUi workspaces, responsive UI and packaged assets | Complete in source; stable install/KeepAlive service waits for canary maintenance window |
 
@@ -248,25 +250,21 @@ must not be reset or reused as `alpha-rc-1`.
 - A real primary console on port 8765 held the `0700` state directory's `0600` lease. A second
   source-tree start on port 8766 exited 2 before recovery; primary health and the existing `ready`
   plan were unchanged.
-- Current-HEAD real doctor has exactly one failing check: the deliberately stale stable qd lacks
-  `soak` and `console`. Every dependency, credential boundary, template, installed service,
-  runtime, port, permission, backup target, and Paperclip single-instance check passes.
+- Historical pre-migration doctor had one failing command-surface check because the installed
+  `quarterdeck 0.0.1` lacked `soak` and `console`. The verified RC migration supersedes that
+  snapshot: production now runs `0.1.0a1`, and real doctor is fully green. Evidence:
+  [ALPHA-RC-VALIDATION.md](ALPHA-RC-VALIDATION.md).
 
 ## Safe remaining sequence
 
-1. Validate the private Release workflow and its exact downloadable artifacts; smoke-install the
-   downloaded wheel in a blank uv-tool root.
-2. In one quiesced maintenance window, back up state plus the legacy uv tool/symlink, install only
-   that verified wheel, retain legacy data and plist identities, restore all five services, and
-   require real-user-domain doctor to pass or roll back immediately.
-3. Create the isolated 15-minute `com.opswitness.alpha-canary`, enroll only its exact label, and
-   start the append-only `alpha-rc-1` contract for at least 24 awake hours. Never reset or relabel
-   the failed `m2-canary`.
-4. Complete professional confusing-similarity review and physical iPhone Safari/Chrome acceptance.
-5. Only after those gates pass, merge privately, publish the repository, enable required checks and
+1. Let the existing `alpha-rc-1` contract reach its frozen 24-hour minimum. Any failure must remain
+   append-only; do not reset or relabel the failed `m2-canary`, and do not checkpoint Alpha until
+   every contract check passes.
+2. Complete professional confusing-similarity review and physical iPhone Safari/Chrome acceptance.
+3. Only after those gates pass, merge privately, publish the repository, enable required checks and
    security controls, validate public main, approve one exact annotated tag, and inspect the
    resulting prerelease assets/attestation from a blank install.
-6. Adopt feed-monitor and sox-monitor only for the later seven-day Stable soak. Configure optional
+4. Adopt feed-monitor and sox-monitor only for the later seven-day Stable soak. Configure optional
    Telegram/mail integrations only through their existing consent and secret boundaries. Begin M6
    product code only after written paid commitment or deposit.
 

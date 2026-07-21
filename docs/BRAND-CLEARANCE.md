@@ -36,7 +36,7 @@ trademark search results can still change before publication.
 
 ## Hard release gate
 
-Before any public tag or announcement, all of the following must be true. Items 3 and 4 are now
+Before any public tag or announcement, all of the following must be true. Items 3, 4, and 6 are now
 complete; all other items remain live gates until evidence says otherwise:
 
 1. repeat exact-name package, web, GitHub, domain, and relevant trademark searches;
@@ -46,7 +46,8 @@ complete; all other items remain live gates until evidence says otherwise:
 5. enable private vulnerability reporting, Dependabot, minimum Actions permissions, and required
    checks on `main`;
 6. run the release workflow in validation mode against the private remote, where it builds and
-   verifies the distributions without publication credentials;
+   verifies the distributions without publication credentials — **complete**; evidence:
+   [ALPHA-RC-VALIDATION.md](ALPHA-RC-VALIDATION.md);
 7. make the repository public, or separately verify GitHub Enterprise Cloud attestation support,
    before creating the approved public tag;
 8. inspect every Release asset and attestation; and

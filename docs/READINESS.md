@@ -13,15 +13,26 @@ The `opswitness` GitHub organization, private `opswitness/opswitness` repository
 gitleaks checks. These facts close identifier reservation and ordinary PR CI only; they do not
 constitute legal clearance or a public-release verdict.
 
-The private Release workflow has not yet completed a validation run. The production installation
-is still the legacy `quarterdeck 0.0.1` uv tool, the new `alpha-rc-1` canary has not started, and
-physical iPhone Safari/Chrome Beta acceptance has not been recorded. The former `m2-canary` is a
-permanent failed record: its observed cadence gap reached 50,171 seconds against a frozen
-25,920-second allowance. It must not be deleted, rewritten, reset into a pass, or cited as Alpha
-canary evidence. Alpha publication remains blocked until the private RC build/install/migration,
-new append-only canary, browser acceptance, professional confusing-similarity review, public-main
-checks, and final Release-asset inspection pass. Stable remains blocked on the seven-day soak and
-recovery/adoption gates recorded below.
+Private Release validation run
+[29794782849](https://github.com/opswitness/opswitness/actions/runs/29794782849) passed its
+preflight, Linux/macOS quality, DCO, full-history gitleaks, and build jobs at commit
+`92d10d557f13f0358fa1a424049054fa53dcb467`. Its downloaded wheel, sdist, checksums, manifest, and
+SPDX SBOM passed independent verification and a blank uv-tool install. The verified wheel is now
+the production RC: `opswitness`, `qd`, and all five legacy-label services run `0.1.0a1`; real doctor
+is fully green; old state roots were adopted in place; and all pre-migration ledger/CAS hashes were
+preserved.
+
+The independent append-only `alpha-rc-1` canary started at
+`2026-07-21T02:35:06.365539+00:00`. Its first wrapped run succeeded, backlog is zero, watchdog is
+green, and its only current blocker is the unelapsed 24-hour minimum. No checkpoint exists. The
+former `m2-canary` remains a permanent failed record: its observed cadence gap reached 50,171
+seconds against a frozen 25,920-second allowance. It must not be deleted, rewritten, reset into a
+pass, or cited as Alpha canary evidence. Physical iPhone Safari/Chrome Beta acceptance and
+professional confusing-similarity review have not been recorded. Alpha publication therefore
+remains blocked on elapsed canary evidence, those two external gates, private merge/public-main
+checks, and final prerelease asset/attestation inspection. Stable remains blocked on the seven-day
+soak and recovery/adoption gates recorded below. Detailed evidence:
+[ALPHA-RC-VALIDATION.md](ALPHA-RC-VALIDATION.md).
 
 The private remote is a validation stage, not a publication stage: its manual workflow builds and
 verifies artifacts with read-only repository permissions. GitHub documents
