@@ -368,6 +368,12 @@ blocked by the current open gates below.
   confirmation dialog. Source-console acceptance opened and cancelled that dialog without deleting
   any real plan; the desktop layout and 390x844 mobile dialog had no horizontal overflow, all
   controls remained visible, and the browser console stayed clean.
+- History now separates whole-Work visibility removal from exact-run private-content erasure. The
+  latter is terminal-only and hash-confirmed; it removes the local plan body, exclusive Aion session,
+  application-managed workspace, unshared planning materials and unshared CAS blobs, while keeping
+  a content-free `task_run_erased` receipt. Shared sessions fail closed and shared/external data is
+  reported as retained. Source and focused regression tests are complete; a fresh installed RC and
+  non-destructive browser acceptance are still required before this becomes an Alpha claim.
 - The unified Work view removes the duplicate task/team lists. Its Team tab graphically groups the
   selected work item's task-scoped team by reporting level, while Activity, Outputs, and Settings
   keep execution signals, outcome evidence, and lifecycle controls distinct. Legacy plans

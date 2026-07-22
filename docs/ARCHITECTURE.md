@@ -282,10 +282,15 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
     AionUi execution team or allowlisted workflow can be created only after a human confirms
     the exact plan hash. Plan modification is append-only: a child version binds the immutable
     parent hash and a hashed change instruction, shows a structural diff, and requires a fresh
-    confirmation; it never edits the reviewed parent in place. User-facing deletion is likewise
+    confirmation; it never edits the reviewed parent in place. Whole-Work removal is likewise
     append-only: one `task_plan_deleted` tombstone hides an inert plan while its private record and
-    evidence remain intact. Active work cannot be deleted, and version parents require child-first
-    deletion. Task adjustments are chat-first: an operator describes the intended change, including
+    evidence remain intact. Exact-run privacy erasure is a distinct terminal-only operation. It
+    scrubs the local plan record, removes the exclusive Aion session, application-owned workspace,
+    unshared planning materials and unshared CAS bytes, then appends a content-free
+    `task_run_erased` receipt. Shared Agent sessions fail closed; shared blobs, explicit external
+    workspaces and already projected governance records remain visible in the receipt boundary.
+    Active work cannot be deleted, and version parents require child-first whole-Work deletion.
+    Task adjustments are chat-first: an operator describes the intended change, including
     a bounded collaboration-loop change, and OpsWitness creates a fresh plan revision for review.
     The Team tab inside the unified Work view folds each plan into one acyclic reporting tree and a separate set of
     bounded collaboration loops; its direct editor is an explicit advanced path for precise manual

@@ -128,6 +128,21 @@ test('Work history continues an exact ended Aion run as a new audited version', 
   assert.match(typeSource, /continuation_available: boolean/);
 });
 
+test('History offers exact-run privacy erasure without pretending the audit receipt disappears', () => {
+  const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const apiSource = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8');
+  const workView = appSource.match(/function WorkView\([\s\S]*?function SystemAutomationHistory/);
+  const dialog = appSource.match(/function EraseRunDialog\([\s\S]*?function TaskAdjustmentChat/);
+  assert.ok(workView);
+  assert.ok(dialog);
+  assert.match(workView[0], /onEraseRun/);
+  assert.match(workView[0], /删除这次运行/);
+  assert.match(dialog[0], /expected_plan_sha256|永久删除这次运行|永久删除本地内容/);
+  assert.match(dialog[0], /不含正文的哈希和删除回执/);
+  assert.match(apiSource, /\/plans\/\$\{encodeURIComponent\(planId\)\}\/run-data/);
+  assert.match(apiSource, /expected_plan_sha256: expectedPlanSha256/);
+});
+
 test('reviewed work exposes an explicit independent fork flow', () => {
   const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
   const apiSource = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8');

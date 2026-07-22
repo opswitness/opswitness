@@ -41,3 +41,11 @@ These limitations are release promises, not a hidden backlog.
     excerpts; Word, Excel, and image content is not parsed during planning and no OCR is provided.
     Attached content is sent to the selected planning model, so credentials and unauthorized or
     unnecessarily sensitive documents must not be attached.
+15. **Run erasure is local and reference-aware, not a forensic or external recall guarantee.** An
+    ended Run can erase its local plan body, operator-input state, exclusive Agent session,
+    application-managed workspace, attachment bytes, and CAS blobs that no other retained Run uses.
+    OpsWitness keeps a content-free hash and erasure receipt, retains shared blobs and explicit
+    external workspaces, and cannot retract records already projected to Paperclip or another
+    external system. Runs sharing one Agent conversation fail closed until the linked retained Runs
+    are handled together. Filesystem snapshots, backups, and provider-side retention remain outside
+    this action.

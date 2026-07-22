@@ -33,6 +33,7 @@ from opswitness.console.schemas import (
     ConfirmRequest,
     ContinueRunRequest,
     DeletePlanRequest,
+    EraseRunRequest,
     ExecutionApprovalModeRequest,
     ExecutionControlRequest,
     ExecutionProfileRevisionRequest,
@@ -284,9 +285,7 @@ def create_app(
         return JSONResponse({"detail": str(exc)}, status_code=404)
 
     @app.exception_handler(WorkspaceMemoryNotFound)
-    async def workspace_memory_not_found(
-        _: Request, exc: WorkspaceMemoryNotFound
-    ) -> JSONResponse:
+    async def workspace_memory_not_found(_: Request, exc: WorkspaceMemoryNotFound) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=404)
 
     @app.exception_handler(ConsoleConflict)
@@ -298,9 +297,7 @@ def create_app(
         return JSONResponse({"detail": str(exc)}, status_code=503)
 
     @app.exception_handler(RuntimeArtifactNotFound)
-    async def runtime_artifact_not_found(
-        _: Request, exc: RuntimeArtifactNotFound
-    ) -> JSONResponse:
+    async def runtime_artifact_not_found(_: Request, exc: RuntimeArtifactNotFound) -> JSONResponse:
         return JSONResponse(
             {"detail": str(exc), "code": "runtime_artifact_not_found"},
             status_code=404,
@@ -598,9 +595,7 @@ def create_app(
     async def runtime_input_artifacts(plan_id: str, request_id: str) -> list[dict]:
         return await run_in_threadpool(service.list_runtime_input_artifacts, plan_id, request_id)
 
-    @app.get(
-        "/api/v1/plans/{plan_id}/input-requests/{request_id}/artifacts/{artifact_name}"
-    )
+    @app.get("/api/v1/plans/{plan_id}/input-requests/{request_id}/artifacts/{artifact_name}")
     async def runtime_input_artifact(
         plan_id: str,
         request_id: str,
@@ -653,6 +648,15 @@ def create_app(
     ) -> dict:
         del x_qd_csrf
         return await run_in_threadpool(service.delete_plan, plan_id, body)
+
+    @app.delete("/api/v1/plans/{plan_id}/run-data")
+    async def erase_run_data(
+        plan_id: str,
+        body: EraseRunRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        return await run_in_threadpool(service.erase_run_data, plan_id, body)
 
     @app.get("/api/v1/task-templates")
     async def task_templates(include_archived: bool = False) -> list[dict]:

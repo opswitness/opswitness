@@ -53,3 +53,40 @@ test('run history follows the selected immutable work chain newest first', () =>
   assert.deepEqual(workRunHistory(other, taskRuns), [taskRuns[2]]);
   assert.deepEqual(workRunHistory(null, taskRuns), []);
 });
+
+test('erased plan shells preserve lineage without appearing as Work or History rows', () => {
+  const erasedRevision = {
+    plan_id: 'erased-revision',
+    parent_plan_id: 'parent',
+    status: 'completed_unverified',
+    erased_at: '2026-07-22T12:00:00Z',
+  };
+  const newest = {
+    plan_id: 'newest',
+    parent_plan_id: 'erased-revision',
+    status: 'completed_unverified',
+  };
+  assert.deepEqual(latestWorkItems([parent, erasedRevision, newest, other]), [newest, other]);
+
+  const taskRuns = [
+    { plan_id: 'parent', parent_plan_id: null, revision_number: 1 },
+    {
+      plan_id: 'erased-revision',
+      parent_plan_id: 'parent',
+      revision_number: 2,
+      deleted: true,
+    },
+    { plan_id: 'newest', parent_plan_id: 'erased-revision', revision_number: 3 },
+  ];
+  assert.deepEqual(workRunHistory(newest, taskRuns), [taskRuns[2], taskRuns[0]]);
+});
+
+test('erasing the latest revision reveals the newest retained parent Work', () => {
+  const erasedLatest = {
+    plan_id: 'revision',
+    parent_plan_id: 'parent',
+    status: 'completed_unverified',
+    erased_at: '2026-07-22T12:00:00Z',
+  };
+  assert.deepEqual(latestWorkItems([parent, erasedLatest, other]), [parent, other]);
+});

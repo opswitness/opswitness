@@ -286,6 +286,8 @@ export type PlanRecord = {
   revision_number: number;
   revision_instruction: string;
   revision_instruction_sha256?: string | null;
+  erased_at?: string | null;
+  erasure_event_id?: string | null;
   error?: string | null;
   execution?: ExecutionState | null;
 };
@@ -523,7 +525,8 @@ export type TaskRunHistory = {
       | 'task_approval_mode_change_requested'
       | 'task_approval_mode_changed'
       | 'task_approval_mode_change_aborted'
-      | 'task_approval_mode_change_recovered';
+      | 'task_approval_mode_change_recovered'
+      | 'task_run_erased';
     ts: string;
   }>;
 };

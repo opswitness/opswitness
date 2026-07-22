@@ -12,9 +12,18 @@ const ACTIVE_WORK_STATUSES = new Set([
 ]);
 
 export function latestWorkItems(plans) {
-  return plans.filter(
-    (record) => !plans.some((child) => child.parent_plan_id === record.plan_id),
-  );
+  const retained = plans.filter((record) => !record.erased_at);
+  const byPlanId = new Map(plans.map((record) => [record.plan_id, record]));
+  return retained.filter((record) => !retained.some((candidate) => {
+    const seen = new Set();
+    let parentPlanId = candidate.parent_plan_id || null;
+    while (parentPlanId && !seen.has(parentPlanId)) {
+      if (parentPlanId === record.plan_id) return true;
+      seen.add(parentPlanId);
+      parentPlanId = byPlanId.get(parentPlanId)?.parent_plan_id || null;
+    }
+    return false;
+  }));
 }
 
 export function currentWorkItem(plans, focusedPlanId) {
@@ -32,7 +41,7 @@ export function workRunHistory(record, taskRuns) {
   while (planId && !seen.has(planId)) {
     seen.add(planId);
     const run = byPlanId.get(planId);
-    if (run) rows.push(run);
+    if (run && !run.deleted) rows.push(run);
     const nextParent = run?.parent_plan_id ?? parentPlanId;
     planId = nextParent || '';
     parentPlanId = null;

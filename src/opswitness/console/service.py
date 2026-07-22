@@ -11,6 +11,7 @@ import json
 import mimetypes
 import os
 import re
+import shutil
 import stat
 import subprocess
 import threading
@@ -48,6 +49,7 @@ from opswitness.console.schemas import (
     ConfirmRequest,
     ContinueRunRequest,
     DeletePlanRequest,
+    EraseRunRequest,
     ExecutionApprovalModeRequest,
     ExecutionControlRequest,
     ExecutionProfile,
@@ -311,6 +313,7 @@ TASK_RUN_EVENT_KINDS = frozenset(
         "task_approval_mode_changed",
         "task_approval_mode_change_aborted",
         "task_approval_mode_change_recovered",
+        "task_run_erased",
     }
 )
 
@@ -395,13 +398,10 @@ def _stored_unfinished_aion_stage_orders(record: PlanRecord) -> list[int]:
     if len(rows_by_order) != len(stage_rows) or set(rows_by_order) != expected_orders:
         return []
     if any(
-        stage.source != "aion_team_task" or not stage.task_id
-        for stage in rows_by_order.values()
+        stage.source != "aion_team_task" or not stage.task_id for stage in rows_by_order.values()
     ):
         return []
-    return sorted(
-        order for order, stage in rows_by_order.items() if stage.status != "completed"
-    )
+    return sorted(order for order, stage in rows_by_order.items() if stage.status != "completed")
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -464,9 +464,7 @@ def _profiled_plan(
     if profile == ExecutionProfile.CUSTOM:
         return plan.model_copy(update={"execution_profile": profile}, deep=True)
     available = {
-        str(entry.get("runtime")): entry
-        for entry in capabilities
-        if entry.get("available") is True
+        str(entry.get("runtime")): entry for entry in capabilities if entry.get("available") is True
     }
     payload = plan.model_dump(mode="json")
     payload["execution_profile"] = str(profile)
@@ -562,6 +560,22 @@ def _deleted_plan_events(events: list[dict[str, Any]]) -> dict[str, dict[str, An
     return deleted
 
 
+def _run_erasure_events(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    erased: dict[str, dict[str, Any]] = {}
+    for event in events:
+        payload = event.get("payload")
+        plan_id = event.get("run_id")
+        if (
+            event.get("kind") == "task_run_erased"
+            and isinstance(plan_id, str)
+            and isinstance(payload, dict)
+            and payload.get("schema_version") == 1
+            and payload.get("source") in {"local_console", "local_console_recovery"}
+        ):
+            erased[plan_id] = event
+    return erased
+
+
 def _parse_event_time(value: str) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -581,6 +595,7 @@ def _task_run_history(
 ) -> list[TaskRunHistory]:
     """Fold confirmed executions in ledger commit order without creating a second history store."""
     records = {record.plan_id: record for record in plans}
+    erased = _run_erasure_events(events)
     grouped: dict[str, list[TaskRunEvidence]] = {}
     terminal_payloads: dict[str, dict[str, Any]] = {}
     execution_modes: dict[str, Literal["aion_team", "workflow"]] = {}
@@ -619,6 +634,53 @@ def _task_run_history(
         if not any(event.kind == "task_plan_confirmed" for event in evidence_events):
             continue
         record = records.get(plan_id)
+        erasure = erased.get(plan_id)
+        if erasure is not None:
+            erasure_payload = erasure.get("payload", {})
+            erased_status = erasure_payload.get("status")
+            erased_run_status = cast(
+                Literal["cancelled", "completed_unverified", "failed"],
+                erased_status
+                if erased_status in {"cancelled", "completed_unverified", "failed"}
+                else "failed",
+            )
+            rows.append(
+                TaskRunHistory(
+                    run_id=plan_id,
+                    plan_id=plan_id,
+                    title="已删除的运行",
+                    status=erased_run_status,
+                    execution_mode=None,
+                    agent_count=0,
+                    revision_number=(
+                        record.revision_number
+                        if record is not None
+                        else int(erasure_payload.get("revision_number") or 1)
+                    ),
+                    parent_plan_id=(
+                        record.parent_plan_id
+                        if record is not None
+                        else erasure_payload.get("parent_plan_id")
+                    ),
+                    continued_from_plan_id=None,
+                    continuation_available=False,
+                    started_at=evidence_events[0].ts,
+                    updated_at=str(erasure["ts"]),
+                    finished_at=str(erasure["ts"]),
+                    duration_s=None,
+                    outcome_verified=False,
+                    evidence_gap=False,
+                    deleted=True,
+                    events=[
+                        TaskRunEvidence(
+                            event_id=str(erasure["event_id"]),
+                            kind="task_run_erased",
+                            ts=str(erasure["ts"]),
+                        )
+                    ],
+                )
+            )
+            continue
         status: Literal[
             "confirmed",
             "dispatching",
@@ -975,8 +1037,9 @@ def _memory_states(
 def _repeatable_works(records: list[PlanRecord]) -> list[RepeatableWork]:
     """Project latest ended revisions into full reusable Work Blueprints."""
     by_id = {record.plan_id: record for record in records}
-    parents = {record.parent_plan_id for record in records if record.parent_plan_id}
-    latest = [record for record in records if record.plan_id not in parents]
+    retained = [record for record in records if record.erased_at is None]
+    parents = {record.parent_plan_id for record in retained if record.parent_plan_id}
+    latest = [record for record in retained if record.plan_id not in parents]
 
     def root_id(record: PlanRecord) -> str:
         seen: set[str] = set()
@@ -1023,6 +1086,7 @@ def _repeatable_works(records: list[PlanRecord]) -> list[RepeatableWork]:
 def _workspace_conversations(records: list[PlanRecord]) -> list[WorkspaceConversation]:
     """Project immutable plan chains into selectable Workspace conversations."""
     by_id = {record.plan_id: record for record in records}
+    retained = [record for record in records if record.erased_at is None]
 
     def root(record: PlanRecord) -> PlanRecord:
         seen: set[str] = set()
@@ -1037,7 +1101,7 @@ def _workspace_conversations(records: list[PlanRecord]) -> list[WorkspaceConvers
 
     grouped: dict[str, list[PlanRecord]] = {}
     roots: dict[str, PlanRecord] = {}
-    for record in records:
+    for record in retained:
         root_record = root(record)
         roots[root_record.plan_id] = root_record
         grouped.setdefault(root_record.plan_id, []).append(record)
@@ -2607,9 +2671,7 @@ class ConsoleService:
                 path.mkdir(parents=True, exist_ok=True, mode=0o700)
                 os.chmod(path, 0o700)
             elif not path.exists():
-                raise ConsoleConflict(
-                    "planning material is unavailable; create a new plan"
-                )
+                raise ConsoleConflict("planning material is unavailable; create a new plan")
             elif stat.S_IMODE(path.stat().st_mode) != 0o700:
                 raise ConsoleConflict("planning material directory permissions are unsafe")
         if not plan_root.is_dir() or plan_root.is_symlink():
@@ -2642,9 +2704,7 @@ class ConsoleService:
                 guessed, _ = mimetypes.guess_type(upload.name)
                 if guessed:
                     media_type = guessed.casefold()
-            decoded.append(
-                (upload, content, media_type, hashlib.sha256(content).hexdigest())
-            )
+            decoded.append((upload, content, media_type, hashlib.sha256(content).hexdigest()))
 
         root = self._plan_material_root(plan_id, create=True)
         attachments: list[PlanningAttachment] = []
@@ -2798,8 +2858,8 @@ class ConsoleService:
     def request_plan(self, request: PlanRequest) -> PlanRecord:
         workspace = self._normalise_requested_workspace(request.workspace)
         request = request.model_copy(update={"workspace": workspace})
-        _, memory_version_ids, memory_snapshot_sha256 = (
-            self._approved_workspace_memory_snapshot(workspace)
+        _, memory_version_ids, memory_snapshot_sha256 = self._approved_workspace_memory_snapshot(
+            workspace
         )
         blueprint: TeamBlueprint | None = None
         if request.blueprint_id is not None:
@@ -2818,9 +2878,7 @@ class ConsoleService:
             ]
         request_hash = _canonical_sha256(request_payload)
         attachment_manifest_sha256 = (
-            _canonical_sha256(
-                [attachment.model_dump(mode="json") for attachment in attachments]
-            )
+            _canonical_sha256([attachment.model_dump(mode="json") for attachment in attachments])
             if attachments
             else None
         )
@@ -4025,7 +4083,9 @@ class ConsoleService:
                 "relative_path": metadata.relative_path,
             }
             if any(evidence.get(key) != value for key, value in expected.items()):
-                raise ConsoleConflict("workspace memory creation evidence failed integrity validation")
+                raise ConsoleConflict(
+                    "workspace memory creation evidence failed integrity validation"
+                )
             state = states.get(metadata.version_id)
             if state is None:
                 raise ConsoleConflict("workspace memory lifecycle evidence is incomplete")
@@ -4087,9 +4147,7 @@ class ConsoleService:
             return [], [], None
         payload = self._memory_snapshot_payload(selected)
         version_ids = [str(item["version_id"]) for item in payload]
-        snapshot_sha = _canonical_sha256(
-            {"schema_version": 1, "memories": payload}
-        )
+        snapshot_sha = _canonical_sha256({"schema_version": 1, "memories": payload})
         return payload, version_ids, snapshot_sha
 
     def _record_workspace_memory_snapshot(
@@ -4112,9 +4170,7 @@ class ConsoleService:
                 raise ConsoleConflict("workspace-scoped memory no longer matches this plan")
             selected.append(row)
         payload = self._memory_snapshot_payload(selected)
-        snapshot_sha = _canonical_sha256(
-            {"schema_version": 1, "memories": payload}
-        )
+        snapshot_sha = _canonical_sha256({"schema_version": 1, "memories": payload})
         if snapshot_sha != record.memory_snapshot_sha256:
             raise ConsoleConflict("workspace memory snapshot integrity failed")
         return payload
@@ -4128,7 +4184,9 @@ class ConsoleService:
             if not tag:
                 continue
             if len(tag) > 48 or "\n" in tag or "\r" in tag:
-                raise ValueError("workspace memory tags must be single-line and at most 48 characters")
+                raise ValueError(
+                    "workspace memory tags must be single-line and at most 48 characters"
+                )
             folded = tag.casefold()
             if folded not in seen:
                 seen.add(folded)
@@ -5539,6 +5597,256 @@ class ConsoleService:
                 "evidence_event_id": event["event_id"],
             }
 
+    @staticmethod
+    def _run_erasure_response(event: dict[str, Any]) -> dict[str, Any]:
+        payload = event.get("payload", {})
+        return {
+            "plan_id": event["run_id"],
+            "erased": True,
+            "erased_at": event["ts"],
+            "evidence_event_id": event["event_id"],
+            "local_workspace_removed": payload.get("local_workspace_removed") is True,
+            "exclusive_aion_team_removed": payload.get("exclusive_aion_team_removed") is True,
+            "cas_blobs_removed": int(payload.get("cas_blobs_removed") or 0),
+            "shared_blobs_retained": int(payload.get("shared_blobs_retained") or 0),
+            "material_sets_removed": int(payload.get("material_sets_removed") or 0),
+            "shared_material_sets_retained": int(payload.get("shared_material_sets_retained") or 0),
+            "external_workspace_retained": payload.get("external_workspace_retained") is True,
+            "external_governance_retained": payload.get("external_governance_retained") is True,
+        }
+
+    @staticmethod
+    def _remove_private_tree(path: Path, expected_parent: Path) -> bool:
+        """Remove one exact application-owned directory without following links."""
+        if not path.exists() and not path.is_symlink():
+            return False
+        if path.is_symlink() or not path.is_dir():
+            raise ConsoleUnavailable("private run storage could not be erased safely")
+        try:
+            parent = expected_parent.resolve(strict=True)
+            if path.parent.resolve(strict=True) != parent:
+                raise ConsoleUnavailable("private run storage identity did not match")
+            shutil.rmtree(path)
+            fd = os.open(parent, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        except OSError as exc:
+            raise ConsoleUnavailable("private run storage could not be erased") from exc
+        return True
+
+    def erase_run_data(self, plan_id: str, request: EraseRunRequest) -> dict[str, Any]:
+        """Erase one terminal run's private content while preserving a content-free receipt."""
+        with self._plan_transition_lock:
+            events = self.ledger.read_all()
+            erasures = _run_erasure_events(events)
+            if existing := erasures.get(plan_id):
+                try:
+                    shell = self.store.get(plan_id)
+                    if shell.erasure_event_id is None:
+                        self.store.mutate(
+                            plan_id,
+                            lambda current: current.model_copy(
+                                update={"erasure_event_id": existing["event_id"]},
+                                deep=True,
+                            ),
+                        )
+                except PlanNotFound:
+                    pass
+                return self._run_erasure_response(existing)
+
+            record = self.store.get(plan_id)
+            if record.plan_sha256 != request.expected_plan_sha256:
+                raise ConsoleConflict("run erasure hash does not match the selected plan version")
+            if record.status not in {"failed", "cancelled", "completed_unverified"}:
+                raise ConsoleConflict("only terminal runs can be erased")
+
+            if record.erased_at is not None:
+                recovered = self._append(
+                    "task_run_erased",
+                    plan_id,
+                    {
+                        "schema_version": 1,
+                        "source": "local_console_recovery",
+                        "status": record.status,
+                        "plan_sha256": record.plan_sha256,
+                        "parent_plan_id": record.parent_plan_id,
+                        "revision_number": record.revision_number,
+                        "local_workspace_removed": False,
+                        "exclusive_aion_team_removed": False,
+                        "cas_blobs_removed": 0,
+                        "shared_blobs_retained": 0,
+                        "material_sets_removed": 0,
+                        "shared_material_sets_retained": 0,
+                        "external_workspace_retained": False,
+                        "external_governance_retained": False,
+                        "recovered_receipt": True,
+                    },
+                )
+                self.store.mutate(
+                    plan_id,
+                    lambda current: current.model_copy(
+                        update={"erasure_event_id": recovered["event_id"]},
+                        deep=True,
+                    ),
+                )
+                return self._run_erasure_response(recovered)
+
+            deleted_plans = set(_deleted_plan_events(events))
+            other_records = [
+                candidate
+                for candidate in self.store.list_all()
+                if candidate.plan_id != plan_id
+                and candidate.erased_at is None
+                and candidate.plan_id not in deleted_plans
+            ]
+            execution = record.execution
+            aion_team_id = execution.aion_team_id if execution is not None else None
+            if aion_team_id and any(
+                candidate.execution is not None and candidate.execution.aion_team_id == aion_team_id
+                for candidate in other_records
+            ):
+                raise ConsoleConflict(
+                    "this run shares its Agent session with another retained run; erase the linked newer runs first"
+                )
+
+            exclusive_aion_team_removed = False
+            if aion_team_id:
+                try:
+                    remote_teams = self.aion.list_teams()
+                    if any(team.get("id") == aion_team_id for team in remote_teams):
+                        self.aion.delete_team(aion_team_id)
+                        exclusive_aion_team_removed = True
+                except (AionUiError, OSError, ValueError) as exc:
+                    raise ConsoleUnavailable(
+                        "the private Agent session could not be erased; no local run content was changed"
+                    ) from exc
+
+            state_root = self.settings.console.state_dir.expanduser()
+            execution_root = state_root / "executions"
+            local_workspace_removed = False
+            external_workspace_retained = bool(record.workspace)
+            if not record.workspace:
+                local_workspace_removed = self._remove_private_tree(
+                    execution_root / plan_id,
+                    execution_root,
+                )
+
+            storage_ids = {attachment.storage_plan_id for attachment in record.attachments}
+            used_storage_ids = {
+                attachment.storage_plan_id
+                for candidate in other_records
+                for attachment in candidate.attachments
+            }
+            material_sets_removed = 0
+            shared_material_sets_retained = 0
+            materials_root = state_root / "materials"
+            for storage_id in storage_ids:
+                if storage_id in used_storage_ids:
+                    shared_material_sets_retained += 1
+                    continue
+                if self._remove_private_tree(materials_root / storage_id, materials_root):
+                    material_sets_removed += 1
+
+            target_artifacts = [
+                event for event in artifact_records(events) if event.get("run_id") == plan_id
+            ]
+            erased_run_ids = set(erasures)
+            retained_digests = {
+                str(event.get("payload", {}).get("sha256"))
+                for event in artifact_records(events)
+                if event.get("run_id") != plan_id
+                and event.get("run_id") not in erased_run_ids
+                and isinstance(event.get("payload", {}).get("sha256"), str)
+            }
+            cas_blobs_removed = 0
+            shared_blobs_retained = 0
+            cas_root = artifact_root(self.ledger)
+            for digest in {
+                str(event.get("payload", {}).get("sha256"))
+                for event in target_artifacts
+                if isinstance(event.get("payload", {}).get("sha256"), str)
+                and re.fullmatch(r"[0-9a-f]{64}", str(event.get("payload", {}).get("sha256")))
+            }:
+                if digest in retained_digests:
+                    shared_blobs_retained += 1
+                    continue
+                blob = cas_path(cas_root, digest)
+                if not blob.exists() and not blob.is_symlink():
+                    continue
+                if blob.is_symlink() or not blob.is_file():
+                    raise ConsoleUnavailable("artifact content could not be erased safely")
+                try:
+                    blob.unlink()
+                    cas_blobs_removed += 1
+                    fd = os.open(blob.parent, os.O_RDONLY)
+                    try:
+                        os.fsync(fd)
+                    finally:
+                        os.close(fd)
+                    if blob.parent.exists() and not any(blob.parent.iterdir()):
+                        blob.parent.rmdir()
+                except OSError as exc:
+                    raise ConsoleUnavailable("artifact content could not be erased") from exc
+
+            erased_at = utc_now()
+
+            def scrub(current: PlanRecord) -> PlanRecord:
+                current.objective = "Run content erased"
+                current.constraints = ""
+                current.workspace = ""
+                current.preferred_cadence = "once"
+                current.attachments = []
+                current.source_blueprint_id = None
+                current.source_blueprint_sha256 = None
+                current.memory_snapshot_sha256 = None
+                current.memory_version_ids = []
+                current.approval_mode = None
+                current.planning_progress = None
+                current.plan = None
+                current.revision_instruction = ""
+                current.error = None
+                current.execution = None
+                current.erased_at = erased_at
+                current.erasure_event_id = None
+                return current
+
+            self.store.mutate(plan_id, scrub)
+            event = self._append(
+                "task_run_erased",
+                plan_id,
+                {
+                    "schema_version": 1,
+                    "source": "local_console",
+                    "status": record.status,
+                    "plan_sha256": record.plan_sha256,
+                    "parent_plan_id": record.parent_plan_id,
+                    "revision_number": record.revision_number,
+                    "local_workspace_removed": local_workspace_removed,
+                    "exclusive_aion_team_removed": exclusive_aion_team_removed,
+                    "cas_blobs_removed": cas_blobs_removed,
+                    "shared_blobs_retained": shared_blobs_retained,
+                    "material_sets_removed": material_sets_removed,
+                    "shared_material_sets_retained": shared_material_sets_retained,
+                    "external_workspace_retained": external_workspace_retained,
+                    "external_governance_retained": bool(
+                        execution is not None and execution.paperclip_issue_id
+                    ),
+                },
+            )
+            self.store.mutate(
+                plan_id,
+                lambda current: current.model_copy(
+                    update={
+                        "erased_at": event["ts"],
+                        "erasure_event_id": event["event_id"],
+                    },
+                    deep=True,
+                ),
+            )
+            return self._run_erasure_response(event)
+
     def dispatch_plan(self, plan_id: str) -> PlanRecord:
         try:
             claimed = False
@@ -6073,6 +6381,8 @@ class ConsoleService:
         if plan_id in _deleted_plan_events(self.ledger.read_all()):
             raise PlanNotFound(f"unknown plan: {plan_id}")
         record = self.store.get(plan_id)
+        if record.erased_at is not None:
+            raise PlanNotFound(f"unknown plan: {plan_id}")
         needs_terminal_progress = bool(
             record.status == "completed_unverified"
             and record.execution is not None
@@ -6108,7 +6418,8 @@ class ConsoleService:
         snapshot = self.ledger.read_all() if events is None else events
         excluded_ids = set(_deleted_plan_events(snapshot))
         records = self.store.list(limit, exclude_ids=excluded_ids)
-        if self._reconcile_terminal_aion_records(records):
+        retained = [record for record in records if record.erased_at is None]
+        if self._reconcile_terminal_aion_records(retained):
             return self.store.list(limit, exclude_ids=excluded_ids)
         return records
 
@@ -6803,7 +7114,11 @@ class ConsoleService:
         recent_runs = query_runs(index_db, limit=8)
         all_plans = list(self.store.list_all())
         deleted_plans = _deleted_plan_events(events)
-        active_plans = [record for record in all_plans if record.plan_id not in deleted_plans]
+        active_plans = [
+            record
+            for record in all_plans
+            if record.plan_id not in deleted_plans and record.erased_at is None
+        ]
         if self._reconcile_terminal_aion_records(active_plans):
             events = self.ledger.read_all()
             info = rebuild(index_db, self.ledger, events=events)

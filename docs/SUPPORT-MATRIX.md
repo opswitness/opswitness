@@ -17,6 +17,7 @@ not that Stable durability or an SLA is available.
 | AionUi team execution | Supported integration | Requires compatible local AionUi; stage completion is Agent-reported |
 | Paperclip governance projection | Supported integration | Paperclip is not the evidence authority |
 | JSONL ledger, CAS, History and evidence views | Supported | Append-only authority; SQLite views are rebuildable |
+| Exact-run private-content erasure | Source-complete; fresh RC required | Terminal runs only; removes local plan content, exclusive Agent session, managed workspace and unshared inputs/results while retaining a content-free receipt and any externally projected or shared data |
 | Inline approval and operator input | Supported | Auto is default; manual mode remains available |
 | Pause, continue and stop | Supported for mapped Aion team runs | Cooperative and evidence-confirmed; not an OS process freeze |
 | `opswitness wrap` for launchd/cron commands | Supported | Existing command semantics and exit status remain authoritative |

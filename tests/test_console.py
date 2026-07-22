@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from opswitness import mcp_server
+from opswitness.artifacts import artifact_root, register_console_artifact
 from opswitness.config import Settings
 from opswitness.console.aionui import (
     AionUiClient,
@@ -31,6 +32,7 @@ from opswitness.console.schemas import (
     ConfirmRequest,
     ContinueRunRequest,
     DeletePlanRequest,
+    EraseRunRequest,
     ExecutionApprovalModeRequest,
     ExecutionProfile,
     ExecutionProfileRevisionRequest,
@@ -93,6 +95,7 @@ from opswitness.console.service import (
     _profiled_plan,
 )
 from opswitness.console.store import PlanNotFound
+from opswitness.ids import new_ulid
 from opswitness.ledger import Ledger
 from opswitness.paperclip import PaperclipError
 
@@ -256,6 +259,8 @@ class FakeAion:
         self.pause_calls: list[tuple[str, str]] = []
         self.cancel_calls: list[tuple[str, str]] = []
         self.resume_calls: list[tuple[str, str, str, str]] = []
+        self.remote_teams = {"team-1"}
+        self.deleted_teams: list[str] = []
         self.snapshot_requests: list[dict] = []
         self.control_state: dict = {
             "status": "running",
@@ -390,6 +395,15 @@ class FakeAion:
                 for index, agent in enumerate(kwargs["plan"].agents, start=1)
             ],
         }
+
+    def list_teams(self):
+        return [{"id": team_id} for team_id in sorted(self.remote_teams)]
+
+    def delete_team(self, team_id):
+        if team_id not in self.remote_teams:
+            raise AionUiError("team missing")
+        self.remote_teams.remove(team_id)
+        self.deleted_teams.append(team_id)
 
     def execution_snapshot(
         self,
@@ -829,9 +843,7 @@ def test_ended_work_can_create_an_unconfirmed_ai_revision_without_dispatch(conso
 
     revision = service.request_plan_revision(
         finished.plan_id,
-        RevisePlanRequest(
-            instruction="增加一名核验 Agent，并让它向负责人汇报；其他约束保持不变。"
-        ),
+        RevisePlanRequest(instruction="增加一名核验 Agent，并让它向负责人汇报；其他约束保持不变。"),
     )
 
     assert revision.status == "planning"
@@ -1065,9 +1077,7 @@ def test_ended_aion_run_continues_same_context_as_new_audited_version(console_en
 def test_continuation_captures_only_this_run_artifact_delta(console_env):
     settings, service, aion, _ = console_env
     running = _running_aion_plan(service)
-    source_artifacts = (
-        settings.console.state_dir / "executions" / running.plan_id / "artifacts"
-    )
+    source_artifacts = settings.console.state_dir / "executions" / running.plan_id / "artifacts"
     source_artifacts.mkdir(parents=True, mode=0o700)
     (source_artifacts / "prior.json").write_text('{"run": "prior"}')
     finished = service.refresh_execution(running.plan_id)
@@ -1096,9 +1106,7 @@ def test_continuation_captures_only_this_run_artifact_delta(console_env):
         for event in service.ledger.read_all()
         if event["kind"] == "artifact_registered" and event["run_id"] == continued.plan_id
     ]
-    assert [event["payload"]["logical_name"] for event in registered] == [
-        "follow-up.pdf"
-    ]
+    assert [event["payload"]["logical_name"] for event in registered] == ["follow-up.pdf"]
 
 
 def test_registered_pdf_content_is_cas_verified_and_workspace_files_are_denied(
@@ -1139,10 +1147,7 @@ def test_registered_pdf_content_is_cas_verified_and_workspace_files_are_denied(
         assert opened.headers["content-disposition"] == 'inline; filename="report.pdf"'
         assert opened.headers["cache-control"] == "no-store"
         assert opened.headers["x-content-type-options"] == "nosniff"
-        assert (
-            opened.headers["x-opswitness-artifact-sha256"]
-            == hashlib.sha256(report).hexdigest()
-        )
+        assert opened.headers["x-opswitness-artifact-sha256"] == hashlib.sha256(report).hexdigest()
         denied = client.get(f"{endpoint}/late.pdf/content")
         assert denied.status_code == 404
         traversal = client.get(f"{endpoint}/..%2Foutside.pdf/content")
@@ -1972,6 +1977,206 @@ def test_plan_delete_http_facade_requires_csrf_and_confirmation(console_env, mon
         assert client.get(path).status_code == 404
 
 
+def test_terminal_run_erasure_removes_private_content_and_is_idempotent(console_env):
+    settings, service, aion, _ = console_env
+    running = _running_aion_plan(service)
+    ended = service.refresh_execution(running.plan_id)
+    assert ended.status == "completed_unverified"
+    assert ended.plan_sha256 is not None
+
+    run_root = settings.console.state_dir / "executions" / ended.plan_id
+    artifact_dir = run_root / "artifacts"
+    artifact_dir.mkdir(parents=True)
+    source = artifact_dir / "private-result.json"
+    source.write_text('{"private":"DEMO-PRIVATE"}', encoding="utf-8")
+    registered = register_console_artifact(
+        service.ledger,
+        source,
+        plan_id=ended.plan_id,
+        logical_name=source.name,
+    )
+    digest = registered["payload"]["sha256"]
+    blob = artifact_root(service.ledger) / "sha256" / digest[:2] / digest
+    assert blob.is_file()
+
+    result = service.erase_run_data(
+        ended.plan_id,
+        EraseRunRequest(
+            confirmed=True,
+            expected_plan_sha256=ended.plan_sha256,
+        ),
+    )
+
+    assert result["erased"] is True
+    assert result["local_workspace_removed"] is True
+    assert result["exclusive_aion_team_removed"] is True
+    assert result["cas_blobs_removed"] == 1
+    assert result["external_governance_retained"] is True
+    assert not run_root.exists()
+    assert not blob.exists()
+    assert aion.deleted_teams == ["team-1"]
+    shell = service.store.get(ended.plan_id)
+    assert shell.erased_at == result["erased_at"]
+    assert shell.erasure_event_id == result["evidence_event_id"]
+    assert shell.objective == "Run content erased"
+    assert shell.plan is None
+    assert shell.execution is None
+    with pytest.raises(PlanNotFound):
+        service.get_plan(ended.plan_id, refresh=False)
+
+    task_run = next(
+        row for row in service.dashboard()["task_runs"] if row["plan_id"] == ended.plan_id
+    )
+    assert task_run["deleted"] is True
+    assert task_run["title"] == "已删除的运行"
+    assert [event["kind"] for event in task_run["events"]] == ["task_run_erased"]
+    assert (
+        service.erase_run_data(
+            ended.plan_id,
+            EraseRunRequest(
+                confirmed=True,
+                expected_plan_sha256=ended.plan_sha256,
+            ),
+        )
+        == result
+    )
+
+
+def test_run_erasure_retains_cas_blob_referenced_by_another_run(console_env):
+    settings, service, _, _ = console_env
+    ended = service.refresh_execution(_running_aion_plan(service).plan_id)
+    assert ended.plan_sha256 is not None
+
+    run_root = settings.console.state_dir / "executions" / ended.plan_id
+    source = run_root / "artifacts" / "shared-result.json"
+    source.parent.mkdir(parents=True)
+    source.write_text('{"shared":true}', encoding="utf-8")
+    target_event = register_console_artifact(
+        service.ledger,
+        source,
+        plan_id=ended.plan_id,
+        logical_name=source.name,
+    )
+    digest = str(target_event["payload"]["sha256"])
+    blob = artifact_root(service.ledger) / "sha256" / digest[:2] / digest
+
+    retained_run = ended.model_copy(
+        update={
+            "plan_id": new_ulid(),
+            "parent_plan_id": ended.plan_id,
+            "parent_plan_sha256": ended.plan_sha256,
+            "revision_number": ended.revision_number + 1,
+            "status": "ready",
+            "execution": None,
+        },
+        deep=True,
+    )
+    service.store.create(retained_run)
+    register_console_artifact(
+        service.ledger,
+        source,
+        plan_id=retained_run.plan_id,
+        logical_name=source.name,
+    )
+
+    result = service.erase_run_data(
+        ended.plan_id,
+        EraseRunRequest(
+            confirmed=True,
+            expected_plan_sha256=ended.plan_sha256,
+        ),
+    )
+
+    assert result["cas_blobs_removed"] == 0
+    assert result["shared_blobs_retained"] == 1
+    assert blob.is_file()
+    assert not run_root.exists()
+
+
+def test_run_erasure_rejects_wrong_hash_active_and_shared_agent_context(console_env):
+    _, service, _, _ = console_env
+    running = _running_aion_plan(service)
+    assert running.plan_sha256 is not None
+    with pytest.raises(ConsoleConflict, match="hash does not match"):
+        service.erase_run_data(
+            running.plan_id,
+            EraseRunRequest(confirmed=True, expected_plan_sha256="0" * 64),
+        )
+    with pytest.raises(ConsoleConflict, match="only terminal runs"):
+        service.erase_run_data(
+            running.plan_id,
+            EraseRunRequest(
+                confirmed=True,
+                expected_plan_sha256=running.plan_sha256,
+            ),
+        )
+
+    ended = service.refresh_execution(running.plan_id)
+    shared = ended.model_copy(
+        update={
+            "plan_id": new_ulid(),
+            "parent_plan_id": ended.plan_id,
+            "parent_plan_sha256": ended.plan_sha256,
+            "revision_number": ended.revision_number + 1,
+        },
+        deep=True,
+    )
+    service.store.create(shared)
+    with pytest.raises(ConsoleConflict, match="shares its Agent session"):
+        service.erase_run_data(
+            ended.plan_id,
+            EraseRunRequest(
+                confirmed=True,
+                expected_plan_sha256=str(ended.plan_sha256),
+            ),
+        )
+    assert service.store.get(ended.plan_id).erased_at is None
+
+
+def test_run_erasure_http_facade_requires_csrf_confirmation_and_exact_hash(
+    console_env, monkeypatch
+):
+    settings, service, _, _ = console_env
+    ended = service.refresh_execution(_running_aion_plan(service).plan_id)
+    assert ended.plan_sha256 is not None
+    monkeypatch.setattr(service, "acquire_instance_lease", lambda: True)
+    monkeypatch.setattr(service, "recover_startup", lambda: {})
+    monkeypatch.setattr(service, "release_instance_lease", lambda: None)
+    app = create_app(settings, service=service)
+    csrf = app.state.csrf_token
+    path = f"/api/v1/plans/{ended.plan_id}/run-data"
+    with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+        denied = client.request(
+            "DELETE",
+            path,
+            json={"confirmed": True, "expected_plan_sha256": ended.plan_sha256},
+        )
+        assert denied.status_code == 403
+        unconfirmed = client.request(
+            "DELETE",
+            path,
+            json={"confirmed": False, "expected_plan_sha256": ended.plan_sha256},
+            headers={"X-QD-CSRF": csrf},
+        )
+        assert unconfirmed.status_code == 422
+        wrong_hash = client.request(
+            "DELETE",
+            path,
+            json={"confirmed": True, "expected_plan_sha256": "0" * 64},
+            headers={"X-QD-CSRF": csrf},
+        )
+        assert wrong_hash.status_code == 409
+        accepted = client.request(
+            "DELETE",
+            path,
+            json={"confirmed": True, "expected_plan_sha256": ended.plan_sha256},
+            headers={"X-QD-CSRF": csrf},
+        )
+        assert accepted.status_code == 200
+        assert accepted.json()["erased"] is True
+        assert client.get(f"/api/v1/plans/{ended.plan_id}").status_code == 404
+
+
 def test_planning_has_no_execution_side_effect_before_confirmation(console_env):
     _, service, aion, paperclip = console_env
     record = service.request_plan(
@@ -2023,12 +2228,7 @@ def test_planning_attachment_is_hash_bound_private_and_available_to_execution(co
     assert attachment.name == "company-brief.txt"
     assert attachment.size_bytes == len(content)
     assert attachment.sha256 == hashlib.sha256(content).hexdigest()
-    stored = (
-        settings.console.state_dir
-        / "materials"
-        / requested.plan_id
-        / attachment.attachment_id
-    )
+    stored = settings.console.state_dir / "materials" / requested.plan_id / attachment.attachment_id
     assert stored.read_bytes() == content
     assert stat.S_IMODE(stored.stat().st_mode) == 0o400
 
@@ -2124,11 +2324,7 @@ def test_missing_planning_attachment_fails_closed_before_confirmation(console_en
         )
     )
     ready = service.draft_plan(requested.plan_id)
-    material_root = (
-        settings.console.state_dir
-        / "materials"
-        / ready.attachments[0].storage_plan_id
-    )
+    material_root = settings.console.state_dir / "materials" / ready.attachments[0].storage_plan_id
     shutil.rmtree(material_root)
 
     with pytest.raises(ConsoleConflict, match="planning material is unavailable"):
@@ -2876,9 +3072,7 @@ def test_runtime_input_answer_http_requires_csrf_and_confirmation(monkeypatch, c
     assert len(aion.team_messages) == 1
 
 
-def test_runtime_input_artifact_preview_is_request_bound_and_hides_paths(
-    monkeypatch, console_env
-):
+def test_runtime_input_artifact_preview_is_request_bound_and_hides_paths(monkeypatch, console_env):
     settings, service, _, _ = console_env
     ready = service.draft_plan(
         service.request_plan(PlanRequest(objective="测试候选知识库预览")).plan_id
@@ -5593,7 +5787,9 @@ def test_home_bounds_historical_questions_errors_and_titles(console_env, monkeyp
 
     assert response.status_code == 200
     actions = response.json()["home"]["action_queue"]
-    input_action = next(action for action in actions if action["action_id"] == f"input:{waiting.plan_id}")
+    input_action = next(
+        action for action in actions if action["action_id"] == f"input:{waiting.plan_id}"
+    )
     failed_action = next(
         action for action in actions if action["action_id"] == f"blocked:{failed.plan_id}"
     )
@@ -6050,9 +6246,7 @@ def test_execution_profile_revision_pins_exact_models_in_an_immutable_child(cons
         },
     ]
     service.runtime_capabilities = lambda: capabilities  # type: ignore[method-assign]
-    parent = service.draft_plan(
-        service.request_plan(PlanRequest(objective="档位模型选择")).plan_id
-    )
+    parent = service.draft_plan(service.request_plan(PlanRequest(objective="档位模型选择")).plan_id)
     assert parent.plan is not None
     assert parent.plan.execution_profile == ExecutionProfile.BALANCED
     assert [agent.model for agent in parent.plan.agents] == [
@@ -6082,7 +6276,9 @@ def test_execution_profile_revision_pins_exact_models_in_an_immutable_child(cons
         "claude-sonnet-test",
         "gpt-codex-test",
     ]
-    assert all("所选模型已按本机能力表写入方案" in agent.runtime_reason for agent in child.plan.agents)
+    assert all(
+        "所选模型已按本机能力表写入方案" in agent.runtime_reason for agent in child.plan.agents
+    )
     assert aion.dispatched == 0
     assert paperclip.created == 0
     event = service.ledger.read_all()[-1]
@@ -6110,9 +6306,7 @@ def test_execution_profile_revision_pins_exact_models_in_an_immutable_child(cons
     assert paperclip.created == 0
 
 
-def test_execution_profile_http_facade_requires_csrf_and_confirmation(
-    console_env, monkeypatch
-):
+def test_execution_profile_http_facade_requires_csrf_and_confirmation(console_env, monkeypatch):
     settings, service, aion, paperclip = console_env
     parent = service.draft_plan(
         service.request_plan(PlanRequest(objective="HTTP 执行档位")).plan_id
@@ -6508,7 +6702,9 @@ def test_completed_aion_execution_with_unfinished_stages_is_reconciled_locally(
 
 def test_dashboard_reconciles_terminal_aion_false_completion(console_env, monkeypatch):
     _, service, aion, _ = console_env
-    ready = service.draft_plan(service.request_plan(PlanRequest(objective="列表终态阶段核对")).plan_id)
+    ready = service.draft_plan(
+        service.request_plan(PlanRequest(objective="列表终态阶段核对")).plan_id
+    )
     service.confirm_plan(
         ready.plan_id,
         ConfirmRequest(plan_sha256=str(ready.plan_sha256), confirmed=True),

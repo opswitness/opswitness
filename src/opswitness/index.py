@@ -58,6 +58,21 @@ def rebuild(
 ) -> dict[str, Any]:
     """Build a complete private index, then atomically publish it."""
     events = ledger.read_all() if events is None else events
+    erased_run_ids = {
+        str(event.get("run_id"))
+        for event in events
+        if event.get("kind") == "task_run_erased"
+        and isinstance(event.get("run_id"), str)
+        and isinstance(event.get("payload"), dict)
+        and event["payload"].get("schema_version") == 1
+    }
+    erased_artifact_event_ids = {
+        str(event.get("event_id"))
+        for event in events
+        if event.get("kind") == "artifact_registered"
+        and event.get("run_id") in erased_run_ids
+        and isinstance(event.get("event_id"), str)
+    }
     db_path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
         dir=db_path.parent,
@@ -97,6 +112,8 @@ def rebuild(
                     ),
                 )
             elif e.get("kind") == "artifact_registered":
+                if e.get("run_id") in erased_run_ids:
+                    continue
                 con.execute(
                     "INSERT INTO artifacts (event_id, run_id, job, logical_name, sha256,"
                     " size, mime, labels_json, cas_uri, registered_ts)"
@@ -115,6 +132,8 @@ def rebuild(
                     ),
                 )
             elif e.get("kind") in {"artifact_eval", "artifact_signoff"}:
+                if p.get("artifact_event_id") in erased_artifact_event_ids:
+                    continue
                 con.execute(
                     "INSERT INTO artifact_outcomes (event_id, artifact_event_id, kind,"
                     " verdict, actor, summary, ts) VALUES (?,?,?,?,?,?,?)",

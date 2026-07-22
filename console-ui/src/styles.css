@@ -3738,6 +3738,19 @@ button.table-row:hover {
   line-height: 1.65;
 }
 
+.erase-run-warning {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  border: 1px solid #dfc47a;
+  background: var(--amber-soft);
+  padding: 12px 14px;
+  color: #6d5520;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
 .delete-plan-actions {
   display: flex;
   justify-content: flex-end;
@@ -7898,6 +7911,21 @@ input::placeholder {
 .work-run-detail-header small {
   color: var(--faint);
   font-size: 9px;
+}
+
+.work-run-detail-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.run-delete-button {
+  min-height: 34px;
+  padding: 7px 10px;
+  font-size: 11px;
 }
 
 .work-run-facts {

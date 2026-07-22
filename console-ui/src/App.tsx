@@ -68,6 +68,7 @@ import {
   createWorkspaceMemoryCandidate,
   createPairingInvitation,
   deletePlan,
+  eraseRun,
   disableTelegram,
   disableMail,
   decideApproval,
@@ -375,6 +376,7 @@ function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activePlan, setActivePlan] = useState<PlanRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PlanRecord | null>(null);
+  const [eraseRunTarget, setEraseRunTarget] = useState<PlanRecord | null>(null);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [workspaceBlueprint, setWorkspaceBlueprint] = useState<TeamBlueprint | null>(null);
   const [workspaceSeed, setWorkspaceSeed] = useState('');
@@ -834,6 +836,7 @@ function App() {
                     void refresh(true);
                   }}
                   onDelete={setDeleteTarget}
+                  onEraseRun={setEraseRunTarget}
                   onNew={openNewTask}
                 />
               )}
@@ -909,6 +912,19 @@ function App() {
             setDrawerOpen(false);
           }
           setDeleteTarget(null);
+        }}
+      />
+      <EraseRunDialog
+        record={eraseRunTarget}
+        onClose={() => setEraseRunTarget(null)}
+        onConfirm={async (record) => {
+          if (!record.plan_sha256) throw new Error(t('方案哈希缺失'));
+          await eraseRun(record.plan_id, record.plan_sha256);
+          if (workFocusPlanId === record.plan_id) {
+            setWorkFocusPlanId(record.parent_plan_id || '');
+          }
+          setEraseRunTarget(null);
+          await refresh(true);
         }}
       />
       <MailSetupDialog
@@ -2505,6 +2521,7 @@ function WorkView({
   onControl,
   onApprovalModeChange,
   onDelete,
+  onEraseRun,
   onNew,
 }: {
   plans: PlanRecord[];
@@ -2548,6 +2565,7 @@ function WorkView({
     expectedCurrentMode: ApprovalMode,
   ) => Promise<void>;
   onDelete: (record: PlanRecord) => void;
+  onEraseRun: (record: PlanRecord) => void;
   onNew: () => void;
 }) {
   const { language, t } = useLanguage();
@@ -2919,7 +2937,19 @@ function WorkView({
                             <h3>{selectedHistoryRun.title}</h3>
                             <small>{shortId(selectedHistoryRun.run_id)} · {formatTime(selectedHistoryRun.updated_at, language)}</small>
                           </div>
-                          <StatusBadge status={selectedHistoryRun.status} />
+                          <div className="work-run-detail-actions">
+                            <StatusBadge status={selectedHistoryRun.status} />
+                            {selectedHistoryRecord?.plan_sha256
+                              && ['failed', 'cancelled', 'completed_unverified'].includes(selectedHistoryRecord.status) && (
+                              <button
+                                className="secondary-button danger-button run-delete-button"
+                                type="button"
+                                onClick={() => onEraseRun(selectedHistoryRecord)}
+                              >
+                                <Trash2 size={15} />{t('删除这次运行')}
+                              </button>
+                            )}
+                          </div>
                         </header>
                         <div className="work-run-facts">
                           <span><small>{t('执行方式')}</small><strong>{selectedHistoryRun.execution_mode === 'workflow' ? 'Workflow' : t('Agent 团队')}</strong></span>
@@ -3699,6 +3729,7 @@ const taskRunEventLabel: Record<TaskRunHistory['events'][number]['kind'], string
   task_approval_mode_change_recovered: '审批模式已安全恢复',
   task_execution_failed: '执行失败已记账',
   task_execution_finished: '执行终态已记账',
+  task_run_erased: '运行私有内容已删除',
 };
 
 function HistoryView({
@@ -5465,6 +5496,65 @@ function DeletePlanDialog({
             <button className="secondary-button danger-button" type="button" disabled={busy} onClick={() => void submit()}>
               {busy ? <LoaderCircle size={16} className="spin" /> : <Trash2 size={16} />}
               {t('删除任务')}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function EraseRunDialog({
+  record,
+  onClose,
+  onConfirm,
+}: {
+  record: PlanRecord | null;
+  onClose: () => void;
+  onConfirm: (record: PlanRecord) => Promise<void>;
+}) {
+  const { t } = useLanguage();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  if (!record) return null;
+  const title = record.plan?.title || record.objective;
+  const submit = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await onConfirm(record);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('运行删除失败'));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="modal-layer" role="dialog" aria-modal="true" aria-label={t('确认删除运行')}>
+      <button className="modal-backdrop" type="button" aria-label={t('关闭')} onClick={() => !busy && onClose()} />
+      <section className="mail-setup-dialog delete-plan-dialog erase-run-dialog">
+        <header className="modal-header">
+          <div><span className="section-kicker">{t('隐私擦除')}</span><h2>{t('永久删除这次运行？')}</h2></div>
+          <button className="icon-button" type="button" title={t('关闭')} disabled={busy} onClick={onClose}><X size={19} /></button>
+        </header>
+        <div className="mail-setup-content">
+          <div className="delete-plan-summary">
+            <Trash2 size={20} />
+            <div><strong>{title}</strong><span>v{record.revision_number} · {shortId(record.plan_id)}</span></div>
+          </div>
+          <p className="delete-plan-copy">
+            {t('这会清除这次运行的本地方案正文、用户输入、独占 Agent 会话、托管工作目录和不再被其他运行引用的结果文件。删除后无法继续或查看这次运行。')}
+          </p>
+          <div className="erase-run-warning">
+            <ShieldCheck size={18} />
+            <span>{t('为保持审计链，系统会保留不含正文的哈希和删除回执。已投影到外部治理服务的记录、明确指定的外部工作目录，以及仍被其他运行引用的共享文件不会被删除。')}</span>
+          </div>
+          {error && <InlineError text={error} />}
+          <div className="delete-plan-actions">
+            <button className="secondary-button" type="button" disabled={busy} onClick={onClose}>{t('取消')}</button>
+            <button className="secondary-button danger-button" type="button" disabled={busy} onClick={() => void submit()}>
+              {busy ? <LoaderCircle size={16} className="spin" /> : <Trash2 size={16} />}
+              {t('永久删除本地内容')}
             </button>
           </div>
         </div>

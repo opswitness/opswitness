@@ -203,6 +203,29 @@ export function deletePlan(planId: string): Promise<{
   });
 }
 
+export function eraseRun(planId: string, expectedPlanSha256: string): Promise<{
+  plan_id: string;
+  erased: true;
+  erased_at: string;
+  evidence_event_id: string;
+  local_workspace_removed: boolean;
+  exclusive_aion_team_removed: boolean;
+  cas_blobs_removed: number;
+  shared_blobs_retained: number;
+  material_sets_removed: number;
+  shared_material_sets_retained: number;
+  external_workspace_retained: boolean;
+  external_governance_retained: boolean;
+}> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/run-data`, {
+    method: 'DELETE',
+    body: JSON.stringify({
+      confirmed: true,
+      expected_plan_sha256: expectedPlanSha256,
+    }),
+  });
+}
+
 export function getTeamBlueprints(includeArchived = false): Promise<TeamBlueprint[]> {
   const query = includeArchived ? '?include_archived=true' : '';
   return api(`/api/v1/team-blueprints${query}`);

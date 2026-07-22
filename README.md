@@ -232,6 +232,13 @@ run. Active work, workflow runs, missing session identity, or adapter failure ar
 than silently starting a new team or changing runtime. The new run filters shared-conversation
 telemetry at its dispatch timestamp, so old replies and tool calls cannot prove new progress.
 
+History also offers an exact-run privacy-erasure action for terminal Runs. It removes the local plan
+body, operator-input state, exclusive Aion session, application-managed workspace, planning
+materials, and result blobs that are not referenced by another retained Run. A content-free hash and
+erasure receipt remain in the append-only ledger, while shared blobs, explicit external workspaces,
+backups, and already projected governance records are retained. A shared Agent conversation blocks
+the action rather than pretending one Run can be removed independently.
+
 Plan confirmation snapshots an approval mode. New plans and reviewed reruns default to
 `automatic`: after the operator confirms the exact plan hash, every AionUi tool confirmation
 receives an automatic single-use decision. OpsWitness still creates the Paperclip approval and

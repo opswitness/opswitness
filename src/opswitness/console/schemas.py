@@ -311,6 +311,15 @@ class DeletePlanRequest(BaseModel):
     confirmed: Literal[True]
 
 
+class EraseRunRequest(BaseModel):
+    """Irreversibly erase the private content for one exact terminal run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    confirmed: Literal[True]
+    expected_plan_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class RerunPlanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -628,6 +637,11 @@ class PlanRecord(BaseModel):
     revision_instruction_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     error: str | None = Field(default=None, max_length=500)
     execution: ExecutionState | None = None
+    erased_at: str | None = None
+    erasure_event_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$",
+    )
 
 
 class AgentSession(BaseModel):
@@ -987,6 +1001,7 @@ class TaskRunEvidence(BaseModel):
         "task_approval_mode_changed",
         "task_approval_mode_change_aborted",
         "task_approval_mode_change_recovered",
+        "task_run_erased",
     ]
     ts: str
 
