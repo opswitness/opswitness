@@ -83,6 +83,24 @@ def _asset_files(dist: Path) -> list[Path]:
     )
 
 
+def assert_spdx_sbom(path: Path, *, distribution: str) -> None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"SPDX SBOM is unreadable: {path.name}") from exc
+    if not isinstance(payload, dict) or payload.get("spdxVersion") != "SPDX-2.3":
+        raise ValueError(f"SPDX SBOM has an unsupported or missing version: {path.name}")
+    packages = payload.get("packages")
+    if not isinstance(packages, list) or not any(
+        isinstance(package, dict)
+        and str(package.get("name") or "").casefold() == distribution.casefold()
+        for package in packages
+    ):
+        raise ValueError(
+            f"SPDX SBOM does not identify the {distribution} distribution: {path.name}"
+        )
+
+
 def write_manifest(
     *,
     root: Path,
@@ -102,8 +120,12 @@ def write_manifest(
         raise ValueError("release assets do not contain a wheel")
     if not any(path.name.endswith(".tar.gz") for path in files):
         raise ValueError("release assets do not contain an sdist")
-    if require_sbom and not any(path.name.endswith(".spdx.json") for path in files):
-        raise ValueError("release assets do not contain an SPDX SBOM")
+    sboms = [path for path in files if path.name.endswith(".spdx.json")]
+    if require_sbom:
+        if not sboms:
+            raise ValueError("release assets do not contain an SPDX SBOM")
+        for sbom in sboms:
+            assert_spdx_sbom(sbom, distribution=distribution)
 
     records = [
         {"name": path.name, "sha256": sha256(path), "size": path.stat().st_size}

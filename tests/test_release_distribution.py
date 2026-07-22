@@ -221,6 +221,40 @@ def test_manifest_can_require_spdx_sbom(tmp_path):
             require_sbom=True,
         )
 
+    (dist / "sbom.spdx.json").write_text(
+        json.dumps(
+            {
+                "spdxVersion": "SPDX-2.3",
+                "packages": [{"name": "dist", "SPDXID": "SPDXRef-dist"}],
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="does not identify the opswitness distribution"):
+        _MANIFEST.write_manifest(
+            root=root,
+            dist=dist,
+            tag="v0.1.0-alpha.1",
+            require_sbom=True,
+        )
+
+    (dist / "sbom.spdx.json").write_text(
+        json.dumps(
+            {
+                "spdxVersion": "SPDX-2.3",
+                "packages": [{"name": "opswitness", "SPDXID": "SPDXRef-opswitness"}],
+            }
+        )
+    )
+    manifest = _MANIFEST.write_manifest(
+        root=root,
+        dist=dist,
+        tag="v0.1.0-alpha.1",
+        require_sbom=True,
+    )
+    assert any(
+        item["name"] == "sbom.spdx.json" for item in manifest["artifacts"]
+    )
+
 
 def test_release_tag_gate_precedes_build_and_attestation():
     workflow = yaml.load(
