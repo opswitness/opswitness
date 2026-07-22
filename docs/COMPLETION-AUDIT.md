@@ -7,12 +7,13 @@ historical evidence or hash. Release engineering now requires a clean checkout, 
 mapping, dual CLI verification, Linux/macOS quality gates, full-history DCO/gitleaks, checksums,
 build manifest, SPDX SBOM, and GitHub attestation. The GitHub organization, private repository, and
 domain are reserved; Draft PR #1 is green on Linux, macOS, DCO, and gitleaks. Private Release
-validation and rollback-safe production migration now pass, and the independent `alpha-rc-1`
-contract is running with one successful start and zero projection backlog. Publication remains
-blocked on its unelapsed 24-hour minimum, professional brand review, physical iPhone acceptance,
-and final public-main Release acceptance as recorded in READINESS. The legacy `m2-canary`
-permanently failed its frozen cadence contract
-(`50,171s > 25,920s`) and is retained as failure evidence, never promoted to Alpha evidence.
+validation and rollback-safe production migration now pass. The independent `alpha-rc-1` contract
+failed its frozen cadence contract after a host sleep gap (`7,504.433s > 1,200s`) and remains
+immutable failure evidence. Its independent replacement `alpha-rc-2` has one successful run, zero
+projection backlog, and only the unelapsed 24-hour minimum outstanding. Publication remains
+blocked on that duration gate, professional brand review, physical iPhone acceptance, and final
+public-main Release acceptance as recorded in READINESS. The legacy `m2-canary` also permanently
+failed its frozen cadence contract (`50,171s > 25,920s`) and is never promoted to Alpha evidence.
 
 Operational snapshot: 2026-07-13 21:24 PDT. The source-only console updates below were recorded
 through 2026-07-15 02:18 PDT without changing production state. This document maps the approved M0-M6
@@ -25,7 +26,7 @@ snapshot.
 |---|---|---|
 | M0 trusted baseline | Process-tree supervisor, shared schedule classification, append-only lifecycle, full tests | Complete |
 | M1 install and recovery tooling | Doctor, secure service exec, encrypted backup/isolated restore, five secret-free launchd templates | Complete in source |
-| M2 permanent install and soak | Postgres/Paperclip/services run OpsWitness `0.1.0a1`; real doctor is fully green; the legacy canary failure is retained; `alpha-rc-1` has started | In progress: Alpha duration gate, then feed/SOX seven-day Stable soak |
+| M2 permanent install and soak | Postgres/Paperclip/services run OpsWitness `0.1.0a1`; real doctor is fully green; both failed contracts are retained; `alpha-rc-2` has started under a dedicated wake assertion | In progress: Alpha duration gate, then feed/SOX seven-day Stable soak |
 | M3 Claude gate | Two live defer/approval/resume/consume drills and 60-second recovery service | Complete for non-interactive `qd gated-claude` only |
 | M4 artifact/eval/signoff | Atomic CAS, ledger authority, live projection/reconciliation and restore evidence | Complete |
 | M5 Community Alpha | Private remote/PR CI, private Release validation, verified downloadable artifacts, blank install, production RC migration, browser smoke, and a running independent Alpha canary exist | Release candidate: blocked by 24-hour canary completion, professional review, physical iPhone acceptance and public-main release gates |
@@ -257,9 +258,10 @@ must not be reset or reused as `alpha-rc-1`.
 
 ## Safe remaining sequence
 
-1. Let the existing `alpha-rc-1` contract reach its frozen 24-hour minimum. Any failure must remain
-   append-only; do not reset or relabel the failed `m2-canary`, and do not checkpoint Alpha until
-   every contract check passes.
+1. Let the existing `alpha-rc-2` contract reach its frozen 24-hour minimum. Keep the Mac open,
+   powered and ventilated while its dedicated wake assertion runs. Any failure must remain
+   append-only; do not reset or relabel the failed `alpha-rc-1` or `m2-canary`, and do not
+   checkpoint Alpha until every contract check passes.
 2. Complete professional confusing-similarity review and physical iPhone Safari/Chrome acceptance.
 3. Only after those gates pass, merge privately, publish the repository, enable required checks and
    security controls, validate public main, approve one exact annotated tag, and inspect the

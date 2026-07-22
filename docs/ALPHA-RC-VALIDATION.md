@@ -1,10 +1,11 @@
 # OpsWitness Alpha RC Validation
 
-Snapshot: 2026-07-20 19:40 PDT
+Snapshot: 2026-07-21 17:38 PDT
 
-This record covers the private build validation, rollback-safe production migration, and start of
-the independent `alpha-rc-1` canary for `OpsWitness v0.1.0-alpha.1`. It is evidence for a release
-candidate, not approval for a public tag or stable release.
+This record covers the private build validation, rollback-safe production migration, the failed
+independent `alpha-rc-1` canary, and its fail-closed replacement `alpha-rc-2` for
+`OpsWitness v0.1.0-alpha.1`. It is evidence for a release candidate, not approval for a public tag
+or stable release.
 
 ## Private Release build
 
@@ -68,25 +69,34 @@ The user-owned schedule enrolls that exact label. It does not enroll a namespace
 the former `m2-canary` or either historical release-canary service.
 
 The append-only `alpha-rc-1` contract started at `2026-07-21T02:35:06.365539+00:00` with event
-`01KY18DS7ZBS7KHZJZ3SCQHJYF`. Its first status snapshot was intentionally non-green/pending:
+`01KY18DS7ZBS7KHZJZ3SCQHJYF`. It later failed its frozen cadence contract. The status recomputed at
+`2026-07-22T00:39:07.309643+00:00` reported 61 starts, 61 successes, zero task failures, zero
+running tasks, zero projection backlog, and a 7,504.433-second maximum gap against the frozen
+1,200-second allowance. `cadence_gap` is a hard blocker. No checkpoint or reset was written.
 
-- starts 1, successes 1, failures 0, running 0;
-- maximum observed gap 63.471 seconds against a frozen 1,200-second allowance;
-- projection backlog 0;
-- the only blocker was the remaining minimum duration;
-- watchdog reported both exactly enrolled jobs within expectations.
+macOS power evidence explains the gap but does not waive it. `pmset -g log` records entry into
+sleep at 2026-07-21 01:47:57 PDT due to `Software Sleep pid=84736`, followed by thermal-emergency
+sleep/dark-wake cycles and a full user wake at 09:54:20 PDT. The launchd canary ran only during
+sparse wake windows. This is a host-availability failure and remains permanent release evidence.
 
-The Mac was on AC power with system sleep disabled for AC. The earliest duration-only eligibility
-is `2026-07-22T02:35:06.365539+00:00` (2026-07-21 19:35 PDT), provided no later failure, degraded
-event, torn line, lifecycle violation, schedule drift, projection backlog, or cadence breach occurs.
-No checkpoint has been written.
+`alpha-rc-2` started independently at `2026-07-22T00:36:01.202548+00:00` with event
+`01KY3M0EHNH17A17KD7Y0MT78C` and the same exact 900-second schedule plus 300-second grace. A
+temporary `com.opswitness.alpha-canary-awake` launchd service runs `/usr/bin/caffeinate -is`;
+`pmset -g assertions` confirms both `PreventSystemSleep` and `PreventUserIdleSystemSleep`. Its
+first wrapped run succeeded, and the normal projector reduced the temporary two-event backlog to
+zero. The only current blocker is the unelapsed 24-hour minimum. Earliest duration-only eligibility
+is `2026-07-23T00:36:01.202548+00:00` (2026-07-22 17:36 PDT).
+
+The wake assertion does not override lid closure, manual sleep, power loss, or macOS thermal
+protection. Any resulting gap still fails `alpha-rc-2`; no widened grace or evidence rewrite is
+permitted.
 
 ## Gates still open
 
 The repository remains private, PR #1 remains draft, no public tag or GitHub Release exists, and
 `PUBLIC_RELEASE_APPROVED` remains unset. Public Alpha still requires:
 
-1. a passing 24-hour `alpha-rc-1` status and append-only checkpoint;
+1. a passing 24-hour `alpha-rc-2` status and append-only checkpoint; `alpha-rc-1` remains failed;
 2. professional confusing-similarity review;
 3. physical iPhone Safari and Chrome pairing/PWA/write/revoke acceptance, or removal of mobile
    claims from Alpha;

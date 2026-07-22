@@ -1,6 +1,6 @@
 # OpsWitness Readiness
 
-## Community Alpha release-candidate update (2026-07-20)
+## Community Alpha release-candidate update (2026-07-21)
 
 The approved source migration targets `v0.1.0-alpha.1` (`0.1.0a1` in Python metadata) with
 `opswitness` as the distribution, module, and primary CLI. The `qd` CLI, `QD_*` environment
@@ -22,16 +22,20 @@ the production RC: `opswitness`, `qd`, and all five legacy-label services run `0
 is fully green; old state roots were adopted in place; and all pre-migration ledger/CAS hashes were
 preserved.
 
-The independent append-only `alpha-rc-1` canary started at
-`2026-07-21T02:35:06.365539+00:00`. Its first wrapped run succeeded, backlog is zero, watchdog is
-green, and its only current blocker is the unelapsed 24-hour minimum. No checkpoint exists. The
-former `m2-canary` remains a permanent failed record: its observed cadence gap reached 50,171
-seconds against a frozen 25,920-second allowance. It must not be deleted, rewritten, reset into a
-pass, or cited as Alpha canary evidence. Physical iPhone Safari/Chrome Beta acceptance and
-professional confusing-similarity review have not been recorded. Alpha publication therefore
-remains blocked on elapsed canary evidence, those two external gates, private merge/public-main
-checks, and final prerelease asset/attestation inspection. Stable remains blocked on the seven-day
-soak and recovery/adoption gates recorded below. Detailed evidence:
+The independent append-only `alpha-rc-1` canary failed after macOS sleep produced a
+7,504.433-second cadence gap against its frozen 1,200-second allowance. `pmset` records software
+sleep followed by thermal-emergency sleep/dark-wake cycles; the explanation does not waive the
+hard contract. No checkpoint or reset exists. A distinct `alpha-rc-2` contract started at
+`2026-07-22T00:36:01.202548+00:00` with a dedicated `/usr/bin/caffeinate -is` launchd assertion.
+Its first wrapped run succeeded and normal projection drained to zero; only the unelapsed 24-hour
+minimum is currently outstanding. The former `m2-canary` also remains a permanent failed record:
+its observed cadence gap reached 50,171 seconds against a frozen 25,920-second allowance. Neither
+failed contract may be deleted, rewritten, reset into a pass, or cited as successful Alpha
+evidence. Physical iPhone Safari/Chrome Beta acceptance and professional confusing-similarity
+review have not been recorded. Alpha publication therefore remains blocked on `alpha-rc-2`, those
+two external gates, private merge/public-main checks, and final prerelease asset/attestation
+inspection. Stable remains blocked on the seven-day soak and recovery/adoption gates recorded
+below. Detailed evidence:
 [ALPHA-RC-VALIDATION.md](ALPHA-RC-VALIDATION.md).
 
 The private remote is a validation stage, not a publication stage: its manual workflow builds and
@@ -406,9 +410,11 @@ blocked by the current open gates below.
    encrypted state backup and an exact archive of the legacy uv tool/symlink, install only the
    verified wheel, retain the legacy data roots and plist labels in place, restore single-instance
    services, and require real-user-domain doctor to pass. Any failure restores the old tool.
-3. **Independent Alpha canary** — create only `com.opswitness.alpha-canary`, enroll that exact
-   label, and run the append-only `alpha-rc-1` contract for at least 24 hours with the Mac awake.
-   The failed `m2-canary` remains immutable historical evidence and is not reset or reused.
+3. **Independent Alpha canary** — keep only `com.opswitness.alpha-canary` exactly enrolled and let
+   append-only `alpha-rc-2` run for at least 24 hours with the Mac open, powered and ventilated.
+   Its dedicated wake assertion prevents idle/AC sleep but cannot override lid closure, manual
+   sleep, power loss, or thermal protection. Failed `alpha-rc-1` and `m2-canary` remain immutable
+   historical evidence and are not reset or reused.
 4. **Professional brand review** — the exact organization, private repository, and domain are
    reserved, but a qualified confusing-similarity review for intended markets remains required.
 5. **Physical mobile acceptance** — desktop and responsive-browser acceptance do not substitute
@@ -552,10 +558,11 @@ own independent acceptance gates.
 
 ## Next task
 
-Complete private Release validation, perform the rollback-safe RC tool migration, and start the
-separate `alpha-rc-1` canary. Keep the failed `m2-canary` and every legacy ledger/CAS object intact.
-Do not make the repository public, set `PUBLIC_RELEASE_APPROVED`, create a tag, adopt
-feed-monitor/sox-monitor, or build the practitioner UI before their independent gates pass.
+Let the separate `alpha-rc-2` canary complete its frozen 24-hour contract, then complete
+professional brand review and physical iPhone acceptance. Keep failed `alpha-rc-1`, failed
+`m2-canary`, and every legacy ledger/CAS object intact. Do not make the repository public, set
+`PUBLIC_RELEASE_APPROVED`, create a tag, adopt feed-monitor/sox-monitor, or build the practitioner
+UI before their independent gates pass.
 
 ---
 

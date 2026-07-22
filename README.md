@@ -259,10 +259,11 @@ Alpha. Built against Paperclip v2026.707. Not affiliated with Paperclip.
 The local P2 code path and M1 install-readiness tooling are test-complete. The verified private
 Release wheel is installed as the production `OpsWitness 0.1.0a1` RC; Paperclip, Postgres, and all
 five legacy-label launchd services pass real-user-domain doctor. The independent
-`com.opswitness.alpha-canary` is running under the append-only `alpha-rc-1` contract, but its
-24-hour duration gate is not complete. The failed historical `m2-canary` remains preserved as
-failure evidence. Feed-monitor and sox-monitor remain blocked until the later Stable gates in
-READINESS pass. Evidence: [ALPHA-RC-VALIDATION.md](docs/ALPHA-RC-VALIDATION.md).
+`com.opswitness.alpha-canary` is running under the append-only `alpha-rc-2` contract, but its
+24-hour duration gate is not complete. `alpha-rc-1` failed its frozen cadence contract after the
+host slept; it and the earlier failed `m2-canary` remain preserved as failure evidence.
+Feed-monitor and sox-monitor remain blocked until the later Stable gates in READINESS pass.
+Evidence: [ALPHA-RC-VALIDATION.md](docs/ALPHA-RC-VALIDATION.md).
 M3's non-interactive Claude gate passed two
 live defer/board-approval/resume drills; its one-minute recovery service is installed and
 fail-closed. M4 content-addressed artifact/eval/signoff and live Paperclip work-product
