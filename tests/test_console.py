@@ -85,6 +85,7 @@ from opswitness.console.service import (
     _hashable_plan_payload,
     _mail_setup_detail,
     _paperclip_launchd_label,
+    _profiled_plan,
 )
 from opswitness.console.store import PlanNotFound
 from opswitness.ledger import Ledger
@@ -837,6 +838,23 @@ def test_plan_revision_http_facade_requires_csrf(console_env, monkeypatch):
 
 def test_ended_work_prepares_an_idempotent_reviewed_rerun_without_dispatch(console_env):
     _, service, aion, paperclip = console_env
+    service.runtime_capabilities = lambda: [  # type: ignore[method-assign]
+        {
+            "runtime": "claude_code",
+            "available": True,
+            "models": [{"id": "default"}, {"id": "sonnet"}],
+        },
+        {
+            "runtime": "codex_cli",
+            "available": True,
+            "models": [{"id": "default"}, {"id": "gpt-5.4-mini"}],
+        },
+        {
+            "runtime": "aion_cli",
+            "available": False,
+            "models": [{"id": "default"}],
+        },
+    ]
     requested = service.request_plan(PlanRequest(objective="每天生成研究摘要"))
     ready = service.draft_plan(requested.plan_id)
     service.confirm_plan(
@@ -892,6 +910,22 @@ def test_ended_work_prepares_an_idempotent_reviewed_rerun_without_dispatch(conso
     assert event["payload"]["approval_mode"] == "automatic"
     assert event["payload"]["execution_profile"] == "fast"
     assert "每天生成研究摘要" not in json.dumps(event, ensure_ascii=False)
+
+
+def test_execution_profile_uses_only_the_advertised_default_model():
+    capabilities = [
+        {
+            "runtime": runtime,
+            "available": True,
+            "models": [{"id": "default"}],
+        }
+        for runtime in ("claude_code", "codex_cli")
+    ]
+
+    profiled = _profiled_plan(_plan(), ExecutionProfile.FAST, capabilities)
+
+    assert [agent.model for agent in profiled.agents] == ["default", "default"]
+    assert profiled.execution_profile == ExecutionProfile.FAST
 
 
 def test_rerun_http_facade_requires_csrf_and_explicit_confirmation(console_env, monkeypatch):
