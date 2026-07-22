@@ -245,11 +245,22 @@ def test_launchd_runtime_check_is_fail_closed():
             "state = not running\nruns = 5\nlast exit code = 1\n"
         ),
     )
+    pended, pended_detail = _launchd_service_runtime(
+        "gate-recovery",
+        run=lambda *args, **kwargs: completed(
+            "state = not running\nruns = 5\n"
+            "pended nondemand spawn = interval\nlast exit code = 0\n"
+        ),
+    )
 
     assert paperclip_ok is True
     assert console_ok is True
     assert periodic_ok is True and detail == "runs=4 last_exit=0"
     assert failed is False and failed_detail == "runs=5 last_exit=1"
+    assert pended is False
+    assert pended_detail == (
+        "launchd trigger is pending without execution: reason=interval runs=5"
+    )
 
 
 def test_qd_command_surface_rejects_stale_installed_tool():

@@ -194,6 +194,16 @@ def _launchd_service_runtime(
         running = state is not None and state.group(1) == "running"
         return running, f"state={state.group(1) if state else 'unknown'}"
 
+    pending = re.search(
+        r"^\s*pended nondemand spawn = ([^\s]+)\s*$", output, re.MULTILINE
+    )
+    if pending is not None:
+        return (
+            False,
+            "launchd trigger is pending without execution: "
+            f"reason={pending.group(1)} runs={runs.group(1) if runs else 'unknown'}",
+        )
+
     last_exit = re.search(r"^\s*last exit code = (-?\d+)\s*$", output, re.MULTILINE)
     if last_exit is None:
         return False, f"runs={runs.group(1) if runs else 'unknown'} last_exit=unknown"

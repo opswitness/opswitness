@@ -1,11 +1,11 @@
 # OpsWitness Alpha RC Validation
 
-Snapshot: 2026-07-22 07:39 PDT
+Snapshot: 2026-07-22 08:02 PDT
 
 This record covers the private build validations, rollback-safe production migrations, immutable
-failed canary chain, and current exact-artifact `alpha-rc-4` contract for
+failed canary chain, including the exact-artifact `alpha-rc-4` contract for
 `OpsWitness v0.1.0-alpha.1`. It is evidence for a release candidate, not approval for a public tag
-or stable release. Documentation updates made while `alpha-rc-4` runs do not change executable
+or stable release. Documentation updates made before `alpha-rc-4` failed did not change executable
 source, the installed artifact, the schedule, or any ledger/CAS object.
 
 ## Exact post-freeze private Release build
@@ -73,7 +73,9 @@ service worker.
 - The five official services were restored and explicitly kickstarted after launchd accepted the
   bootstrap without immediately scheduling each process. Paperclip, console, projector,
   watchdog, and gate recovery are single-instance; projection backlog is zero; the production
-  console and bootstrap API return HTTP 200; real-user-domain doctor returns `healthy=true`.
+  console and bootstrap API return HTTP 200. The first doctor snapshot returned `healthy=true`,
+  but a later interval probe proved the periodic services were pended; that green verdict is not
+  accepted as runtime-health evidence.
 
 ## Earlier rollback-safe production migration (historical)
 
@@ -146,20 +148,29 @@ evidence and is not reset, relabeled, or cited as success.
 
 `alpha-rc-4` is bound to the exact Actions artifact from commit `3bd2b0d`. It started at
 `2026-07-22T14:34:21.145132+00:00` with event `01KY53ZFJZCQWHS6FC60XRB4Y5`, a 900-second interval,
-300-second grace, and 86,400-second minimum. Its first wrapped run succeeded, projection backlog is
-zero, and the dedicated `/usr/bin/caffeinate -is` assertion is active. The authoritative status at
-`2026-07-22T14:39:30.007927+00:00` reported one start, one success, zero failures, zero running
-tasks, a 264.478-second maximum gap against the 1,200-second allowance, and no hard blocker. It
-remains `pending` solely because 24 hours have not elapsed. The earliest possible checkpoint is
-approximately `2026-07-23 07:34 PDT`; elapsed time and a fresh blocker-free status are mandatory.
+300-second grace, and 86,400-second minimum. Its first wrapped run succeeded and projection backlog
+remained zero, but launchd received the next interval trigger and left it as
+`pended nondemand spawn = interval`. At `2026-07-22T15:02:33.528698+00:00`, the authoritative
+verdict reported one start, one success, zero task failures, and a 1,647.999-second maximum gap
+against the frozen 1,200-second allowance. The contract is permanently failed; no checkpoint or
+reset was written.
+
+A separate 10-second LaunchAgent running only `/usr/bin/true` reproduced `runs=0` with the same
+pended interval state. macOS reports 26.5.2 staged with a restart required, matching launchd's
+on-demand-only behavior. This explains the host condition but does not waive the failed contract.
+The update must complete and the Mac must reboot before automatic intervals are probed again. Only
+after repeated automatic triggers pass may a rebuilt exact artifact start a new append-only
+contract.
 
 ## Gates still open
 
 The repository remains private, PR #1 remains draft, no public tag or GitHub Release exists, and
 `PUBLIC_RELEASE_APPROVED` remains unset. Public Alpha still requires:
 
-1. a passing 24-hour append-only `alpha-rc-4`; exact-source build, install, migration, and browser
-   smoke are complete, while `alpha-rc-1` through `alpha-rc-3` remain failed;
+1. completion of the staged macOS update and reboot, repeated automatic interval-probe success,
+   a rebuilt exact artifact, and a fresh passing 24-hour append-only contract; exact-source build,
+   install, migration, and browser smoke for the prior artifact are complete, while
+   `alpha-rc-1` through `alpha-rc-4` remain failed;
 2. professional confusing-similarity review;
 3. private merge plus green `main`, public-repository security controls, public-main release
    validation, exact annotated tag approval, prerelease asset/attestation inspection, and a final

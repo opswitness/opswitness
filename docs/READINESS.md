@@ -1,6 +1,6 @@
 # OpsWitness Readiness
 
-## Exact Actions RC and `alpha-rc-4` update (2026-07-22)
+## Exact Actions RC and `alpha-rc-4` failure update (2026-07-22)
 
 Private Release validation run
 [29927606948](https://github.com/opswitness/opswitness/actions/runs/29927606948) passed
@@ -18,23 +18,28 @@ state backup is
 command links, nine related plists, and pre-migration state hashes are retained under
 `~/.local/state/quarterdeck/release-rollback/opswitness-actions-3bd2b0d-20260722T142908Z/`.
 Legacy ledger, CAS, configuration roots, and service labels were adopted in place. Post-install
-CAS hashes are unchanged, projection backlog is zero, the five official services are
-single-instance, and real-user-domain `opswitness doctor --json` returns `healthy=true`.
+CAS hashes are unchanged, projection backlog is zero, and the five official services are
+single-instance. The earlier doctor snapshot returned `healthy=true`, but a later interval probe
+proved that periodic launchd triggers were pending without execution. Doctor now treats that state
+as a failure instead of trusting a prior exit-zero run.
 
 `alpha-rc-3` is immutable failed evidence. It started at
 `2026-07-22T06:21:34.204863+00:00` and acquired a hard cadence gap after executable source changed;
 later runs cannot erase that gap. The exact Actions artifact has its own append-only contract,
 `alpha-rc-4`, event `01KY53ZFJZCQWHS6FC60XRB4Y5`, with evidence starting at
-`2026-07-22T14:34:21.145132+00:00`. Its 900-second synthetic job plus 300-second grace is running
-with zero failures, zero degraded events, zero projection backlog, and no current hard blocker.
-It remains `pending` until the full 86,400-second duration elapses. The earliest possible
-checkpoint is approximately **2026-07-23 07:34 PDT**, and only a fresh authoritative status may
-decide it. `alpha-rc-1`, `alpha-rc-2`, `alpha-rc-3`, and `m2-canary` remain permanent failed
-records.
+`2026-07-22T14:34:21.145132+00:00`. Its first run succeeded, but the next interval trigger was
+received and pended by launchd instead of executed. At `2026-07-22T15:02:33.528698+00:00` the
+authoritative verdict was permanently failed: one start, one success, zero task failures, zero
+projection backlog, and a 1,647.999-second cadence gap against the frozen 1,200-second allowance.
+A harmless 10-second `/usr/bin/true` probe reproduced `runs=0` with
+`pended nondemand spawn = interval`, proving this was not the wrapped command or canary plist.
+macOS 26.5.2 is staged and requires restart; a fresh contract must not start until the update and
+reboot complete and repeated automatic interval probes pass. `alpha-rc-1` through `alpha-rc-4`
+and `m2-canary` remain permanent failed records.
 
-This documentation-only update changes no executable source, installed artifact, schedule,
-contract, ledger, or CAS object, so it does not restart `alpha-rc-4`. Public Alpha remains blocked
-by a passing `alpha-rc-4`, professional confusing-similarity review, private merge and green
+This update changes the doctor runtime check but does not change any prior contract, ledger, or CAS
+object. Public Alpha remains blocked by a rebuilt exact artifact, a fresh post-reboot 24-hour
+canary, professional confusing-similarity review, private merge and green
 `main`, repository security/publication controls, public-main release validation, approved exact
 tag, prerelease asset/attestation inspection, and final blank-install smoke.
 
@@ -62,8 +67,9 @@ the ledger or bootstrap summary.
 
 This was product code after the Alpha release freeze and invalidated `alpha-rc-2` as evidence for
 the current source build. The exact-source private build, isolated install, browser smoke, and
-rollback-safe production migration are now complete as recorded above. `alpha-rc-4` is the only
-canary that may validate that artifact; prior contracts remain immutable historical evidence.
+rollback-safe production migration are now complete as recorded above. `alpha-rc-4` failed and
+cannot validate that artifact; all prior contracts remain immutable historical evidence. The
+doctor fix requires a rebuilt exact artifact and a new post-reboot contract.
 
 Earlier local acceptance on 2026-07-22 built and independently inspected a wheel from the working tree,
 preserved the previous uv-tool installation as a rollback copy, installed the wheel, restarted only
@@ -136,9 +142,9 @@ rewritten, reset into a pass, or cited as successful Alpha evidence.
 
 The post-freeze source differed from the artifact that started `alpha-rc-2`; the clean-source
 Release build, exact-artifact install, browser smoke, and migration have since passed for commit
-`3bd2b0d`. `alpha-rc-3` also failed its frozen cadence contract and remains preserved. Publication
-therefore depends on the current `alpha-rc-4` duration/verdict plus professional
-confusing-similarity review, private merge/public-main checks, and final prerelease
+`3bd2b0d`. `alpha-rc-3` and `alpha-rc-4` also failed their frozen cadence contracts and remain
+preserved. Publication therefore depends on a rebuilt exact artifact and fresh post-reboot canary
+plus professional confusing-similarity review, private merge/public-main checks, and final prerelease
 asset/attestation inspection. Mobile
 access is not advertised in Alpha;
 private HTTPS, pairing, and PWA remain Beta until physical iPhone Safari/Chrome acceptance passes.
@@ -524,14 +530,14 @@ blocked by the current open gates below.
 1. **Private Release validation** — complete for commit `3bd2b0d`; exact assets, identity,
    checksums, clean-tree manifest, SPDX package, blank install, dual CLIs, synthetic wrap, and
    packaged browser surface passed.
-2. **Rollback-safe production RC migration** — complete for the exact Actions wheel; encrypted
-   backup and exact rollback bundle exist, legacy state was adopted in place, CAS remained
-   unchanged, services are single-instance, and real-user-domain doctor is green.
-3. **Independent Alpha canary** — preserve failed `alpha-rc-1`, `alpha-rc-2`, `alpha-rc-3`, and
-   `m2-canary` as immutable historical evidence. Keep only `com.opswitness.alpha-canary` exactly
-   enrolled and allow the fresh append-only `alpha-rc-4` contract to run for at least 24 hours with the Mac
-   open, powered, and ventilated. The wake assertion can prevent idle/AC sleep but cannot override
-   lid closure, manual sleep, power loss, or thermal protection. No prior contract is reset,
+2. **Rollback-safe production RC migration** — complete for the prior exact Actions wheel;
+   encrypted backup and exact rollback bundle exist, legacy state was adopted in place, CAS
+   remained unchanged, and services are single-instance. The new doctor change requires a rebuilt
+   artifact before another RC canary begins.
+3. **Independent Alpha canary** — preserve failed `alpha-rc-1` through `alpha-rc-4` and
+   `m2-canary` as immutable historical evidence. Install macOS 26.5.2 and reboot, then require a
+   temporary interval probe to execute repeatedly without a pended trigger. Only then rebuild and
+   install the exact RC and start a new append-only 24-hour contract. No prior contract is reset,
    relabeled, or reused. Checkpoint only if the recomputed verdict has no hard or pending blocker.
 4. **Professional brand review** — the exact organization, private repository, and domain are
    reserved, but a qualified confusing-similarity review for intended markets remains required.
