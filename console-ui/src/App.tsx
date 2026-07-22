@@ -1898,47 +1898,58 @@ function WorkspaceView({
                 ))}
               </div>
             </div>
-            <button className="preset-library-trigger" type="button" onClick={() => setPresetOpen(true)}>
-              <span className="preset-library-icon"><Library size={18} /></span>
-              <span>
-                <strong>{t('浏览 31 个常用任务')}</strong>
-                <small>{t('含 10 个成熟模板，以及更多灵活任务起点')}</small>
-              </span>
-              <ChevronRight size={17} />
-            </button>
-            <button className="preset-library-trigger user-template-trigger" type="button" onClick={() => setTemplateOpen(true)}>
-              <span className="preset-library-icon"><Save size={18} /></span>
-              <span>
-                <strong>{t('我的任务模板')}</strong>
-                <small>{taskTemplates.length
-                  ? t('{count} 个已保存模板，可随时复用', { count: taskTemplates.length })
-                  : t('保存常用目标，之后一键填入')}</small>
-              </span>
-              <ChevronRight size={17} />
-            </button>
-            <button className="preset-library-trigger blueprint-library-trigger" type="button" onClick={() => setBlueprintOpen(true)}>
-              <span className="preset-library-icon"><Network size={18} /></span>
-              <span>
-                <strong>{t('团队蓝图')}</strong>
-                <small>{blueprints.length
-                  ? t('{count} 个已保存蓝图，可用于新工作', { count: blueprints.length })
-                  : t('保存并复用 Agent 角色与协作结构')}</small>
-              </span>
-              <ChevronRight size={17} />
-            </button>
-            <button className="preset-library-trigger memory-library-trigger" type="button" onClick={() => setMemoryOpen(true)}>
-              <span className="preset-library-icon"><BrainCircuit size={18} /></span>
-              <span>
-                <strong>{t('Workspace 记忆')}</strong>
-                <small>{workspaceMemoryStatus.approved_count
-                  ? t('{approved} 条已批准 · {candidates} 条待审核', {
-                    approved: workspaceMemoryStatus.approved_count,
-                    candidates: workspaceMemoryStatus.candidate_count,
-                  })
-                  : t('审核流程经验和知识后，供新 Work 只读使用')}</small>
-              </span>
-              <ChevronRight size={17} />
-            </button>
+            <section className="workspace-library-section" aria-labelledby="workspace-library-title">
+              <div className="featured-work-heading">
+                <div>
+                  <span className="section-kicker">{t('Workspace 资源库')}</span>
+                  <strong id="workspace-library-title">{t('复用模板、团队与已批准记忆')}</strong>
+                </div>
+                <small>{t('从已有资产准备新 Work；不会自动执行。')}</small>
+              </div>
+              <div className="workspace-library-grid">
+                <button className="preset-library-trigger" type="button" onClick={() => setPresetOpen(true)}>
+                  <span className="preset-library-icon"><Library size={18} /></span>
+                  <span>
+                    <strong>{t('浏览 31 个常用任务')}</strong>
+                    <small>{t('含 10 个成熟模板，以及更多灵活任务起点')}</small>
+                  </span>
+                  <ChevronRight size={17} />
+                </button>
+                <button className="preset-library-trigger user-template-trigger" type="button" onClick={() => setTemplateOpen(true)}>
+                  <span className="preset-library-icon"><Save size={18} /></span>
+                  <span>
+                    <strong>{t('我的任务模板')}</strong>
+                    <small>{taskTemplates.length
+                      ? t('{count} 个已保存模板，可随时复用', { count: taskTemplates.length })
+                      : t('保存常用目标，之后一键填入')}</small>
+                  </span>
+                  <ChevronRight size={17} />
+                </button>
+                <button className="preset-library-trigger blueprint-library-trigger" type="button" onClick={() => setBlueprintOpen(true)}>
+                  <span className="preset-library-icon"><Network size={18} /></span>
+                  <span>
+                    <strong>{t('团队蓝图')}</strong>
+                    <small>{blueprints.length
+                      ? t('{count} 个已保存蓝图，可用于新工作', { count: blueprints.length })
+                      : t('保存并复用 Agent 角色与协作结构')}</small>
+                  </span>
+                  <ChevronRight size={17} />
+                </button>
+                <button className="preset-library-trigger memory-library-trigger" type="button" onClick={() => setMemoryOpen(true)}>
+                  <span className="preset-library-icon"><BrainCircuit size={18} /></span>
+                  <span>
+                    <strong>{t('Workspace 记忆')}</strong>
+                    <small>{workspaceMemoryStatus.approved_count
+                      ? t('{approved} 条已批准 · {candidates} 条待审核', {
+                        approved: workspaceMemoryStatus.approved_count,
+                        candidates: workspaceMemoryStatus.candidate_count,
+                      })
+                      : t('审核流程经验和知识后，供新 Work 只读使用')}</small>
+                  </span>
+                  <ChevronRight size={17} />
+                </button>
+              </div>
+            </section>
           </div>
         ) : (
           <>
