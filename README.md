@@ -81,6 +81,15 @@ point through at least `v0.2.0`. See [Quickstart](docs/QUICKSTART.md),
 [Support matrix](docs/SUPPORT-MATRIX.md), and
 [Known limitations](docs/KNOWN-LIMITATIONS.md) before connecting real work.
 
+After trying the Alpha, use the
+[guided experience report](https://github.com/opswitness/opswitness/issues/new?template=alpha_experience.yml)
+for onboarding and repeatable-Work feedback, the
+[bug report](https://github.com/opswitness/opswitness/issues/new?template=bug_report.yml) for a
+reproducible defect, or the
+[feature request](https://github.com/opswitness/opswitness/issues/new?template=feature_request.yml)
+for a bounded Community improvement. Never include credentials, private task text, or customer
+data in a public issue.
+
 It adds the three things the platforms don't cover:
 
 | Module | What it does | Why it doesn't exist elsewhere |
