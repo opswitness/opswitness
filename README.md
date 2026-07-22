@@ -1,9 +1,10 @@
 # OpsWitness
 
 > **Community Alpha release candidate.** The source is being prepared as
-> `v0.1.0-alpha.1`. The identifier and private remote are reserved, but this post-freeze source
-> requires a fresh RC artifact, browser smoke, append-only canary, brand review, and final
-> `PUBLIC_RELEASE_APPROVED=true` before public distribution.
+> `v0.1.0-alpha.1`. The exact private Actions artifact for commit `3bd2b0d` passed isolated install
+> and browser smoke and is now installed locally with rollback evidence. Public distribution is
+> still blocked by the append-only `alpha-rc-4` 24-hour gate, professional brand review, and final
+> public-main approval with `PUBLIC_RELEASE_APPROVED=true`.
 
 **Turn one-off AI work into repeatable company operations.**
 
@@ -315,9 +316,10 @@ Alpha. Built against Paperclip v2026.707. Not affiliated with Paperclip.
 The local P2 code path and M1 install-readiness tooling are test-complete. The verified private
 Release wheel is installed as the production `OpsWitness 0.1.0a1` RC; Paperclip, Postgres, and all
 five legacy-label launchd services pass real-user-domain doctor. The independent
-`com.opswitness.alpha-canary` is running under the append-only `alpha-rc-2` contract, but its
-24-hour duration gate is not complete. `alpha-rc-1` failed its frozen cadence contract after the
-host slept; it and the earlier failed `m2-canary` remain preserved as failure evidence.
+`com.opswitness.alpha-canary` is running under the append-only `alpha-rc-4` contract for the exact
+Actions artifact from commit `3bd2b0d`; its only current blocker is the unelapsed 24-hour duration
+gate. `alpha-rc-1`, `alpha-rc-2`, `alpha-rc-3`, and the earlier `m2-canary` remain preserved as
+immutable failed evidence and are not cited as Alpha success.
 Feed-monitor and sox-monitor remain blocked until the later Stable gates in READINESS pass.
 Evidence: [ALPHA-RC-VALIDATION.md](docs/ALPHA-RC-VALIDATION.md).
 Mobile access is not part of the Alpha promise. Private HTTPS, device pairing, and PWA support

@@ -1,5 +1,43 @@
 # OpsWitness Readiness
 
+## Exact Actions RC and `alpha-rc-4` update (2026-07-22)
+
+Private Release validation run
+[29927606948](https://github.com/opswitness/opswitness/actions/runs/29927606948) passed
+preflight, Ubuntu and macOS quality, DCO, full-history gitleaks, and build for source commit
+`3bd2b0d005d86495b8121477d3425ac0bd264ec9`. Publication was intentionally skipped because the
+workflow was an untagged private validation. Independent inspection verified `clean_tree=true`,
+the release identity, checksums, manifest, and SPDX package identity. A blank isolated uv-tool
+install returned `0.1.0a1` from both `opswitness` and `qd`, completed a synthetic wrapped run,
+served the packaged console and bootstrap API, and passed a browser smoke of Workspace and the
+priority Work templates.
+
+The exact Actions wheel was then installed under a quiesced maintenance window. The encrypted
+state backup is
+`~/.local/state/quarterdeck/backups/opswitness-20260722T142908Z.tar.age`; the prior uv tool,
+command links, nine related plists, and pre-migration state hashes are retained under
+`~/.local/state/quarterdeck/release-rollback/opswitness-actions-3bd2b0d-20260722T142908Z/`.
+Legacy ledger, CAS, configuration roots, and service labels were adopted in place. Post-install
+CAS hashes are unchanged, projection backlog is zero, the five official services are
+single-instance, and real-user-domain `opswitness doctor --json` returns `healthy=true`.
+
+`alpha-rc-3` is immutable failed evidence. It started at
+`2026-07-22T06:21:34.204863+00:00` and acquired a hard cadence gap after executable source changed;
+later runs cannot erase that gap. The exact Actions artifact has its own append-only contract,
+`alpha-rc-4`, event `01KY53ZFJZCQWHS6FC60XRB4Y5`, with evidence starting at
+`2026-07-22T14:34:21.145132+00:00`. Its 900-second synthetic job plus 300-second grace is running
+with zero failures, zero degraded events, zero projection backlog, and no current hard blocker.
+It remains `pending` until the full 86,400-second duration elapses. The earliest possible
+checkpoint is approximately **2026-07-23 07:34 PDT**, and only a fresh authoritative status may
+decide it. `alpha-rc-1`, `alpha-rc-2`, `alpha-rc-3`, and `m2-canary` remain permanent failed
+records.
+
+This documentation-only update changes no executable source, installed artifact, schedule,
+contract, ledger, or CAS object, so it does not restart `alpha-rc-4`. Public Alpha remains blocked
+by a passing `alpha-rc-4`, professional confusing-similarity review, private merge and green
+`main`, repository security/publication controls, public-main release validation, approved exact
+tag, prerelease asset/attestation inspection, and final blank-install smoke.
+
 ## Planning history, Repeatable Work and Workspace Memory source update (2026-07-22)
 
 Workspace now folds immutable Plan revision chains into selectable planning conversation history.
@@ -22,18 +60,17 @@ exact-version rollback are ledger lifecycle events. New planning receives only a
 snapshot; confirmation fails closed if that snapshot is no longer active. Memory bodies never enter
 the ledger or bootstrap summary.
 
-This is product code after the Alpha release freeze. It invalidates `alpha-rc-2` as evidence for
-the current source build even if that historical contract reaches its own frozen duration. Before
-publication, OpsWitness requires a new clean build, isolated install and browser smoke, plus a new
-append-only canary id. `alpha-rc-1`, `alpha-rc-2`, and `m2-canary` remain immutable historical
-evidence and must not be reset or relabeled.
+This was product code after the Alpha release freeze and invalidated `alpha-rc-2` as evidence for
+the current source build. The exact-source private build, isolated install, browser smoke, and
+rollback-safe production migration are now complete as recorded above. `alpha-rc-4` is the only
+canary that may validate that artifact; prior contracts remain immutable historical evidence.
 
-Local acceptance on 2026-07-22 built and independently inspected a wheel from this working tree,
+Earlier local acceptance on 2026-07-22 built and independently inspected a wheel from the working tree,
 preserved the previous uv-tool installation as a rollback copy, installed the wheel, restarted only
 the console service, and confirmed the packaged Workspace/Memory UI at `127.0.0.1:8765` with a fully
 green real-host `opswitness doctor --json`. This is local smoke evidence only. The source tree is not
 a clean release commit, so this installation does not satisfy the fresh RC or canary requirements
-above.
+by itself; the later exact Actions artifact validation above supersedes it for RC identity.
 
 ## Execution-profile source update (2026-07-21)
 
@@ -97,11 +134,12 @@ cause of this later gap has not yet been attributed and does not change the verd
 seconds against a frozen 25,920-second allowance. None of these failed contracts may be deleted,
 rewritten, reset into a pass, or cited as successful Alpha evidence.
 
-The current post-freeze product source also differs from the artifact that started
-`alpha-rc-2`. Publication therefore requires a clean source commit, a new private Release build,
-exact-artifact install and browser smoke, and a fresh `alpha-rc-3` contract. Professional
-confusing-similarity review has not been recorded. Alpha publication remains blocked on those
-gates, private merge/public-main checks, and final prerelease asset/attestation inspection. Mobile
+The post-freeze source differed from the artifact that started `alpha-rc-2`; the clean-source
+Release build, exact-artifact install, browser smoke, and migration have since passed for commit
+`3bd2b0d`. `alpha-rc-3` also failed its frozen cadence contract and remains preserved. Publication
+therefore depends on the current `alpha-rc-4` duration/verdict plus professional
+confusing-similarity review, private merge/public-main checks, and final prerelease
+asset/attestation inspection. Mobile
 access is not advertised in Alpha;
 private HTTPS, pairing, and PWA remain Beta until physical iPhone Safari/Chrome acceptance passes.
 Stable remains blocked on the seven-day soak and recovery/adoption gates recorded below. Detailed evidence:
@@ -483,20 +521,18 @@ blocked by the current open gates below.
 
 ## Open gates and deferred items (status explicit)
 
-1. **Private Release validation** — run `release.yml` manually on the Alpha branch, inspect its
-   wheel, sdist, checksums, manifest, SPDX SBOM, commit, and clean-tree evidence, then install that
-   exact wheel into a blank uv-tool root and pass both CLIs plus synthetic core smoke tests.
-2. **Rollback-safe production RC migration** — quiesce the five existing services, create an
-   encrypted state backup and an exact archive of the legacy uv tool/symlink, install only the
-   verified wheel, retain the legacy data roots and plist labels in place, restore single-instance
-   services, and require real-user-domain doctor to pass. Any failure restores the old tool.
-3. **Independent Alpha canary** — preserve failed `alpha-rc-1`, failed `alpha-rc-2`, and failed
-   `m2-canary` as immutable historical evidence. After the current source is committed, build and
-   install that exact clean artifact, keep only `com.opswitness.alpha-canary` exactly enrolled,
-   and start a fresh append-only `alpha-rc-3` contract. Run it for at least 24 hours with the Mac
+1. **Private Release validation** — complete for commit `3bd2b0d`; exact assets, identity,
+   checksums, clean-tree manifest, SPDX package, blank install, dual CLIs, synthetic wrap, and
+   packaged browser surface passed.
+2. **Rollback-safe production RC migration** — complete for the exact Actions wheel; encrypted
+   backup and exact rollback bundle exist, legacy state was adopted in place, CAS remained
+   unchanged, services are single-instance, and real-user-domain doctor is green.
+3. **Independent Alpha canary** — preserve failed `alpha-rc-1`, `alpha-rc-2`, `alpha-rc-3`, and
+   `m2-canary` as immutable historical evidence. Keep only `com.opswitness.alpha-canary` exactly
+   enrolled and allow the fresh append-only `alpha-rc-4` contract to run for at least 24 hours with the Mac
    open, powered, and ventilated. The wake assertion can prevent idle/AC sleep but cannot override
    lid closure, manual sleep, power loss, or thermal protection. No prior contract is reset,
-   relabeled, or reused.
+   relabeled, or reused. Checkpoint only if the recomputed verdict has no hard or pending blocker.
 4. **Professional brand review** — the exact organization, private repository, and domain are
    reserved, but a qualified confusing-similarity review for intended markets remains required.
 5. **Mobile Beta promotion (non-blocking for Alpha)** — Alpha does not advertise mobile access.

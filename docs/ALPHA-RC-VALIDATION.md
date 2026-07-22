@@ -1,13 +1,37 @@
 # OpsWitness Alpha RC Validation
 
-Snapshot: 2026-07-22 06:29 PDT
+Snapshot: 2026-07-22 07:39 PDT
 
-This record covers the private build validation, rollback-safe production migration, the failed
-independent `alpha-rc-1` canary, and its fail-closed replacement `alpha-rc-2` for
+This record covers the private build validations, rollback-safe production migrations, immutable
+failed canary chain, and current exact-artifact `alpha-rc-4` contract for
 `OpsWitness v0.1.0-alpha.1`. It is evidence for a release candidate, not approval for a public tag
-or stable release.
+or stable release. Documentation updates made while `alpha-rc-4` runs do not change executable
+source, the installed artifact, the schedule, or any ledger/CAS object.
 
-## Private Release build
+## Exact post-freeze private Release build
+
+- GitHub Actions run: [29927606948](https://github.com/opswitness/opswitness/actions/runs/29927606948)
+- Source commit: `3bd2b0d005d86495b8121477d3425ac0bd264ec9`
+- Preflight, Ubuntu quality, macOS quality, DCO, full-history gitleaks, and build passed. Publish was
+  intentionally skipped for the untagged private validation.
+- The manifest reported schema 2, `clean_tree=true`, product `OpsWitness`, distribution
+  `opswitness`, public version `0.1.0-alpha.1`, Python version `0.1.0a1`, the requested tag, and the
+  exact source commit. Independent inspection verified the SPDX package identity as
+  `opswitness 0.1.0a1`.
+
+| Asset | SHA-256 |
+|---|---|
+| `opswitness-0.1.0a1-py3-none-any.whl` | `4cbb00087f6a310c875cf6bb5acfa2cde3120994e5b85705d3b7e152b4169b8e` |
+| `opswitness-0.1.0a1.tar.gz` | `6839e015bc5babe25eb8844f76ca5b2477f2c242c54c8330635b9c083cbcbb99` |
+| `sbom.spdx.json` | `7751a8ac550ed6da589cf1ef41fdfc12b053498178500b568aef30adf09a8639` |
+
+The exact wheel was installed into an empty isolated uv-tool root. Both CLI aliases returned
+`0.1.0a1`; a synthetic wrapped `/usr/bin/true` run succeeded and wrote a succeeded lifecycle; the
+packaged console and `/api/v1/bootstrap` returned HTTP 200. Browser acceptance loaded Workspace
+without warnings or errors and exposed the priority one-person-company templates, including
+commercial analysis, CPA/EA workpaper, customs evidence, and P&C renewal workflows.
+
+## Earlier private Release build (historical)
 
 - GitHub Actions run: [29794782849](https://github.com/opswitness/opswitness/actions/runs/29794782849)
 - Source commit: `92d10d557f13f0358fa1a424049054fa53dcb467`
@@ -31,7 +55,27 @@ MCP tools were present; the packaged outage/replay/lost-ack showcase ended with 
 projection events; and the packaged console served its index, CSS, JavaScript, manifest, and
 service worker.
 
-## Rollback-safe production migration
+## Exact-artifact production migration
+
+- Nine related OpsWitness/legacy jobs were quiesced after confirming that no wrapped or gated
+  Work execution was active.
+- The encrypted state backup is
+  `~/.local/state/quarterdeck/backups/opswitness-20260722T142908Z.tar.age` (64,763,512 bytes,
+  mode `0600`).
+- The exact rollback bundle is
+  `~/.local/state/quarterdeck/release-rollback/opswitness-actions-3bd2b0d-20260722T142908Z/`.
+  It contains the prior uv tool, both command links, all nine related plist files, a migration
+  manifest, and SHA-256 evidence for every preexisting ledger/CAS file.
+- The exact Actions wheel replaced the prior locally built `0.1.0a1` tool. Installed package
+  provenance points to that wheel, and both `opswitness` and `qd` return `0.1.0a1`.
+- No canonical fresh-install state or config root was created; the legacy roots remain the single
+  adopted authority. Existing CAS hashes are identical after migration.
+- The five official services were restored and explicitly kickstarted after launchd accepted the
+  bootstrap without immediately scheduling each process. Paperclip, console, projector,
+  watchdog, and gate recovery are single-instance; projection backlog is zero; the production
+  console and bootstrap API return HTTP 200; real-user-domain doctor returns `healthy=true`.
+
+## Earlier rollback-safe production migration (historical)
 
 - Before quiescence, an encrypted full-state backup was created at
   `~/.local/state/quarterdeck/backups/quarterdeck-20260721T021437Z.tar.age` (52,646,648 bytes,
@@ -94,13 +138,28 @@ contract. No checkpoint, widened grace, reset, relabel, or evidence rewrite is p
 `alpha-rc-2` is permanent failed evidence and cannot validate either its former installed artifact
 or the newer post-freeze source.
 
+`alpha-rc-3` started at `2026-07-22T06:21:34.204863+00:00` with event
+`01KY47S5M1K72XAQ2YZD48WEHY`. A later executable-source change required a distinct exact-artifact
+contract. The resulting service interruption left `alpha-rc-3` with a hard cadence gap; subsequent
+runs for the same enrolled job cannot remove the maximum observed gap. It remains permanent failed
+evidence and is not reset, relabeled, or cited as success.
+
+`alpha-rc-4` is bound to the exact Actions artifact from commit `3bd2b0d`. It started at
+`2026-07-22T14:34:21.145132+00:00` with event `01KY53ZFJZCQWHS6FC60XRB4Y5`, a 900-second interval,
+300-second grace, and 86,400-second minimum. Its first wrapped run succeeded, projection backlog is
+zero, and the dedicated `/usr/bin/caffeinate -is` assertion is active. The authoritative status at
+`2026-07-22T14:39:30.007927+00:00` reported one start, one success, zero failures, zero running
+tasks, a 264.478-second maximum gap against the 1,200-second allowance, and no hard blocker. It
+remains `pending` solely because 24 hours have not elapsed. The earliest possible checkpoint is
+approximately `2026-07-23 07:34 PDT`; elapsed time and a fresh blocker-free status are mandatory.
+
 ## Gates still open
 
 The repository remains private, PR #1 remains draft, no public tag or GitHub Release exists, and
 `PUBLIC_RELEASE_APPROVED` remains unset. Public Alpha still requires:
 
-1. a clean private Release build of the current source, exact-artifact install/browser smoke, and
-   a passing 24-hour append-only `alpha-rc-3`; `alpha-rc-1` and `alpha-rc-2` remain failed;
+1. a passing 24-hour append-only `alpha-rc-4`; exact-source build, install, migration, and browser
+   smoke are complete, while `alpha-rc-1` through `alpha-rc-3` remain failed;
 2. professional confusing-similarity review;
 3. private merge plus green `main`, public-repository security controls, public-main release
    validation, exact annotated tag approval, prerelease asset/attestation inspection, and a final

@@ -1,6 +1,6 @@
 # OpsWitness Brand Clearance Gate
 
-Snapshot refreshed: 2026-07-20 America/Los_Angeles
+Snapshot refreshed: 2026-07-22 America/Los_Angeles
 
 Status: **source migration and identifier reservation complete; professional confusing-similarity
 review remains a public-release blocker.** The `opswitness` GitHub organization,
@@ -47,6 +47,8 @@ complete; all other items remain live gates until evidence says otherwise:
    checks on `main`;
 6. run the release workflow in validation mode against the private remote, where it builds and
    verifies the distributions without publication credentials — **complete**; evidence:
+   exact-source run
+   [29927606948](https://github.com/opswitness/opswitness/actions/runs/29927606948) and
    [ALPHA-RC-VALIDATION.md](ALPHA-RC-VALIDATION.md);
 7. make the repository public, or separately verify GitHub Enterprise Cloud attestation support,
    before creating the approved public tag;

@@ -1,5 +1,23 @@
 # OpsWitness Completion Audit
 
+Exact Actions RC update, 2026-07-22: private Release validation run
+[29927606948](https://github.com/opswitness/opswitness/actions/runs/29927606948) passed all
+preflight, Ubuntu/macOS quality, DCO, full-history gitleaks, and build jobs for clean commit
+`3bd2b0d005d86495b8121477d3425ac0bd264ec9`. Independent verification covered the wheel, sdist,
+checksums, build manifest, SPDX package identity, dual CLI aliases, isolated synthetic wrap, static
+console, bootstrap API, and browser surface. The exact Actions wheel is installed locally under a
+quiesced, encrypted, rollback-safe migration; legacy state was adopted in place, CAS hashes are
+unchanged, projection backlog is zero, all five official services are single-instance, and the
+real-host doctor verdict is green.
+
+The artifact's append-only canary is `alpha-rc-4`, event
+`01KY53ZFJZCQWHS6FC60XRB4Y5`, starting `2026-07-22T14:34:21.145132+00:00`. It currently has no
+hard blocker but remains pending on the full 24-hour duration. `alpha-rc-1`, `alpha-rc-2`,
+`alpha-rc-3`, and `m2-canary` are immutable failed evidence. This documentation-only update does
+not alter executable source or restart the canary. Public Alpha is not yet approved: a passing
+`alpha-rc-4`, professional brand review, private merge/public-main security sequence, exact tag,
+asset/attestation inspection, and final blank-install smoke remain open.
+
 Planning-history, Repeatable-work and Workspace-Memory update, 2026-07-22: Workspace now derives a
 read-only conversation list from immutable Plan revision chains, restores the latest intact version
 for review, and can save an explicitly confirmed objective template bound to the exact source Plan
@@ -14,15 +32,16 @@ rollback, and HTTP confirmation/CSRF boundaries; frontend tests cover the ordina
 and confirmed memory lifecycle APIs. [ADR-0008](adr/0008-repeatable-work-and-auditable-workspace-memory.md)
 is the design authority.
 
-This is post-freeze product code. No earlier RC artifact or canary validates it. Publication now
-requires a new clean artifact, isolated installation, browser acceptance, and a new append-only
-canary while preserving every prior passed, failed, and in-progress record exactly as written.
+This was post-freeze product code, so no earlier RC artifact or canary validated it. The exact
+clean artifact, isolated installation, browser acceptance, and rollback-safe migration now pass as
+recorded above; only `alpha-rc-4` may provide its continuous canary evidence.
 
-Local smoke acceptance on 2026-07-22 verified a wheel built from the working tree, retained an exact
+Earlier local smoke acceptance on 2026-07-22 verified a wheel built from the working tree, retained an exact
 uv-tool rollback copy, installed the package, restarted only the console, loaded the packaged
 repeatable-Work and Workspace-Memory assets at `127.0.0.1:8765`, and obtained a fully green
 real-host doctor verdict. Because the wheel was not produced from a clean release commit, this
-evidence validates local usability only and does not close the RC, canary, or publication gates.
+evidence validated local usability only; the later exact Actions artifact supersedes it for RC
+identity without rewriting the earlier record.
 
 Execution-profile source update, 2026-07-21: ready plans can now create immutable Fast, Balanced,
 or Deep child versions whose per-Agent model ids are selected only from the sanitized local catalog
@@ -51,10 +70,11 @@ failed its frozen cadence contract after a host sleep gap (`7,504.433s > 1,200s`
 immutable failure evidence. Its independent replacement `alpha-rc-2` also failed: the
 authoritative status recomputed at `2026-07-22T13:29:01.947352+00:00` reports 36 starts, 36
 successes, zero task failures, zero projection backlog, and a `14,820.799s > 1,200s` hard cadence
-gap. Its 24-hour minimum was also still pending. Publication now requires a clean build of the
-post-freeze source, exact-artifact install and browser smoke, and a fresh append-only
-`alpha-rc-3`, plus professional brand review and final public-main Release acceptance as recorded
-in READINESS. Mobile access is not advertised in Alpha and remains a separate Beta acceptance
+gap. Its 24-hour minimum was also still pending. The exact post-freeze build, artifact install, and
+browser smoke now pass. `alpha-rc-3` also failed its frozen cadence contract and remains preserved;
+`alpha-rc-4` is the fresh exact-artifact contract. Publication still requires its passing 24-hour
+verdict, professional brand review, and final public-main Release acceptance as recorded in
+READINESS. Mobile access is not advertised in Alpha and remains a separate Beta acceptance
 gate. The legacy `m2-canary` also permanently
 failed its frozen cadence contract (`50,171s > 25,920s`) and is never promoted to Alpha evidence.
 
@@ -69,12 +89,12 @@ snapshot.
 |---|---|---|
 | M0 trusted baseline | Process-tree supervisor, shared schedule classification, append-only lifecycle, full tests | Complete |
 | M1 install and recovery tooling | Doctor, secure service exec, encrypted backup/isolated restore, five secret-free launchd templates | Complete in source |
-| M2 permanent install and soak | Postgres/Paperclip/services run OpsWitness `0.1.0a1`; real doctor was green for the installed RC; `alpha-rc-1`, `alpha-rc-2`, and `m2-canary` are retained as failed contracts | In progress: clean post-freeze RC and fresh `alpha-rc-3`, then feed/SOX seven-day Stable soak |
+| M2 permanent install and soak | Exact Actions wheel from `3bd2b0d` is installed; Postgres/Paperclip/services run OpsWitness `0.1.0a1`; real doctor is green; failed `alpha-rc-1` through `alpha-rc-3` and `m2-canary` are retained | In progress: `alpha-rc-4` 24-hour verdict, then feed/SOX seven-day Stable soak |
 | M3 Claude gate | Two live defer/approval/resume/consume drills and 60-second recovery service | Complete for non-interactive `qd gated-claude` only |
 | M4 artifact/eval/signoff | Atomic CAS, ledger authority, live projection/reconciliation and restore evidence | Complete |
-| M5 Community Alpha | Private remote/PR CI, an earlier private Release validation, verified downloadable artifacts, blank install, production RC migration, and browser smoke exist; both Alpha canaries failed and current source is post-freeze | Release candidate: blocked by a clean exact-source RC, fresh passing 24-hour `alpha-rc-3`, professional review, and public-main release gates; mobile remains unpromoted Beta |
+| M5 Community Alpha | Private remote/PR CI, exact-source private Release validation, verified assets, blank install, production RC migration, and browser smoke pass; `alpha-rc-4` is collecting exact-artifact evidence | Release candidate: blocked by a passing 24-hour `alpha-rc-4`, professional review, and public-main release gates; mobile remains unpromoted Beta |
 | M6 paid practitioner Pilot | Offer, privacy contract, technical boundary and success criteria exist | Blocked by written paid commitment/deposit; product code intentionally absent |
-| Local total console | Default chat-first Workspace, immutable planning conversation history with exact restore and provenance-bound template creation, AI-expanded execution brief, derived repeatable Work preparation, candidate-first approved Workspace Memory, persisted planning stages and time range, provider connection facade, immutable Fast/Balanced/Deep model-profile revisions plus Custom per-Agent selection, versioned plan revision, independent hash-bound Work forks, evidence-preserving deletion, graphical hierarchy and bounded collaboration loops, evidence-backed Auto/manual approval modes with task-local decisions, resumable runtime operator questions, plan-bound AionUi team-task stage telemetry, ledger-folded immutable run history with exact-context continuation, hash-bound confirmation, atomic dispatch/recovery, fixed-error privacy boundary, single-instance lease, per-request private AionUi workspaces, responsive UI and packaged assets | Complete in source; the post-freeze build requires a fresh artifact, browser acceptance, and new canary |
+| Local total console | Default chat-first Workspace, immutable planning conversation history with exact restore and provenance-bound template creation, AI-expanded execution brief, derived repeatable Work preparation, candidate-first approved Workspace Memory, persisted planning stages and time range, provider connection facade, immutable Fast/Balanced/Deep model-profile revisions plus Custom per-Agent selection, versioned plan revision, independent hash-bound Work forks, evidence-preserving deletion, graphical hierarchy and bounded collaboration loops, evidence-backed Auto/manual approval modes with task-local decisions, resumable runtime operator questions, plan-bound AionUi team-task stage telemetry, ledger-folded immutable run history with exact-context continuation, hash-bound confirmation, atomic dispatch/recovery, fixed-error privacy boundary, single-instance lease, per-request private AionUi workspaces, responsive UI and packaged assets | Complete in the exact installed RC; continuous durability remains under `alpha-rc-4` |
 
 ## Source console change record
 
@@ -310,11 +330,9 @@ must not be reset or reused as `alpha-rc-1`.
 
 ## Safe remaining sequence
 
-1. Preserve failed `alpha-rc-1`, failed `alpha-rc-2`, and failed `m2-canary` unchanged. Freeze and
-   commit the current source, build a clean private Release artifact from that exact commit,
-   install and smoke-test the artifact, then start a distinct append-only `alpha-rc-3`. Keep the
-   Mac open, powered, and ventilated; do not checkpoint Alpha until every frozen 24-hour contract
-   check passes.
+1. Preserve failed `alpha-rc-1`, `alpha-rc-2`, `alpha-rc-3`, and `m2-canary` unchanged. Keep the
+   Mac open, powered, and ventilated while `alpha-rc-4` accumulates the exact Actions artifact's
+   evidence; do not checkpoint Alpha until every frozen 24-hour contract check passes.
 2. Complete professional confusing-similarity review. Keep private HTTPS, pairing, and PWA
    unadvertised until the separate physical iPhone Safari/Chrome Beta acceptance passes.
 3. Only after the blocking gates pass, merge privately, publish the repository, enable required checks and
