@@ -272,6 +272,8 @@ five legacy-label launchd services pass real-user-domain doctor. The independent
 host slept; it and the earlier failed `m2-canary` remain preserved as failure evidence.
 Feed-monitor and sox-monitor remain blocked until the later Stable gates in READINESS pass.
 Evidence: [ALPHA-RC-VALIDATION.md](docs/ALPHA-RC-VALIDATION.md).
+Mobile access is not part of the Alpha promise. Private HTTPS, device pairing, and PWA support
+remain unadvertised Beta capabilities until physical iPhone Safari/Chrome acceptance passes.
 M3's non-interactive Claude gate passed two
 live defer/board-approval/resume drills; its one-minute recovery service is installed and
 fail-closed. M4 content-addressed artifact/eval/signoff and live Paperclip work-product

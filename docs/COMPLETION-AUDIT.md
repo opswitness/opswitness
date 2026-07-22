@@ -16,10 +16,12 @@ build manifest, SPDX SBOM, and GitHub attestation. The GitHub organization, priv
 domain are reserved; Draft PR #1 is green on Linux, macOS, DCO, and gitleaks. Private Release
 validation and rollback-safe production migration now pass. The independent `alpha-rc-1` contract
 failed its frozen cadence contract after a host sleep gap (`7,504.433s > 1,200s`) and remains
-immutable failure evidence. Its independent replacement `alpha-rc-2` has one successful run, zero
-projection backlog, and only the unelapsed 24-hour minimum outstanding. Publication remains
-blocked on that duration gate, professional brand review, physical iPhone acceptance, and final
-public-main Release acceptance as recorded in READINESS. The legacy `m2-canary` also permanently
+immutable failure evidence. At the latest recorded check, its independent replacement
+`alpha-rc-2` has five successful runs, zero failures, zero projection backlog, and only the
+unelapsed 24-hour minimum outstanding. Publication remains blocked on that duration gate,
+professional brand review, and final public-main Release acceptance as recorded in READINESS.
+Mobile access is not advertised in Alpha and remains a separate Beta acceptance gate. The legacy
+`m2-canary` also permanently
 failed its frozen cadence contract (`50,171s > 25,920s`) and is never promoted to Alpha evidence.
 
 Operational snapshot: 2026-07-13 21:24 PDT. The source-only console updates below were recorded
@@ -36,7 +38,7 @@ snapshot.
 | M2 permanent install and soak | Postgres/Paperclip/services run OpsWitness `0.1.0a1`; real doctor is fully green; both failed contracts are retained; `alpha-rc-2` has started under a dedicated wake assertion | In progress: Alpha duration gate, then feed/SOX seven-day Stable soak |
 | M3 Claude gate | Two live defer/approval/resume/consume drills and 60-second recovery service | Complete for non-interactive `qd gated-claude` only |
 | M4 artifact/eval/signoff | Atomic CAS, ledger authority, live projection/reconciliation and restore evidence | Complete |
-| M5 Community Alpha | Private remote/PR CI, private Release validation, verified downloadable artifacts, blank install, production RC migration, browser smoke, and a running independent Alpha canary exist | Release candidate: blocked by 24-hour canary completion, professional review, physical iPhone acceptance and public-main release gates |
+| M5 Community Alpha | Private remote/PR CI, private Release validation, verified downloadable artifacts, blank install, production RC migration, browser smoke, and a running independent Alpha canary exist | Release candidate: blocked by 24-hour canary completion, professional review and public-main release gates; mobile remains unpromoted Beta |
 | M6 paid practitioner Pilot | Offer, privacy contract, technical boundary and success criteria exist | Blocked by written paid commitment/deposit; product code intentionally absent |
 | Local total console | Default chat-first Workspace, AI-expanded execution brief, persisted planning stages and time range, provider connection facade, versioned plan revision, independent hash-bound Work forks, evidence-preserving deletion, graphical hierarchy and bounded collaboration loops, evidence-backed Auto/manual approval modes with task-local decisions, resumable runtime operator questions, plan-bound AionUi team-task stage telemetry, ledger-folded immutable run history with exact-context continuation, hash-bound confirmation, atomic dispatch/recovery, fixed-error privacy boundary, single-instance lease, per-request private AionUi workspaces, responsive UI and packaged assets | Complete in source; stable install/KeepAlive service waits for canary maintenance window |
 
@@ -269,8 +271,9 @@ must not be reset or reused as `alpha-rc-1`.
    powered and ventilated while its dedicated wake assertion runs. Any failure must remain
    append-only; do not reset or relabel the failed `alpha-rc-1` or `m2-canary`, and do not
    checkpoint Alpha until every contract check passes.
-2. Complete professional confusing-similarity review and physical iPhone Safari/Chrome acceptance.
-3. Only after those gates pass, merge privately, publish the repository, enable required checks and
+2. Complete professional confusing-similarity review. Keep private HTTPS, pairing, and PWA
+   unadvertised until the separate physical iPhone Safari/Chrome Beta acceptance passes.
+3. Only after the blocking gates pass, merge privately, publish the repository, enable required checks and
    security controls, validate public main, approve one exact annotated tag, and inspect the
    resulting prerelease assets/attestation from a blank install.
 4. Adopt feed-monitor and sox-monitor only for the later seven-day Stable soak. Configure optional

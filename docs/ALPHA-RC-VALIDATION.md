@@ -1,6 +1,6 @@
 # OpsWitness Alpha RC Validation
 
-Snapshot: 2026-07-21 17:38 PDT
+Snapshot: 2026-07-21 18:46 PDT
 
 This record covers the private build validation, rollback-safe production migration, the failed
 independent `alpha-rc-1` canary, and its fail-closed replacement `alpha-rc-2` for
@@ -82,10 +82,11 @@ sparse wake windows. This is a host-availability failure and remains permanent r
 `alpha-rc-2` started independently at `2026-07-22T00:36:01.202548+00:00` with event
 `01KY3M0EHNH17A17KD7Y0MT78C` and the same exact 900-second schedule plus 300-second grace. A
 temporary `com.opswitness.alpha-canary-awake` launchd service runs `/usr/bin/caffeinate -is`;
-`pmset -g assertions` confirms both `PreventSystemSleep` and `PreventUserIdleSystemSleep`. Its
-first wrapped run succeeded, and the normal projector reduced the temporary two-event backlog to
-zero. The only current blocker is the unelapsed 24-hour minimum. Earliest duration-only eligibility
-is `2026-07-23T00:36:01.202548+00:00` (2026-07-22 17:36 PDT).
+`pmset -g assertions` confirms both `PreventSystemSleep` and `PreventUserIdleSystemSleep`. At
+`2026-07-22T01:40:35.982819+00:00`, the contract had five starts, five successes, zero failures,
+zero running tasks, zero projection backlog, and a 901.74-second maximum gap against the frozen
+1,200-second allowance. The only current blocker is the unelapsed 24-hour minimum. Earliest
+duration-only eligibility is `2026-07-23T00:36:01.202548+00:00` (2026-07-22 17:36 PDT).
 
 The wake assertion does not override lid closure, manual sleep, power loss, or macOS thermal
 protection. Any resulting gap still fails `alpha-rc-2`; no widened grace or evidence rewrite is
@@ -98,11 +99,13 @@ The repository remains private, PR #1 remains draft, no public tag or GitHub Rel
 
 1. a passing 24-hour `alpha-rc-2` status and append-only checkpoint; `alpha-rc-1` remains failed;
 2. professional confusing-similarity review;
-3. physical iPhone Safari and Chrome pairing/PWA/write/revoke acceptance, or removal of mobile
-   claims from Alpha;
-4. private merge plus green `main`, public-repository security controls, public-main release
+3. private merge plus green `main`, public-repository security controls, public-main release
    validation, exact annotated tag approval, prerelease asset/attestation inspection, and a final
    blank-install smoke test.
+
+The Alpha does not advertise mobile access. Private HTTPS, device pairing, and PWA support remain
+Beta capabilities, and physical iPhone Safari/Chrome acceptance is deferred to that Beta promotion
+gate rather than treated as an Alpha publication blocker.
 
 Stable `v0.1.0` remains separately blocked on the seven-day feed-monitor/sox-monitor soak and
 isolated restore drill.

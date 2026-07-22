@@ -37,15 +37,17 @@ The independent append-only `alpha-rc-1` canary failed after macOS sleep produce
 sleep followed by thermal-emergency sleep/dark-wake cycles; the explanation does not waive the
 hard contract. No checkpoint or reset exists. A distinct `alpha-rc-2` contract started at
 `2026-07-22T00:36:01.202548+00:00` with a dedicated `/usr/bin/caffeinate -is` launchd assertion.
-Its first wrapped run succeeded and normal projection drained to zero; only the unelapsed 24-hour
-minimum is currently outstanding. The former `m2-canary` also remains a permanent failed record:
+At `2026-07-22T01:40:35.982819+00:00`, it had five starts, five successes, zero failures, zero
+running tasks, zero projection backlog, and a 901.74-second maximum gap against the frozen
+1,200-second allowance; only the unelapsed 24-hour minimum is currently outstanding. The former
+`m2-canary` also remains a permanent failed record:
 its observed cadence gap reached 50,171 seconds against a frozen 25,920-second allowance. Neither
 failed contract may be deleted, rewritten, reset into a pass, or cited as successful Alpha
-evidence. Physical iPhone Safari/Chrome Beta acceptance and professional confusing-similarity
-review have not been recorded. Alpha publication therefore remains blocked on `alpha-rc-2`, those
-two external gates, private merge/public-main checks, and final prerelease asset/attestation
-inspection. Stable remains blocked on the seven-day soak and recovery/adoption gates recorded
-below. Detailed evidence:
+evidence. Professional confusing-similarity review has not been recorded. Alpha publication
+therefore remains blocked on `alpha-rc-2`, that external gate, private merge/public-main checks,
+and final prerelease asset/attestation inspection. Mobile access is not advertised in Alpha;
+private HTTPS, pairing, and PWA remain Beta until physical iPhone Safari/Chrome acceptance passes.
+Stable remains blocked on the seven-day soak and recovery/adoption gates recorded below. Detailed evidence:
 [ALPHA-RC-VALIDATION.md](ALPHA-RC-VALIDATION.md).
 
 The private remote is a validation stage, not a publication stage: its manual workflow builds and
@@ -411,7 +413,7 @@ blocked by the current open gates below.
   read-only summaries and the action queue can route active work, but the cards themselves are not
   yet navigation controls. This is a discoverability gap, not a separate data model or evidence gap.
 
-## Open gates (blocking, in order)
+## Open gates and deferred items (status explicit)
 
 1. **Private Release validation** — run `release.yml` manually on the Alpha branch, inspect its
    wheel, sdist, checksums, manifest, SPDX SBOM, commit, and clean-tree evidence, then install that
@@ -427,10 +429,10 @@ blocked by the current open gates below.
    historical evidence and are not reset or reused.
 4. **Professional brand review** — the exact organization, private repository, and domain are
    reserved, but a qualified confusing-similarity review for intended markets remains required.
-5. **Physical mobile acceptance** — desktop and responsive-browser acceptance do not substitute
-   for a real iPhone Safari and Chrome pairing/PWA/write/revoke test. If it fails, hide the mobile
-   entry and retain private HTTPS/PWA as Beta.
-6. **Public-main release sequence** — merge only after private gates pass, make the repository
+5. **Mobile Beta promotion (non-blocking for Alpha)** — Alpha does not advertise mobile access.
+   Private HTTPS, pairing, and PWA remain Beta until a real iPhone Safari and Chrome
+   pairing/PWA/write/revoke test passes.
+6. **Public-main release sequence** — merge only after the blocking private gates pass, make the repository
    public, immediately enable required checks/security settings, validate the exact main SHA,
    create an approved annotated Alpha tag, and verify the resulting prerelease assets and
    attestation from a blank install. `PUBLIC_RELEASE_APPROVED` must be absent at every earlier step.
@@ -569,7 +571,8 @@ own independent acceptance gates.
 ## Next task
 
 Let the separate `alpha-rc-2` canary complete its frozen 24-hour contract, then complete
-professional brand review and physical iPhone acceptance. Keep failed `alpha-rc-1`, failed
+professional brand review. Keep mobile access unadvertised until the separate physical iPhone
+Beta acceptance passes. Keep failed `alpha-rc-1`, failed
 `m2-canary`, and every legacy ledger/CAS object intact. Do not make the repository public, set
 `PUBLIC_RELEASE_APPROVED`, create a tag, adopt feed-monitor/sox-monitor, or build the practitioner
 UI before their independent gates pass.

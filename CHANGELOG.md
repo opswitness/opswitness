@@ -29,4 +29,5 @@ PEP 440 for Python package metadata.
 ### Not included
 
 - OpenClaw, Work-as-worker/team-of-teams, auditable long-term memory, DeepSeek/Grok execution
-  adapters, SaaS, multi-user identity, and PyPI publishing.
+  adapters, SaaS, multi-user identity, promoted mobile access, and PyPI publishing. Private HTTPS,
+  device pairing, and PWA support remain unadvertised Beta capabilities.
