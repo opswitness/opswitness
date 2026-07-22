@@ -83,7 +83,7 @@ def _asset_files(dist: Path) -> list[Path]:
     )
 
 
-def assert_spdx_sbom(path: Path, *, distribution: str) -> None:
+def assert_spdx_sbom(path: Path, *, distribution: str, version: str) -> None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -94,10 +94,12 @@ def assert_spdx_sbom(path: Path, *, distribution: str) -> None:
     if not isinstance(packages, list) or not any(
         isinstance(package, dict)
         and str(package.get("name") or "").casefold() == distribution.casefold()
+        and str(package.get("versionInfo") or "") == version
         for package in packages
     ):
         raise ValueError(
-            f"SPDX SBOM does not identify the {distribution} distribution: {path.name}"
+            "SPDX SBOM does not identify the "
+            f"{distribution} {version} distribution: {path.name}"
         )
 
 
@@ -125,7 +127,11 @@ def write_manifest(
         if not sboms:
             raise ValueError("release assets do not contain an SPDX SBOM")
         for sbom in sboms:
-            assert_spdx_sbom(sbom, distribution=distribution)
+            assert_spdx_sbom(
+                sbom,
+                distribution=distribution,
+                version=python_version,
+            )
 
     records = [
         {"name": path.name, "sha256": sha256(path), "size": path.stat().st_size}

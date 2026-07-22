@@ -127,10 +127,17 @@ jobs:
             exit 1
           fi
           echo "path=${wheels[0]}" >> "$GITHUB_OUTPUT"
+      - name: Extract the release wheel for SBOM generation
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel_root="${RUNNER_TEMP}/opswitness-release-wheel"
+          mkdir -p "$wheel_root"
+          python -m zipfile -e "${{ steps.release-wheel.outputs.path }}" "$wheel_root"
       - name: Generate SPDX SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
-          file: ${{ steps.release-wheel.outputs.path }}
+          path: ${{ runner.temp }}/opswitness-release-wheel
           format: spdx-json
           output-file: dist/sbom.spdx.json
           upload-artifact: false

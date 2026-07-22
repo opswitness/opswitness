@@ -225,11 +225,20 @@ def test_manifest_can_require_spdx_sbom(tmp_path):
         json.dumps(
             {
                 "spdxVersion": "SPDX-2.3",
-                "packages": [{"name": "dist", "SPDXID": "SPDXRef-dist"}],
+                "packages": [
+                    {
+                        "name": "dist",
+                        "versionInfo": "0.1.0a1",
+                        "SPDXID": "SPDXRef-dist",
+                    }
+                ],
             }
         )
     )
-    with pytest.raises(ValueError, match="does not identify the opswitness distribution"):
+    with pytest.raises(
+        ValueError,
+        match="does not identify the opswitness 0.1.0a1 distribution",
+    ):
         _MANIFEST.write_manifest(
             root=root,
             dist=dist,
@@ -241,7 +250,38 @@ def test_manifest_can_require_spdx_sbom(tmp_path):
         json.dumps(
             {
                 "spdxVersion": "SPDX-2.3",
-                "packages": [{"name": "opswitness", "SPDXID": "SPDXRef-opswitness"}],
+                "packages": [
+                    {
+                        "name": "opswitness",
+                        "versionInfo": "0.1.0a0",
+                        "SPDXID": "SPDXRef-opswitness",
+                    }
+                ],
+            }
+        )
+    )
+    with pytest.raises(
+        ValueError,
+        match="does not identify the opswitness 0.1.0a1 distribution",
+    ):
+        _MANIFEST.write_manifest(
+            root=root,
+            dist=dist,
+            tag="v0.1.0-alpha.1",
+            require_sbom=True,
+        )
+
+    (dist / "sbom.spdx.json").write_text(
+        json.dumps(
+            {
+                "spdxVersion": "SPDX-2.3",
+                "packages": [
+                    {
+                        "name": "opswitness",
+                        "versionInfo": "0.1.0a1",
+                        "SPDXID": "SPDXRef-opswitness",
+                    }
+                ],
             }
         )
     )
@@ -303,6 +343,20 @@ def test_release_tag_gate_precedes_build_and_attestation():
     assert not any(
         step.get("uses", "").startswith("actions/attest@") for step in build["steps"]
     )
+    extract_wheel = next(
+        step
+        for step in build["steps"]
+        if step.get("name") == "Extract the release wheel for SBOM generation"
+    )
+    assert "python -m zipfile -e" in extract_wheel["run"]
+    generate_sbom = next(
+        step
+        for step in build["steps"]
+        if step.get("name") == "Generate SPDX SBOM"
+    )
+    assert "file" not in generate_sbom["with"]
+    assert generate_sbom["with"]["path"].endswith("/opswitness-release-wheel")
+    assert generate_sbom["with"]["upload-artifact"] == "false"
     assert "refs/tags/" in publish["if"]
     assert "PUBLIC_RELEASE_APPROVED" in publish["if"]
     assert publish["needs"] == "build"
