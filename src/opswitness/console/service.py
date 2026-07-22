@@ -46,6 +46,8 @@ from opswitness.console.schemas import (
     DeletePlanRequest,
     ExecutionApprovalModeRequest,
     ExecutionControlRequest,
+    ExecutionProfile,
+    ExecutionProfileRevisionRequest,
     ExecutionProgress,
     ExecutionState,
     ForkPlanRequest,
@@ -62,6 +64,8 @@ from opswitness.console.schemas import (
     PlanningProgress,
     ProviderConnectionRequest,
     ProviderConnectionJob,
+    ProcessMemoryProposalRequest,
+    RepeatableWork,
     RerunPlanRequest,
     RevisePlanRequest,
     RuntimeInputAnswerRequest,
@@ -72,6 +76,7 @@ from opswitness.console.schemas import (
     TaskPlan,
     TaskTemplate,
     TaskTemplateArchiveRequest,
+    TaskTemplateFromPlanRequest,
     TaskTemplateSaveRequest,
     TelegramConfigureRequest,
     TeamBlueprint,
@@ -79,6 +84,12 @@ from opswitness.console.schemas import (
     TeamBlueprintArchiveRequest,
     TeamBlueprintLoop,
     TeamBlueprintSaveRequest,
+    WorkspaceMemoryCandidateRequest,
+    WorkspaceMemoryDecisionRequest,
+    WorkspaceMemoryRollbackRequest,
+    WorkspaceMemoryVersion,
+    WorkspaceMemoryView,
+    WorkspaceConversation,
     utc_now,
 )
 from opswitness.console.providers import (
@@ -94,6 +105,8 @@ from opswitness.console.store import (
     PlanStore,
     TaskTemplateStore,
     TeamBlueprintStore,
+    WorkspaceMemoryNotFound,
+    WorkspaceMemoryStore,
 )
 from opswitness.digest import build_digest
 from opswitness.ids import new_ulid
@@ -156,6 +169,7 @@ _RUNTIME_ARTIFACT_REFERENCE = re.compile(
     r"(?<![A-Za-z0-9_./-])artifacts/([A-Za-z0-9][A-Za-z0-9._-]{0,127})"
 )
 _RUNTIME_ARTIFACT_PREVIEW_LIMIT = 1024 * 1024
+_RUNTIME_ARTIFACT_CONTENT_LIMIT = 25 * 1024 * 1024
 _CONSOLE_ARTIFACT_LIMIT = 100
 _CONTINUATION_BASELINE = ".artifact-baseline.json"
 TELEGRAM_TEST_FAILED = "Telegram test delivery failed; inspect local diagnostics."
@@ -219,6 +233,7 @@ AUTOMATIC_SAFE_AION_TOOLS = frozenset(
 )
 DELETABLE_PLAN_STATUSES = frozenset({"ready", "failed", "cancelled", "completed_unverified"})
 RERUNNABLE_PLAN_STATUSES = frozenset({"failed", "cancelled", "completed_unverified"})
+REVISION_SOURCE_STATUSES = frozenset({"ready", *RERUNNABLE_PLAN_STATUSES})
 RERUN_REVISION_INSTRUCTION = "rerun_same_reviewed_plan"
 CONTINUATION_REVISION_PREFIX = "continue_same_aion_run:"
 FORKABLE_PLAN_STATUSES = frozenset(
@@ -386,6 +401,9 @@ def _canonical_sha256(value: Any) -> str:
 def _hashable_plan_payload(plan: TaskPlan) -> dict[str, Any]:
     """Keep legacy hashes stable while binding explicit hierarchy and collaboration loops."""
     payload = plan.model_dump(mode="json")
+    if payload.get("execution_profile") is None:
+        # Plans created before execution profiles must keep their original hash.
+        payload.pop("execution_profile", None)
     for agent in payload["agents"]:
         if agent.get("model") is None:
             # Old plan files had no model field. Keep their hashes stable.
@@ -398,6 +416,93 @@ def _hashable_plan_payload(plan: TaskPlan) -> dict[str, Any]:
     if not payload.get("collaboration_loops"):
         payload.pop("collaboration_loops", None)
     return payload
+
+
+_PROFILE_QUALITY_ROLES = frozenset({"lead", "researcher", "operator", "specialist"})
+
+
+def _profile_model_preferences(
+    runtime: str,
+    role: str,
+    profile: ExecutionProfile,
+) -> tuple[str, ...]:
+    quality_role = role in _PROFILE_QUALITY_ROLES
+    if runtime == "claude_code":
+        if profile == ExecutionProfile.FAST:
+            return ("haiku", "sonnet")
+        if profile == ExecutionProfile.BALANCED:
+            return ("sonnet", "haiku") if quality_role else ("haiku", "sonnet")
+        if profile == ExecutionProfile.DEEP:
+            return ("opus", "fable", "sonnet") if quality_role else ("sonnet", "opus")
+    if runtime == "codex_cli":
+        if profile == ExecutionProfile.FAST:
+            return ("mini", "spark", "codex")
+        if profile == ExecutionProfile.BALANCED:
+            return ("codex", "mini")
+        if profile == ExecutionProfile.DEEP:
+            return ("max", "pro", "codex")
+    return ()
+
+
+def _profiled_plan(
+    plan: TaskPlan,
+    profile: ExecutionProfile,
+    capabilities: list[dict[str, Any]],
+) -> TaskPlan:
+    """Resolve a profile to exact advertised choices without runtime fallback."""
+    if profile == ExecutionProfile.CUSTOM:
+        return plan.model_copy(update={"execution_profile": profile}, deep=True)
+    available = {
+        str(entry.get("runtime")): entry
+        for entry in capabilities
+        if entry.get("available") is True
+    }
+    payload = plan.model_dump(mode="json")
+    payload["execution_profile"] = str(profile)
+    profile_reasons = {
+        ExecutionProfile.FAST: "快速档：优先低延迟模型；所选模型已按本机能力表写入方案。",
+        ExecutionProfile.BALANCED: "平衡档：按角色兼顾质量与速度；所选模型已按本机能力表写入方案。",
+        ExecutionProfile.DEEP: "深度档：优先高质量模型；所选模型已按本机能力表写入方案。",
+    }
+    for agent in payload["agents"]:
+        runtime = str(agent["runtime"])
+        capability = available.get(runtime)
+        if capability is None:
+            raise ConsoleConflict(
+                "execution profile cannot be applied because an agent runtime is unavailable"
+            )
+        raw_models = capability.get("models")
+        options = raw_models if isinstance(raw_models, list) else []
+        model_ids = [
+            str(option.get("id"))
+            for option in options
+            if isinstance(option, dict) and isinstance(option.get("id"), str)
+        ]
+        if "default" not in model_ids:
+            model_ids.insert(0, "default")
+        selected: str | None = None
+        for preference in _profile_model_preferences(
+            runtime,
+            str(agent["role"]),
+            profile,
+        ):
+            selected = next(
+                (model_id for model_id in model_ids if preference in model_id.casefold()),
+                None,
+            )
+            if selected is not None:
+                break
+        current = agent.get("model")
+        if selected is None and isinstance(current, str) and current in model_ids:
+            selected = current
+        pinned = [model_id for model_id in model_ids if model_id != "default"]
+        if selected is None and len(pinned) == 1:
+            selected = pinned[0]
+        if selected is None:
+            selected = "default"
+        agent["model"] = selected
+        agent["runtime_reason"] = profile_reasons[profile]
+    return TaskPlan.model_validate(payload)
 
 
 def _model_id(value: object) -> str | None:
@@ -748,6 +853,13 @@ def _execution_plan_sha(record: PlanRecord, plan: TaskPlan | None = None) -> str
             "blueprint_id": record.source_blueprint_id,
             "blueprint_sha256": record.source_blueprint_sha256,
         }
+    if record.memory_snapshot_sha256 is not None or record.memory_version_ids:
+        if record.memory_snapshot_sha256 is None or not record.memory_version_ids:
+            raise ConsoleConflict("workspace memory provenance is incomplete")
+        envelope["workspace_memory"] = {
+            "snapshot_sha256": record.memory_snapshot_sha256,
+            "version_ids": record.memory_version_ids,
+        }
     return _canonical_sha256(envelope)
 
 
@@ -784,14 +896,168 @@ def _blueprint_sha256(
     )
 
 
-def _task_template_sha256(*, name: str, objective: str) -> str:
-    return _canonical_sha256(
-        {
-            "schema_version": 1,
-            "name": name,
-            "objective": objective,
-        }
-    )
+def _task_template_sha256(
+    *,
+    name: str,
+    objective: str,
+    source_plan_id: str | None = None,
+    source_plan_sha256: str | None = None,
+) -> str:
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "name": name,
+        "objective": objective,
+    }
+    if source_plan_id is not None or source_plan_sha256 is not None:
+        if source_plan_id is None or source_plan_sha256 is None:
+            raise ValueError("task template source provenance is incomplete")
+        payload["source_plan_id"] = source_plan_id
+        payload["source_plan_sha256"] = source_plan_sha256
+    return _canonical_sha256(payload)
+
+
+def _memory_states(
+    events: list[dict[str, Any]],
+) -> tuple[dict[str, tuple[str, str | None]], dict[str, str]]:
+    """Fold append-only memory decisions into version state and active version per memory."""
+    states: dict[str, tuple[str, str | None]] = {}
+    active: dict[str, str] = {}
+    for event in events:
+        payload = event.get("payload", {})
+        if not isinstance(payload, dict):
+            continue
+        kind = event.get("kind")
+        version_id = payload.get("version_id")
+        memory_id = payload.get("memory_id")
+        if not isinstance(version_id, str) or not isinstance(memory_id, str):
+            continue
+        decided_at = event.get("ts") if isinstance(event.get("ts"), str) else None
+        if kind == "workspace_memory_candidate_created":
+            states.setdefault(version_id, ("candidate", None))
+        elif kind == "workspace_memory_approved":
+            previous = active.get(memory_id)
+            if previous and previous != version_id:
+                states[previous] = ("superseded", decided_at)
+            states[version_id] = ("approved", decided_at)
+            active[memory_id] = version_id
+        elif kind == "workspace_memory_superseded":
+            states[version_id] = ("superseded", decided_at)
+            if active.get(memory_id) == version_id:
+                active.pop(memory_id, None)
+        elif kind == "workspace_memory_revoked":
+            states[version_id] = ("revoked", decided_at)
+            if active.get(memory_id) == version_id:
+                active.pop(memory_id, None)
+        elif kind == "workspace_memory_rollback":
+            previous = active.get(memory_id)
+            if previous and previous != version_id:
+                states[previous] = ("superseded", decided_at)
+            states[version_id] = ("approved", decided_at)
+            active[memory_id] = version_id
+    return states, active
+
+
+def _repeatable_works(records: list[PlanRecord]) -> list[RepeatableWork]:
+    """Project latest ended revisions into full reusable Work Blueprints."""
+    by_id = {record.plan_id: record for record in records}
+    parents = {record.parent_plan_id for record in records if record.parent_plan_id}
+    latest = [record for record in records if record.plan_id not in parents]
+
+    def root_id(record: PlanRecord) -> str:
+        seen: set[str] = set()
+        current = record
+        while current.parent_plan_id and current.parent_plan_id not in seen:
+            seen.add(current.plan_id)
+            parent = by_id.get(current.parent_plan_id)
+            if parent is None:
+                break
+            current = parent
+        return current.plan_id
+
+    rows: list[RepeatableWork] = []
+    for record in latest:
+        if (
+            record.status not in RERUNNABLE_PLAN_STATUSES
+            or record.plan is None
+            or record.plan_sha256 is None
+            or record.plan_sha256 != _execution_plan_sha(record)
+        ):
+            continue
+        rows.append(
+            RepeatableWork(
+                work_id=root_id(record),
+                source_plan_id=record.plan_id,
+                source_plan_sha256=record.plan_sha256,
+                title=record.plan.title,
+                objective=record.objective,
+                revision_number=record.revision_number,
+                agent_count=len(record.plan.agents),
+                cadence=record.plan.cadence.kind,
+                last_status=cast(
+                    Literal["failed", "cancelled", "completed_unverified"],
+                    record.status,
+                ),
+                updated_at=record.updated_at,
+                outcome_verified=bool(record.execution and record.execution.outcome_verified),
+            )
+        )
+    rows.sort(key=lambda row: row.updated_at, reverse=True)
+    return rows
+
+
+def _workspace_conversations(records: list[PlanRecord]) -> list[WorkspaceConversation]:
+    """Project immutable plan chains into selectable Workspace conversations."""
+    by_id = {record.plan_id: record for record in records}
+
+    def root(record: PlanRecord) -> PlanRecord:
+        seen: set[str] = set()
+        current = record
+        while current.parent_plan_id and current.parent_plan_id not in seen:
+            seen.add(current.plan_id)
+            parent = by_id.get(current.parent_plan_id)
+            if parent is None:
+                break
+            current = parent
+        return current
+
+    grouped: dict[str, list[PlanRecord]] = {}
+    roots: dict[str, PlanRecord] = {}
+    for record in records:
+        root_record = root(record)
+        roots[root_record.plan_id] = root_record
+        grouped.setdefault(root_record.plan_id, []).append(record)
+
+    rows: list[WorkspaceConversation] = []
+    for conversation_id, versions in grouped.items():
+        current = max(
+            versions,
+            key=lambda item: (item.updated_at, item.revision_number, item.created_at, item.plan_id),
+        )
+        source_available = False
+        if current.plan is not None and current.plan_sha256 is not None:
+            try:
+                source_available = current.plan_sha256 == _execution_plan_sha(current)
+            except ConsoleConflict:
+                source_available = False
+        title = (current.plan.title if current.plan is not None else current.objective).strip()
+        if not title:
+            title = "Untitled conversation"
+        rows.append(
+            WorkspaceConversation(
+                conversation_id=conversation_id,
+                current_plan_id=current.plan_id,
+                current_plan_sha256=current.plan_sha256,
+                title=title[:120],
+                objective=current.objective,
+                status=current.status,
+                version_count=len(versions),
+                created_at=roots[conversation_id].created_at,
+                updated_at=current.updated_at,
+                template_source_available=source_available,
+            )
+        )
+    rows.sort(key=lambda row: (row.updated_at, row.current_plan_id), reverse=True)
+    return rows
 
 
 def _member_observations(record: PlanRecord) -> list[AgentObservation]:
@@ -837,13 +1103,26 @@ def _home_summary(
                 if record.execution is not None
                 else []
             )
-            question = pending[0].question if pending else "任务需要你补充信息后才能继续。"
+            question = _model_text(
+                pending[0].question if pending else None,
+                fallback="任务需要你补充信息后才能继续。",
+                limit=320,
+            )
+            task_title = _model_text(
+                record.plan.title if record.plan else record.objective,
+                fallback="未命名任务",
+                limit=150,
+            )
             actions.append(
                 HomeAction(
                     action_id=f"input:{record.plan_id}",
                     kind="input_required",
                     priority=1,
-                    title=f"需要你的信息：{record.plan.title if record.plan else record.objective}",
+                    title=_model_text(
+                        f"需要你的信息：{task_title}",
+                        fallback="需要你的信息",
+                        limit=160,
+                    ),
                     summary=question,
                     target="tasks",
                     plan_id=record.plan_id,
@@ -851,12 +1130,21 @@ def _home_summary(
             )
     for record in plans:
         if record.status == "awaiting_approval":
+            task_title = _model_text(
+                record.plan.title if record.plan else record.objective,
+                fallback="未命名任务",
+                limit=145,
+            )
             actions.append(
                 HomeAction(
                     action_id=f"approval-task:{record.plan_id}",
                     kind="approval",
                     priority=1,
-                    title=f"任务正在等待审批：{record.plan.title if record.plan else record.objective}",
+                    title=_model_text(
+                        f"任务正在等待审批：{task_title}",
+                        fallback="任务正在等待审批",
+                        limit=160,
+                    ),
                     summary="先查看审批请求，再决定是否继续。",
                     target="tasks",
                     plan_id=record.plan_id,
@@ -869,13 +1157,26 @@ def _home_summary(
             elif record.status == "cancel_requested":
                 action_summary = "终止请求已发送，但运行时尚未确认任务已经停止。"
             else:
-                action_summary = record.error or "任务未能完成，请查看任务记录。"
+                action_summary = _model_text(
+                    record.error,
+                    fallback="任务未能完成，请查看任务记录。",
+                    limit=320,
+                )
+            task_title = _model_text(
+                record.plan.title if record.plan else record.objective,
+                fallback="未命名任务",
+                limit=150,
+            )
             actions.append(
                 HomeAction(
                     action_id=f"blocked:{record.plan_id}",
                     kind="task_blocked",
                     priority=2,
-                    title=f"需要处理：{record.plan.title if record.plan else record.objective}",
+                    title=_model_text(
+                        f"需要处理：{task_title}",
+                        fallback="任务需要处理",
+                        limit=160,
+                    ),
                     summary=action_summary,
                     target="tasks",
                     plan_id=record.plan_id,
@@ -916,12 +1217,21 @@ def _home_summary(
             "pause_requested",
             "resuming",
         }:
+            task_title = _model_text(
+                record.plan.title if record.plan else record.objective,
+                fallback="未命名任务",
+                limit=150,
+            )
             actions.append(
                 HomeAction(
                     action_id=f"running:{record.plan_id}",
                     kind="running",
                     priority=4,
-                    title=f"正在推进：{record.plan.title if record.plan else record.objective}",
+                    title=_model_text(
+                        f"正在推进：{task_title}",
+                        fallback="任务正在推进",
+                        limit=160,
+                    ),
                     summary="可查看团队成员的已观测状态与任务证据。",
                     target="team",
                     plan_id=record.plan_id,
@@ -986,6 +1296,7 @@ class ConsoleService:
         self.store = PlanStore(self.settings.console.state_dir)
         self.blueprints = TeamBlueprintStore(self.settings.console.state_dir)
         self.task_templates = TaskTemplateStore(self.settings.console.state_dir)
+        self.workspace_memory = WorkspaceMemoryStore(self.settings.console.state_dir)
         self.aion = aion or AionUiClient(self.settings.console)
         self._owns_aion_runtime = aion is None
         self._owns_paperclip_runtime = paperclip_factory is None
@@ -2273,6 +2584,9 @@ class ConsoleService:
     def request_plan(self, request: PlanRequest) -> PlanRecord:
         workspace = self._normalise_requested_workspace(request.workspace)
         request = request.model_copy(update={"workspace": workspace})
+        _, memory_version_ids, memory_snapshot_sha256 = (
+            self._approved_workspace_memory_snapshot(workspace)
+        )
         blueprint: TeamBlueprint | None = None
         if request.blueprint_id is not None:
             try:
@@ -2294,6 +2608,8 @@ class ConsoleService:
                 "has_workspace": bool(request.workspace),
                 "source_blueprint_id": blueprint.blueprint_id if blueprint else None,
                 "source_blueprint_sha256": blueprint.blueprint_sha256 if blueprint else None,
+                "memory_snapshot_sha256": memory_snapshot_sha256,
+                "memory_version_count": len(memory_version_ids),
             },
         )
         started_at = utc_now()
@@ -2308,6 +2624,8 @@ class ConsoleService:
             preferred_cadence=request.preferred_cadence,
             source_blueprint_id=blueprint.blueprint_id if blueprint else None,
             source_blueprint_sha256=blueprint.blueprint_sha256 if blueprint else None,
+            memory_snapshot_sha256=memory_snapshot_sha256,
+            memory_version_ids=memory_version_ids,
             created_at=started_at,
             updated_at=started_at,
             planning_progress=PlanningProgress(
@@ -2332,10 +2650,17 @@ class ConsoleService:
             if parent_plan_id in deleted:
                 raise PlanNotFound(f"unknown plan: {parent_plan_id}")
             parent = self.store.get(parent_plan_id)
-            if parent.status != "ready" or parent.plan is None or not parent.plan_sha256:
-                raise ConsoleConflict("only a ready plan can be revised")
+            if (
+                parent.status not in REVISION_SOURCE_STATUSES
+                or parent.plan is None
+                or not parent.plan_sha256
+            ):
+                raise ConsoleConflict("only a reviewable or ended plan can be revised")
             if parent.plan_sha256 != _execution_plan_sha(parent):
                 raise ConsoleConflict("parent plan integrity failed; create a new plan")
+            _, memory_version_ids, memory_snapshot_sha256 = (
+                self._approved_workspace_memory_snapshot(parent.workspace)
+            )
             children = [
                 child for child in self.store.list_all() if child.parent_plan_id == parent_plan_id
             ]
@@ -2367,6 +2692,8 @@ class ConsoleService:
                     "parent_plan_sha256": parent.plan_sha256,
                     "revision_number": revision_number,
                     "revision_instruction_sha256": instruction_sha,
+                    "memory_snapshot_sha256": memory_snapshot_sha256,
+                    "memory_version_count": len(memory_version_ids),
                 },
             )
             started_at = utc_now()
@@ -2381,6 +2708,8 @@ class ConsoleService:
                 preferred_cadence=parent.preferred_cadence,
                 source_blueprint_id=parent.source_blueprint_id,
                 source_blueprint_sha256=parent.source_blueprint_sha256,
+                memory_snapshot_sha256=memory_snapshot_sha256,
+                memory_version_ids=memory_version_ids,
                 parent_plan_id=parent.plan_id,
                 parent_plan_sha256=parent.plan_sha256,
                 revision_number=revision_number,
@@ -2405,7 +2734,6 @@ class ConsoleService:
         source_plan_id: str,
         request: RerunPlanRequest,
     ) -> PlanRecord:
-        del request
         with self._plan_transition_lock:
             deleted = _deleted_plan_events(self.ledger.read_all())
             if source_plan_id in deleted:
@@ -2420,13 +2748,18 @@ class ConsoleService:
             if source.plan_sha256 != _execution_plan_sha(source):
                 raise ConsoleConflict("source plan integrity failed; create a new plan")
 
+            requested_profile = ExecutionProfile(request.execution_profile)
+            rerun_instruction = f"{RERUN_REVISION_INSTRUCTION}:{requested_profile}"
             children = [
                 child for child in self.store.list_all() if child.parent_plan_id == source_plan_id
             ]
             for child in children:
                 if child.plan_id in deleted:
                     continue
-                if child.revision_instruction == RERUN_REVISION_INSTRUCTION:
+                if child.revision_instruction == rerun_instruction or (
+                    requested_profile == ExecutionProfile.FAST
+                    and child.revision_instruction == RERUN_REVISION_INSTRUCTION
+                ):
                     return child
                 raise ConsoleConflict("this work has a newer version")
 
@@ -2437,7 +2770,13 @@ class ConsoleService:
                 raise ConsoleConflict("plan revision limit reached; create a new plan")
             created_at = utc_now()
             approval_mode = ApprovalMode.AUTOMATIC
-            instruction_sha = hashlib.sha256(RERUN_REVISION_INSTRUCTION.encode()).hexdigest()
+            instruction_sha = hashlib.sha256(rerun_instruction.encode()).hexdigest()
+            rerun_plan = _profiled_plan(
+                source.plan,
+                requested_profile,
+                self.runtime_capabilities(),
+            )
+            self._validate_runtime_assignments(rerun_plan)
             record = PlanRecord(
                 plan_id=new_ulid(),
                 status="ready",
@@ -2448,13 +2787,15 @@ class ConsoleService:
                 preferred_cadence=source.preferred_cadence,
                 source_blueprint_id=source.source_blueprint_id,
                 source_blueprint_sha256=source.source_blueprint_sha256,
+                memory_snapshot_sha256=source.memory_snapshot_sha256,
+                memory_version_ids=list(source.memory_version_ids),
                 created_at=created_at,
                 updated_at=created_at,
-                plan=source.plan.model_copy(deep=True),
+                plan=rerun_plan,
                 parent_plan_id=source.plan_id,
                 parent_plan_sha256=source.plan_sha256,
                 revision_number=revision_number,
-                revision_instruction=RERUN_REVISION_INSTRUCTION,
+                revision_instruction=rerun_instruction,
                 revision_instruction_sha256=instruction_sha,
             )
             record.plan_sha256 = _execution_plan_sha(record)
@@ -2468,6 +2809,7 @@ class ConsoleService:
                     "revision_number": revision_number,
                     "plan_sha256": record.plan_sha256,
                     "approval_mode": str(approval_mode),
+                    "execution_profile": str(requested_profile),
                 },
             )
             self.store.create(record)
@@ -2588,6 +2930,8 @@ class ConsoleService:
                 preferred_cadence=source.preferred_cadence,
                 source_blueprint_id=source.source_blueprint_id,
                 source_blueprint_sha256=source.source_blueprint_sha256,
+                memory_snapshot_sha256=source.memory_snapshot_sha256,
+                memory_version_ids=list(source.memory_version_ids),
                 created_at=created_at,
                 updated_at=created_at,
                 confirmed_at=created_at,
@@ -2818,6 +3162,8 @@ class ConsoleService:
                 preferred_cadence=source.preferred_cadence,
                 source_blueprint_id=source.source_blueprint_id,
                 source_blueprint_sha256=source.source_blueprint_sha256,
+                memory_snapshot_sha256=source.memory_snapshot_sha256,
+                memory_version_ids=list(source.memory_version_ids),
                 created_at=created_at,
                 updated_at=created_at,
                 plan=source.plan.model_copy(deep=True),
@@ -2920,6 +3266,8 @@ class ConsoleService:
                 preferred_cadence=parent.preferred_cadence,
                 source_blueprint_id=parent.source_blueprint_id,
                 source_blueprint_sha256=parent.source_blueprint_sha256,
+                memory_snapshot_sha256=parent.memory_snapshot_sha256,
+                memory_version_ids=list(parent.memory_version_ids),
                 parent_plan_id=parent.plan_id,
                 parent_plan_sha256=parent.plan_sha256,
                 revision_number=revision_number,
@@ -2995,7 +3343,15 @@ class ConsoleService:
                 raise ConsoleConflict(
                     "runtime assignments must include every planned agent exactly once"
                 )
+            assignments_changed = any(
+                str(assignments[agent.name].runtime) != str(agent.runtime)
+                or assignments[agent.name].model != (agent.model or "default")
+                for agent in parent.plan.agents
+            )
+            if not assignments_changed:
+                raise ConsoleConflict("runtime assignments are unchanged")
             plan_payload = parent.plan.model_dump(mode="json")
+            plan_payload["execution_profile"] = str(request.execution_profile)
             for agent in plan_payload["agents"]:
                 assignment = assignments[str(agent["name"])]
                 agent["runtime"] = str(assignment.runtime)
@@ -3003,8 +3359,6 @@ class ConsoleService:
                 agent["runtime_reason"] = "由操作员在确认前选择运行时与模型；本机可用性已验证。"
             revised_plan = TaskPlan.model_validate(plan_payload)
             self._validate_runtime_assignments(revised_plan)
-            if revised_plan == parent.plan:
-                raise ConsoleConflict("runtime assignments are unchanged")
             revision_number = (
                 max([parent.revision_number, *(child.revision_number for child in children)]) + 1
             )
@@ -3024,6 +3378,8 @@ class ConsoleService:
                 preferred_cadence=parent.preferred_cadence,
                 source_blueprint_id=parent.source_blueprint_id,
                 source_blueprint_sha256=parent.source_blueprint_sha256,
+                memory_snapshot_sha256=parent.memory_snapshot_sha256,
+                memory_version_ids=list(parent.memory_version_ids),
                 parent_plan_id=parent.plan_id,
                 parent_plan_sha256=parent.plan_sha256,
                 revision_number=revision_number,
@@ -3061,38 +3417,178 @@ class ConsoleService:
             self.store.create(record)
             return record
 
+    def revise_plan_execution_profile(
+        self,
+        parent_plan_id: str,
+        request: ExecutionProfileRevisionRequest,
+    ) -> PlanRecord:
+        """Resolve a reviewed preset into exact models in a new immutable child plan."""
+        with self._plan_transition_lock:
+            deleted = _deleted_plan_events(self.ledger.read_all())
+            if parent_plan_id in deleted:
+                raise PlanNotFound(f"unknown plan: {parent_plan_id}")
+            parent = self.store.get(parent_plan_id)
+            if parent.status != "ready" or parent.plan is None or not parent.plan_sha256:
+                raise ConsoleConflict("only a ready plan execution profile can be changed")
+            if parent.plan_sha256 != _execution_plan_sha(parent):
+                raise ConsoleConflict("parent plan integrity failed; create a new plan")
+            children = [
+                child for child in self.store.list_all() if child.parent_plan_id == parent_plan_id
+            ]
+            if any(
+                child.plan_id not in deleted
+                and child.status
+                in {
+                    "planning",
+                    "ready",
+                    "confirmed",
+                    "dispatching",
+                    "running",
+                    "awaiting_approval",
+                    "awaiting_input",
+                    "completed_unverified",
+                }
+                for child in children
+            ):
+                raise ConsoleConflict("this plan has a newer revision")
+            profile = ExecutionProfile(request.execution_profile)
+            revised_plan = _profiled_plan(
+                parent.plan,
+                profile,
+                self.runtime_capabilities(),
+            )
+            self._validate_runtime_assignments(revised_plan)
+            if revised_plan == parent.plan:
+                raise ConsoleConflict("execution profile is unchanged")
+            revision_number = (
+                max([parent.revision_number, *(child.revision_number for child in children)]) + 1
+            )
+            if revision_number > 100:
+                raise ConsoleConflict("plan revision limit reached; create a new plan")
+            plan_id = new_ulid()
+            instruction = f"调整执行档位：{profile}"
+            instruction_sha = hashlib.sha256(instruction.encode()).hexdigest()
+            timestamp = utc_now()
+            record = PlanRecord(
+                plan_id=plan_id,
+                status="ready",
+                approval_mode=parent.approval_mode or ApprovalMode.AUTOMATIC,
+                objective=parent.objective,
+                constraints=parent.constraints,
+                workspace=parent.workspace,
+                preferred_cadence=parent.preferred_cadence,
+                source_blueprint_id=parent.source_blueprint_id,
+                source_blueprint_sha256=parent.source_blueprint_sha256,
+                memory_snapshot_sha256=parent.memory_snapshot_sha256,
+                memory_version_ids=list(parent.memory_version_ids),
+                parent_plan_id=parent.plan_id,
+                parent_plan_sha256=parent.plan_sha256,
+                revision_number=revision_number,
+                revision_instruction=instruction,
+                revision_instruction_sha256=instruction_sha,
+                created_at=timestamp,
+                updated_at=timestamp,
+                plan=revised_plan,
+            )
+            record.plan_sha256 = _execution_plan_sha(record)
+            assignments_sha = _canonical_sha256(
+                [
+                    {
+                        "agent_name": agent.name,
+                        "runtime": str(agent.runtime),
+                        "model": agent.model,
+                        "role": str(agent.role),
+                    }
+                    for agent in revised_plan.agents
+                ]
+            )
+            self._append(
+                "task_plan_execution_profile_revised",
+                plan_id,
+                {
+                    "schema_version": 1,
+                    "parent_plan_id": parent.plan_id,
+                    "parent_plan_sha256": parent.plan_sha256,
+                    "revision_number": revision_number,
+                    "execution_profile": str(profile),
+                    "runtime_assignments_sha256": assignments_sha,
+                    "plan_sha256": record.plan_sha256,
+                },
+            )
+            self.store.create(record)
+            return record
+
     def list_task_templates(self, *, include_archived: bool = False) -> list[TaskTemplate]:
         return self.task_templates.list(include_archived=include_archived)
 
     def save_task_template(self, request: TaskTemplateSaveRequest) -> TaskTemplate:
         """Save a private planning starting point without planning or dispatching it."""
         with self._plan_transition_lock:
-            name = request.name.strip()
-            objective = request.objective.strip()
-            if not name:
-                raise ValueError("task template name must not be blank")
-            if len(objective) < 3:
-                raise ValueError("task template objective must contain at least 3 characters")
-            template_id = new_ulid()
-            template_sha256 = _task_template_sha256(name=name, objective=objective)
-            template = TaskTemplate(
-                template_id=template_id,
-                name=name,
-                objective=objective,
-                template_sha256=template_sha256,
+            return self._save_task_template(
+                name=request.name,
+                objective=request.objective,
             )
-            self._append(
-                "task_template_saved",
-                template_id,
-                {
-                    "schema_version": 1,
-                    "template_sha256": template_sha256,
-                    "name_sha256": hashlib.sha256(name.encode()).hexdigest(),
-                    "objective_sha256": hashlib.sha256(objective.encode()).hexdigest(),
-                },
+
+    def save_task_template_from_plan(
+        self,
+        plan_id: str,
+        request: TaskTemplateFromPlanRequest,
+    ) -> TaskTemplate:
+        """Bind a template to one exact reviewed plan without running it."""
+        with self._plan_transition_lock:
+            record = self.get_plan(plan_id, refresh=False)
+            if record.plan is None or record.plan_sha256 is None:
+                raise ConsoleConflict("only a complete reviewed plan can become a task template")
+            if record.plan_sha256 != _execution_plan_sha(record):
+                raise ConsoleConflict("plan integrity check failed")
+            return self._save_task_template(
+                name=request.name,
+                objective=record.objective,
+                source_plan_id=record.plan_id,
+                source_plan_sha256=record.plan_sha256,
             )
-            self.task_templates.create(template)
-            return template
+
+    def _save_task_template(
+        self,
+        *,
+        name: str,
+        objective: str,
+        source_plan_id: str | None = None,
+        source_plan_sha256: str | None = None,
+    ) -> TaskTemplate:
+        name = name.strip()
+        objective = objective.strip()
+        if not name:
+            raise ValueError("task template name must not be blank")
+        if len(objective) < 3:
+            raise ValueError("task template objective must contain at least 3 characters")
+        template_id = new_ulid()
+        template_sha256 = _task_template_sha256(
+            name=name,
+            objective=objective,
+            source_plan_id=source_plan_id,
+            source_plan_sha256=source_plan_sha256,
+        )
+        template = TaskTemplate(
+            template_id=template_id,
+            name=name,
+            objective=objective,
+            source_plan_id=source_plan_id,
+            source_plan_sha256=source_plan_sha256,
+            template_sha256=template_sha256,
+        )
+        payload = {
+            "schema_version": 1,
+            "template_sha256": template_sha256,
+            "name_sha256": hashlib.sha256(name.encode()).hexdigest(),
+            "objective_sha256": hashlib.sha256(objective.encode()).hexdigest(),
+        }
+        if source_plan_id is not None and source_plan_sha256 is not None:
+            payload["source_plan_id"] = source_plan_id
+            payload["source_plan_sha256"] = source_plan_sha256
+        self._append("task_template_saved", template_id, payload)
+        self.task_templates.create(template)
+        return template
 
     def archive_task_template(
         self,
@@ -3234,6 +3730,439 @@ class ConsoleService:
             )
 
     @staticmethod
+    def _memory_snapshot_payload(
+        memories: list[WorkspaceMemoryView],
+    ) -> list[dict[str, Any]]:
+        ordered = sorted(memories, key=lambda item: (item.memory_id, item.version_number))
+        payload = [
+            {
+                "memory_id": item.memory_id,
+                "version_id": item.version_id,
+                "kind": item.kind,
+                "title": item.title,
+                "tags": item.tags,
+                "content": item.content,
+                "content_sha256": item.content_sha256,
+            }
+            for item in ordered
+        ]
+        if len(payload) > 20 or sum(len(str(item["content"])) for item in payload) > 60_000:
+            raise ConsoleConflict(
+                "approved workspace memory exceeds the planning snapshot limit; revoke or consolidate it"
+            )
+        return payload
+
+    def _workspace_memory_views(
+        self,
+        *,
+        query: str = "",
+        include_history: bool = True,
+        events: list[dict[str, Any]] | None = None,
+    ) -> list[WorkspaceMemoryView]:
+        snapshot = self.ledger.read_all() if events is None else events
+        states, active = _memory_states(snapshot)
+        created: dict[str, dict[str, Any]] = {}
+        for event in snapshot:
+            if event.get("kind") != "workspace_memory_candidate_created":
+                continue
+            payload = event.get("payload")
+            if not isinstance(payload, dict) or not isinstance(payload.get("version_id"), str):
+                continue
+            version_id = str(payload["version_id"])
+            if version_id in created and created[version_id] != payload:
+                raise ConsoleConflict("workspace memory has conflicting creation evidence")
+            created[version_id] = payload
+
+        versions = self.workspace_memory.list_versions()
+        version_ids = {version.version_id for version in versions}
+        if set(created) != version_ids:
+            raise ConsoleConflict("workspace memory files and creation evidence do not match")
+
+        needle = query.strip().casefold()
+        rows: list[WorkspaceMemoryView] = []
+        for metadata in versions:
+            evidence = created[metadata.version_id]
+            expected = {
+                "memory_id": metadata.memory_id,
+                "content_sha256": metadata.content_sha256,
+                "document_sha256": metadata.document_sha256,
+                "relative_path": metadata.relative_path,
+            }
+            if any(evidence.get(key) != value for key, value in expected.items()):
+                raise ConsoleConflict("workspace memory creation evidence failed integrity validation")
+            state = states.get(metadata.version_id)
+            if state is None:
+                raise ConsoleConflict("workspace memory lifecycle evidence is incomplete")
+            stored, content = self.workspace_memory.get(metadata.version_id)
+            if stored != metadata:
+                raise ConsoleConflict("workspace memory metadata changed")
+            row = WorkspaceMemoryView(
+                **metadata.model_dump(mode="json"),
+                state=cast(
+                    Literal["candidate", "approved", "superseded", "revoked"],
+                    state[0],
+                ),
+                active=active.get(metadata.memory_id) == metadata.version_id,
+                content=content,
+                decided_at=state[1],
+            )
+            if not include_history and row.state not in {"candidate", "approved"}:
+                continue
+            if not include_history and row.state == "approved" and not row.active:
+                continue
+            haystack = "\n".join([row.title, row.kind, *row.tags, row.content]).casefold()
+            if needle and needle not in haystack:
+                continue
+            rows.append(row)
+        rows.sort(key=lambda item: (item.created_at, item.version_number), reverse=True)
+        return rows
+
+    def list_workspace_memories(
+        self,
+        *,
+        query: str = "",
+        include_history: bool = True,
+        events: list[dict[str, Any]] | None = None,
+    ) -> list[WorkspaceMemoryView]:
+        return self._workspace_memory_views(
+            query=query,
+            include_history=include_history,
+            events=events,
+        )
+
+    def get_workspace_memory(self, version_id: str) -> WorkspaceMemoryView:
+        for row in self._workspace_memory_views():
+            if row.version_id == version_id:
+                return row
+        raise WorkspaceMemoryNotFound(f"unknown workspace memory version: {version_id}")
+
+    def _approved_workspace_memory_snapshot(
+        self,
+        workspace: str,
+    ) -> tuple[list[dict[str, Any]], list[str], str | None]:
+        selected = [
+            row
+            for row in self._workspace_memory_views(include_history=False)
+            if row.state == "approved"
+            and row.active
+            and (not row.workspace or row.workspace == workspace)
+        ]
+        if not selected:
+            return [], [], None
+        payload = self._memory_snapshot_payload(selected)
+        version_ids = [str(item["version_id"]) for item in payload]
+        snapshot_sha = _canonical_sha256(
+            {"schema_version": 1, "memories": payload}
+        )
+        return payload, version_ids, snapshot_sha
+
+    def _record_workspace_memory_snapshot(
+        self,
+        record: PlanRecord,
+    ) -> list[dict[str, Any]]:
+        if record.memory_snapshot_sha256 is None and not record.memory_version_ids:
+            return []
+        if record.memory_snapshot_sha256 is None or not record.memory_version_ids:
+            raise ConsoleConflict("workspace memory provenance is incomplete")
+        rows = {row.version_id: row for row in self._workspace_memory_views()}
+        selected: list[WorkspaceMemoryView] = []
+        for version_id in record.memory_version_ids:
+            row = rows.get(version_id)
+            if row is None:
+                raise ConsoleConflict("approved workspace memory is unavailable")
+            if row.state != "approved" or not row.active:
+                raise ConsoleConflict("approved workspace memory changed; replan before confirming")
+            if row.workspace and row.workspace != record.workspace:
+                raise ConsoleConflict("workspace-scoped memory no longer matches this plan")
+            selected.append(row)
+        payload = self._memory_snapshot_payload(selected)
+        snapshot_sha = _canonical_sha256(
+            {"schema_version": 1, "memories": payload}
+        )
+        if snapshot_sha != record.memory_snapshot_sha256:
+            raise ConsoleConflict("workspace memory snapshot integrity failed")
+        return payload
+
+    @staticmethod
+    def _normalise_memory_tags(values: list[str]) -> list[str]:
+        tags: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            tag = value.strip()
+            if not tag:
+                continue
+            if len(tag) > 48 or "\n" in tag or "\r" in tag:
+                raise ValueError("workspace memory tags must be single-line and at most 48 characters")
+            folded = tag.casefold()
+            if folded not in seen:
+                seen.add(folded)
+                tags.append(tag)
+        return tags
+
+    def create_workspace_memory_candidate(
+        self,
+        request: WorkspaceMemoryCandidateRequest,
+    ) -> WorkspaceMemoryView:
+        with self._plan_transition_lock:
+            title = request.title.strip()
+            content = request.content.replace("\r\n", "\n").replace("\r", "\n").strip()
+            if not title or "\n" in title or "\r" in title:
+                raise ValueError("workspace memory title must be one non-empty line")
+            if len(content) < 3:
+                raise ValueError("workspace memory content must contain at least 3 characters")
+            tags = self._normalise_memory_tags(request.tags)
+            parent: WorkspaceMemoryVersion | None = None
+            requested_workspace = request.workspace
+            if request.supersedes_version_id is not None:
+                parent, _ = self.workspace_memory.get(request.supersedes_version_id)
+                if parent.kind != request.kind:
+                    raise ConsoleConflict("a memory revision cannot change its kind")
+                if not requested_workspace.strip():
+                    requested_workspace = parent.workspace
+            workspace = self._normalise_requested_workspace(requested_workspace)
+
+            source_plan: PlanRecord | None = None
+            if request.source_plan_id is not None:
+                deleted = _deleted_plan_events(self.ledger.read_all())
+                if request.source_plan_id in deleted:
+                    raise PlanNotFound(f"unknown plan: {request.source_plan_id}")
+                source_plan = self.store.get(request.source_plan_id)
+                if source_plan.plan is None or source_plan.plan_sha256 is None:
+                    raise ConsoleConflict("source Work has no reviewed plan")
+                if source_plan.plan_sha256 != _execution_plan_sha(source_plan):
+                    raise ConsoleConflict("source Work integrity failed")
+                if not workspace:
+                    workspace = source_plan.workspace
+
+            if parent is not None:
+                if workspace != parent.workspace:
+                    raise ConsoleConflict("a memory revision cannot change its workspace scope")
+                existing = [
+                    row
+                    for row in self.workspace_memory.list_versions()
+                    if row.memory_id == parent.memory_id
+                ]
+                version_number = max(row.version_number for row in existing) + 1
+                memory_id = parent.memory_id
+            else:
+                version_number = 1
+                memory_id = new_ulid()
+
+            version_id = new_ulid()
+            content_sha = hashlib.sha256(content.encode()).hexdigest()
+            relative_path = (
+                f"vault/{request.kind}/{memory_id}/v{version_number:04d}-{version_id}.md"
+            )
+            version = WorkspaceMemoryVersion(
+                memory_id=memory_id,
+                version_id=version_id,
+                version_number=version_number,
+                kind=request.kind,
+                title=title,
+                tags=tags,
+                workspace=workspace,
+                source_plan_id=source_plan.plan_id if source_plan else None,
+                source_plan_sha256=source_plan.plan_sha256 if source_plan else None,
+                parent_version_id=parent.version_id if parent else None,
+                content_sha256=content_sha,
+                document_sha256="0" * 64,
+                relative_path=relative_path,
+            )
+            document_sha = hashlib.sha256(
+                self.workspace_memory.render_document(version, content)
+            ).hexdigest()
+            version = version.model_copy(update={"document_sha256": document_sha})
+            self.workspace_memory.create(version, content)
+            try:
+                self._append(
+                    "workspace_memory_candidate_created",
+                    version_id,
+                    {
+                        "schema_version": 1,
+                        "memory_id": memory_id,
+                        "version_id": version_id,
+                        "version_number": version_number,
+                        "kind": request.kind,
+                        "title_sha256": hashlib.sha256(title.encode()).hexdigest(),
+                        "content_sha256": content_sha,
+                        "document_sha256": document_sha,
+                        "relative_path": relative_path,
+                        "workspace_sha256": (
+                            hashlib.sha256(workspace.encode()).hexdigest() if workspace else None
+                        ),
+                        "source_plan_id": source_plan.plan_id if source_plan else None,
+                        "source_plan_sha256": source_plan.plan_sha256 if source_plan else None,
+                        "parent_version_id": parent.version_id if parent else None,
+                    },
+                )
+            except Exception:
+                self.workspace_memory.discard_uncommitted(version)
+                raise
+            return self.get_workspace_memory(version_id)
+
+    def propose_process_memory(
+        self,
+        plan_id: str,
+        request: ProcessMemoryProposalRequest,
+    ) -> WorkspaceMemoryView:
+        deleted = _deleted_plan_events(self.ledger.read_all())
+        if plan_id in deleted:
+            raise PlanNotFound(f"unknown plan: {plan_id}")
+        source = self.store.get(plan_id)
+        if (
+            source.status not in RERUNNABLE_PLAN_STATUSES
+            or source.plan is None
+            or source.plan_sha256 is None
+            or source.plan_sha256 != _execution_plan_sha(source)
+        ):
+            raise ConsoleConflict("only ended, intact Work can propose process memory")
+        plan = source.plan
+        reporting = plan.effective_reporting_lines()
+        status_note = {
+            "completed_unverified": "执行已结束；业务结果仍需 Artifact、Eval 或审签证据。",
+            "failed": "本次执行失败；该流程只能作为待审核教训，不能视为成功实践。",
+            "cancelled": "本次执行被终止；重新使用前必须由操作者审核适用性。",
+        }[source.status]
+        team_lines = [
+            f"- {agent.name} ({agent.role}): {redact_text(agent.responsibility)}; "
+            f"reports to {reporting[agent.name] or 'operator'}"
+            for agent in plan.agents
+        ]
+        stage_lines = [
+            f"{stage.order}. {stage.title} - {redact_text(stage.outcome)}"
+            + (" [human checkpoint]" if stage.checkpoint else "")
+            for stage in plan.stages
+        ]
+        loop_lines = [
+            f"- {loop.source_agent} -> {loop.target_agent}: "
+            f"{redact_text(loop.condition)} (max {loop.max_iterations})"
+            for loop in plan.collaboration_loops
+        ] or ["- No bounded collaboration loop was configured."]
+        content = "\n".join(
+            [
+                "## Purpose",
+                redact_text(source.objective),
+                "",
+                "## Team structure",
+                *team_lines,
+                "",
+                "## Repeatable stages",
+                *stage_lines,
+                "",
+                "## Bounded collaboration",
+                *loop_lines,
+                "",
+                "## Cadence and controls",
+                f"- Cadence: {plan.cadence.kind} ({plan.cadence.update_interval})",
+                f"- Approval checkpoints: {len(plan.approvals)}",
+                f"- Expected artifacts: {len(plan.artifacts)}",
+                "",
+                "## Evidence status",
+                status_note,
+                f"- Source Work: {source.plan_id}",
+                f"- Source plan hash: {source.plan_sha256}",
+                "",
+                "## Operator review",
+                "Confirm what should be retained, revise unsafe assumptions, and approve only after review.",
+            ]
+        )
+        title = request.title.strip() if request.title else f"{plan.title} process memory"
+        return self.create_workspace_memory_candidate(
+            WorkspaceMemoryCandidateRequest(
+                kind="process",
+                title=title,
+                content=content,
+                tags=["repeatable-work", f"status-{source.status}"],
+                workspace=source.workspace,
+                source_plan_id=source.plan_id,
+                confirmed=True,
+            )
+        )
+
+    def approve_workspace_memory(
+        self,
+        version_id: str,
+        request: WorkspaceMemoryDecisionRequest,
+    ) -> WorkspaceMemoryView:
+        with self._plan_transition_lock:
+            target = self.get_workspace_memory(version_id)
+            if target.state == "approved" and target.active:
+                return target
+            if target.state != "candidate":
+                raise ConsoleConflict("only a memory candidate can be approved")
+            _, active = _memory_states(self.ledger.read_all())
+            self._append(
+                "workspace_memory_approved",
+                version_id,
+                {
+                    "schema_version": 1,
+                    "memory_id": target.memory_id,
+                    "version_id": target.version_id,
+                    "content_sha256": target.content_sha256,
+                    "document_sha256": target.document_sha256,
+                    "superseded_version_id": active.get(target.memory_id),
+                    "reason_sha256": (
+                        hashlib.sha256(request.reason.strip().encode()).hexdigest()
+                        if request.reason.strip()
+                        else None
+                    ),
+                },
+            )
+            return self.get_workspace_memory(version_id)
+
+    def revoke_workspace_memory(
+        self,
+        version_id: str,
+        request: WorkspaceMemoryDecisionRequest,
+    ) -> WorkspaceMemoryView:
+        with self._plan_transition_lock:
+            target = self.get_workspace_memory(version_id)
+            if target.state == "revoked":
+                return target
+            if target.state != "approved" or not target.active:
+                raise ConsoleConflict("only the active approved memory can be revoked")
+            self._append(
+                "workspace_memory_revoked",
+                version_id,
+                {
+                    "schema_version": 1,
+                    "memory_id": target.memory_id,
+                    "version_id": target.version_id,
+                    "content_sha256": target.content_sha256,
+                    "reason_sha256": (
+                        hashlib.sha256(request.reason.strip().encode()).hexdigest()
+                        if request.reason.strip()
+                        else None
+                    ),
+                },
+            )
+            return self.get_workspace_memory(version_id)
+
+    def rollback_workspace_memory(
+        self,
+        version_id: str,
+        request: WorkspaceMemoryRollbackRequest,
+    ) -> WorkspaceMemoryView:
+        with self._plan_transition_lock:
+            target = self.get_workspace_memory(version_id)
+            if target.state not in {"superseded", "revoked"}:
+                raise ConsoleConflict("only a superseded or revoked memory can be restored")
+            _, active = _memory_states(self.ledger.read_all())
+            self._append(
+                "workspace_memory_rollback",
+                version_id,
+                {
+                    "schema_version": 1,
+                    "memory_id": target.memory_id,
+                    "version_id": target.version_id,
+                    "content_sha256": target.content_sha256,
+                    "replaced_version_id": active.get(target.memory_id),
+                    "reason_sha256": hashlib.sha256(request.reason.strip().encode()).hexdigest(),
+                },
+            )
+            return self.get_workspace_memory(version_id)
+
+    @staticmethod
     def _normalise_requested_workspace(value: str) -> str:
         if not value.strip():
             return ""
@@ -3279,6 +4208,7 @@ class ConsoleService:
             runtime_capabilities = self.runtime_capabilities()
             if not any(entry.get("available") is True for entry in runtime_capabilities):
                 raise ConsoleUnavailable("no local agent runtime is ready")
+            memory_snapshot = self._record_workspace_memory_snapshot(record)
             previous_plan: TaskPlan | None = None
             if record.parent_plan_id is not None:
                 parent = self.store.get(record.parent_plan_id)
@@ -3321,7 +4251,13 @@ class ConsoleService:
                 revision_instruction=record.revision_instruction,
                 runtime_capabilities=runtime_capabilities,
                 blueprint=blueprint_payload,
+                memory_snapshot=memory_snapshot,
             )
+            if previous_plan is None:
+                target_profile = ExecutionProfile.BALANCED
+            else:
+                target_profile = previous_plan.execution_profile or ExecutionProfile.CUSTOM
+            plan = _profiled_plan(plan, target_profile, runtime_capabilities)
             self._validate_runtime_assignments(plan)
             plan_sha = _execution_plan_sha(record, plan)
             self._append(
@@ -3338,6 +4274,9 @@ class ConsoleService:
                     "revision_number": record.revision_number,
                     "source_blueprint_id": record.source_blueprint_id,
                     "source_blueprint_sha256": record.source_blueprint_sha256,
+                    "memory_snapshot_sha256": record.memory_snapshot_sha256,
+                    "memory_version_count": len(record.memory_version_ids),
+                    "execution_profile": str(target_profile),
                 },
             )
 
@@ -3384,6 +4323,7 @@ class ConsoleService:
                 raise ConsoleConflict("stored plan inputs changed; replan before confirming")
             if request.plan_sha256 != current.plan_sha256:
                 raise ConsoleConflict("plan hash changed; refresh before confirming")
+            self._record_workspace_memory_snapshot(current)
             self._append(
                 "task_plan_confirmed",
                 plan_id,
@@ -3392,6 +4332,8 @@ class ConsoleService:
                     "plan_sha256": current.plan_sha256,
                     "execution_mode": current.plan.execution_mode,
                     "approval_mode": str(request.approval_mode),
+                    "memory_snapshot_sha256": current.memory_snapshot_sha256,
+                    "memory_version_count": len(current.memory_version_ids),
                 },
             )
             current.status = "confirmed"
@@ -3667,6 +4609,62 @@ class ConsoleService:
         row = self._read_workspace_artifact(record, artifact_name, include_content=True)
         row["evidence_status"] = "workspace_unverified"
         return row
+
+    def get_plan_artifact_content(self, plan_id: str, artifact_name: str) -> dict[str, Any]:
+        """Read one registered artifact after re-verifying its CAS identity."""
+        self.get_plan(plan_id, refresh=False)
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", artifact_name):
+            raise RuntimeArtifactNotFound("registered artifact not found")
+        event = self._registered_plan_artifact_events(plan_id).get(artifact_name)
+        if event is None:
+            raise RuntimeArtifactNotFound("registered artifact not found")
+        payload = event.get("payload", {})
+        digest = payload.get("sha256")
+        expected_size = payload.get("size")
+        mime = payload.get("mime")
+        if (
+            not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            or not isinstance(expected_size, int)
+            or expected_size < 0
+            or expected_size > _RUNTIME_ARTIFACT_CONTENT_LIMIT
+            or not isinstance(mime, str)
+        ):
+            raise RuntimeArtifactPreviewError("registered artifact cannot be opened")
+        candidate = cas_path(artifact_root(self.ledger), digest)
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            fd = os.open(candidate, flags)
+        except OSError as exc:
+            raise RuntimeArtifactNotFound("registered artifact blob is unavailable") from exc
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode) or before.st_size != expected_size:
+                raise RuntimeArtifactPreviewError("registered artifact integrity check failed")
+            data = bytearray()
+            while chunk := os.read(fd, 64 * 1024):
+                data.extend(chunk)
+                if len(data) > _RUNTIME_ARTIFACT_CONTENT_LIMIT:
+                    raise RuntimeArtifactPreviewError("registered artifact cannot be opened")
+            after = os.fstat(fd)
+            if (
+                before.st_ino != after.st_ino
+                or before.st_size != after.st_size
+                or before.st_mtime_ns != after.st_mtime_ns
+                or len(data) != expected_size
+                or hashlib.sha256(data).hexdigest() != digest
+            ):
+                raise RuntimeArtifactPreviewError("registered artifact integrity check failed")
+        finally:
+            os.close(fd)
+        safe_inline = mime == "application/pdf"
+        return {
+            "content": bytes(data),
+            "mime": mime if safe_inline else "application/octet-stream",
+            "disposition": "inline" if safe_inline else "attachment",
+            "name": artifact_name,
+            "sha256": digest,
+        }
 
     def list_runtime_input_artifacts(self, plan_id: str, request_id: str) -> list[dict[str, Any]]:
         """List only files explicitly referenced by this operator question."""
@@ -4868,6 +5866,20 @@ class ConsoleService:
             return self.store.list(limit, exclude_ids=excluded_ids)
         return records
 
+    def list_repeatable_works(self) -> list[RepeatableWork]:
+        events = self.ledger.read_all()
+        deleted = set(_deleted_plan_events(events))
+        return _repeatable_works(
+            [record for record in self.store.list_all() if record.plan_id not in deleted]
+        )
+
+    def list_workspace_conversations(self) -> list[WorkspaceConversation]:
+        events = self.ledger.read_all()
+        deleted = set(_deleted_plan_events(events))
+        return _workspace_conversations(
+            [record for record in self.store.list_all() if record.plan_id not in deleted]
+        )
+
     def _reconcile_terminal_aion_records(self, records: list[PlanRecord]) -> bool:
         reconciled = False
         for record in records:
@@ -5669,6 +6681,16 @@ class ConsoleService:
             fleet=fleet,
             mail_ready=bool(mail.get("mcp_ready")),
         )
+        repeatable_works = _repeatable_works(
+            [record for record in all_plans if record.plan_id not in deleted_plans]
+        )
+        workspace_conversations = _workspace_conversations(
+            [record for record in all_plans if record.plan_id not in deleted_plans]
+        )
+        workspace_memories = self.list_workspace_memories(
+            include_history=False,
+            events=events,
+        )
         return {
             "generated_at": utc_now(),
             "integrations": integrations,
@@ -5702,5 +6724,20 @@ class ConsoleService:
             "home": home,
             "task_templates": [row.model_dump(mode="json") for row in self.list_task_templates()],
             "team_blueprints": [row.model_dump(mode="json") for row in self.list_team_blueprints()],
+            "repeatable_works": [row.model_dump(mode="json") for row in repeatable_works],
+            "workspace_conversations": [
+                row.model_dump(mode="json") for row in workspace_conversations
+            ],
+            "workspace_memories": [
+                row.model_dump(mode="json", exclude={"content"}) for row in workspace_memories
+            ],
+            "workspace_memory": {
+                "format": "obsidian_markdown",
+                "candidate_count": sum(row.state == "candidate" for row in workspace_memories),
+                "approved_count": sum(
+                    row.state == "approved" and row.active for row in workspace_memories
+                ),
+                "vault_path": "workspace-memory/vault",
+            },
             "runtime_capabilities": self.runtime_capabilities(),
         }

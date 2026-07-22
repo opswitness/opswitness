@@ -35,6 +35,7 @@ from opswitness.console.schemas import (
     DeletePlanRequest,
     ExecutionApprovalModeRequest,
     ExecutionControlRequest,
+    ExecutionProfileRevisionRequest,
     ForkPlanRequest,
     MailAuthorizationRequest,
     MailDisableRequest,
@@ -43,17 +44,22 @@ from opswitness.console.schemas import (
     PairingClaimRequest,
     PairingMutationRequest,
     PlanRequest,
+    ProcessMemoryProposalRequest,
     ProviderConnectionRequest,
     RerunPlanRequest,
     RevisePlanRequest,
     RuntimeInputAnswerRequest,
     RuntimeRevisionRequest,
     TaskTemplateArchiveRequest,
+    TaskTemplateFromPlanRequest,
     TaskTemplateSaveRequest,
     TelegramActionRequest,
     TelegramConfigureRequest,
     TeamBlueprintArchiveRequest,
     TeamBlueprintSaveRequest,
+    WorkspaceMemoryCandidateRequest,
+    WorkspaceMemoryDecisionRequest,
+    WorkspaceMemoryRollbackRequest,
 )
 from opswitness.console.service import (
     ConsoleConflict,
@@ -62,7 +68,12 @@ from opswitness.console.service import (
     RuntimeArtifactNotFound,
     RuntimeArtifactPreviewError,
 )
-from opswitness.console.store import BlueprintNotFound, PlanNotFound, TaskTemplateNotFound
+from opswitness.console.store import (
+    BlueprintNotFound,
+    PlanNotFound,
+    TaskTemplateNotFound,
+    WorkspaceMemoryNotFound,
+)
 
 
 def create_app(
@@ -272,6 +283,12 @@ def create_app(
     async def task_template_not_found(_: Request, exc: TaskTemplateNotFound) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=404)
 
+    @app.exception_handler(WorkspaceMemoryNotFound)
+    async def workspace_memory_not_found(
+        _: Request, exc: WorkspaceMemoryNotFound
+    ) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=404)
+
     @app.exception_handler(ConsoleConflict)
     async def conflict(_: Request, exc: ConsoleConflict) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=409)
@@ -477,6 +494,23 @@ def create_app(
         record = await run_in_threadpool(service.revise_plan_runtimes, plan_id, body)
         return record.model_dump(mode="json")
 
+    @app.post(
+        "/api/v1/plans/{plan_id}/execution-profile",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def revise_plan_execution_profile(
+        plan_id: str,
+        body: ExecutionProfileRevisionRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        record = await run_in_threadpool(
+            service.revise_plan_execution_profile,
+            plan_id,
+            body,
+        )
+        return record.model_dump(mode="json")
+
     @app.post("/api/v1/plans/{plan_id}/confirm", status_code=status.HTTP_202_ACCEPTED)
     async def confirm_plan(
         plan_id: str,
@@ -591,6 +625,26 @@ def create_app(
             artifact_name,
         )
 
+    @app.get("/api/v1/plans/{plan_id}/artifacts/{artifact_name}/content")
+    async def plan_artifact_content(plan_id: str, artifact_name: str) -> Response:
+        artifact = await run_in_threadpool(
+            service.get_plan_artifact_content,
+            plan_id,
+            artifact_name,
+        )
+        return Response(
+            content=artifact["content"],
+            media_type=artifact["mime"],
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Disposition": (
+                    f'{artifact["disposition"]}; filename="{artifact["name"]}"'
+                ),
+                "X-Content-Type-Options": "nosniff",
+                "X-OpsWitness-Artifact-SHA256": artifact["sha256"],
+            },
+        )
+
     @app.delete("/api/v1/plans/{plan_id}")
     async def delete_plan(
         plan_id: str,
@@ -614,6 +668,23 @@ def create_app(
     ) -> dict:
         del x_qd_csrf
         template = await run_in_threadpool(service.save_task_template, body)
+        return template.model_dump(mode="json")
+
+    @app.post(
+        "/api/v1/plans/{plan_id}/task-template",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def save_task_template_from_plan(
+        plan_id: str,
+        body: TaskTemplateFromPlanRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        template = await run_in_threadpool(
+            service.save_task_template_from_plan,
+            plan_id,
+            body,
+        )
         return template.model_dump(mode="json")
 
     @app.post("/api/v1/task-templates/{template_id}/archive")
@@ -645,6 +716,88 @@ def create_app(
         del x_qd_csrf
         blueprint = await run_in_threadpool(service.save_team_blueprint, body)
         return blueprint.model_dump(mode="json")
+
+    @app.get("/api/v1/repeatable-works")
+    async def repeatable_works() -> list[dict]:
+        rows = await run_in_threadpool(service.list_repeatable_works)
+        return [row.model_dump(mode="json") for row in rows]
+
+    @app.get("/api/v1/workspace-conversations")
+    async def workspace_conversations() -> list[dict]:
+        rows = await run_in_threadpool(service.list_workspace_conversations)
+        return [row.model_dump(mode="json") for row in rows]
+
+    @app.get("/api/v1/workspace-memory")
+    async def workspace_memories(
+        query: str = "",
+        include_history: bool = True,
+    ) -> list[dict]:
+        rows = await run_in_threadpool(
+            service.list_workspace_memories,
+            query=query,
+            include_history=include_history,
+        )
+        return [row.model_dump(mode="json") for row in rows]
+
+    @app.get("/api/v1/workspace-memory/{version_id}")
+    async def workspace_memory(version_id: str) -> dict:
+        row = await run_in_threadpool(service.get_workspace_memory, version_id)
+        return row.model_dump(mode="json")
+
+    @app.post("/api/v1/workspace-memory/candidates", status_code=status.HTTP_201_CREATED)
+    async def create_workspace_memory_candidate(
+        body: WorkspaceMemoryCandidateRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        try:
+            row = await run_in_threadpool(service.create_workspace_memory_candidate, body)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return row.model_dump(mode="json")
+
+    @app.post(
+        "/api/v1/plans/{plan_id}/memory-candidates",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def propose_process_memory(
+        plan_id: str,
+        body: ProcessMemoryProposalRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        row = await run_in_threadpool(service.propose_process_memory, plan_id, body)
+        return row.model_dump(mode="json")
+
+    @app.post("/api/v1/workspace-memory/{version_id}/approve")
+    async def approve_workspace_memory(
+        version_id: str,
+        body: WorkspaceMemoryDecisionRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        row = await run_in_threadpool(service.approve_workspace_memory, version_id, body)
+        return row.model_dump(mode="json")
+
+    @app.post("/api/v1/workspace-memory/{version_id}/revoke")
+    async def revoke_workspace_memory(
+        version_id: str,
+        body: WorkspaceMemoryDecisionRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        row = await run_in_threadpool(service.revoke_workspace_memory, version_id, body)
+        return row.model_dump(mode="json")
+
+    @app.post("/api/v1/workspace-memory/{version_id}/rollback")
+    async def rollback_workspace_memory(
+        version_id: str,
+        body: WorkspaceMemoryRollbackRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        row = await run_in_threadpool(service.rollback_workspace_memory, version_id, body)
+        return row.model_dump(mode="json")
 
     @app.post("/api/v1/team-blueprints/{blueprint_id}/archive")
     async def archive_team_blueprint(

@@ -45,14 +45,18 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  BrainCircuit,
+  Scale,
   Square,
   Users,
+  Zap,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   archiveTaskTemplate,
   archiveTeamBlueprint,
+  approveWorkspaceMemory,
   answerRuntimeInput,
   changeExecutionApprovalMode,
   confirmPlan,
@@ -61,6 +65,7 @@ import {
   configureTelegram,
   continuePlanRun,
   controlPlan,
+  createWorkspaceMemoryCandidate,
   createPairingInvitation,
   deletePlan,
   disableTelegram,
@@ -76,22 +81,31 @@ import {
   getProviderConnection,
   getRuntimeInputArtifact,
   getRuntimeInputArtifacts,
+  getWorkspaceMemories,
   getTelegramStatus,
   forkPlan,
   loadBootstrap,
+  planArtifactContentUrl,
   preparePlanRerun,
+  proposeProcessMemory,
   requestMailAuthorization,
   requestMailSummary,
   requestPlan,
+  revokeWorkspaceMemory,
   revokePairedDevice,
   revisePlan,
+  revisePlanExecutionProfile,
   revisePlanOrganization,
   revisePlanRuntimes,
+  rollbackWorkspaceMemory,
   saveTaskTemplate,
+  saveTaskTemplateFromPlan,
   saveTeamBlueprint,
   testTelegram,
 } from './api';
+import { WorkspaceMemoryDialog } from './workspace-memory-dialog';
 import {
+  canReviseWork,
   canSaveRuntimeRevision,
   homeActionView,
   observationPresentation,
@@ -106,6 +120,14 @@ import {
   stageProgressPresentation,
   stageProgressSummary,
 } from './execution-progress.js';
+import {
+  buildResultSummary,
+  selectResultPreviewArtifacts,
+} from './result-summary.js';
+import type {
+  ResultSummaryCheck,
+  ResultSummaryFact,
+} from './result-summary.js';
 import { useLanguage } from './language';
 import type { UiLanguage } from './i18n.js';
 import { APP_VERSION } from './version';
@@ -116,12 +138,17 @@ import {
   workRunHistory,
 } from './work-selection.js';
 import {
+  FEATURED_WORK_TEMPLATES,
   filterTaskPresets,
   localizedTaskPreset,
   TASK_PRESET_CATEGORIES,
   TASK_PRESETS,
 } from './task-presets.js';
-import type { TaskPreset, TaskPresetCategoryId } from './task-presets.js';
+import type {
+  FeaturedWorkTemplate,
+  TaskPreset,
+  TaskPresetCategoryId,
+} from './task-presets.js';
 import type {
   Bootstrap,
   AIProvider,
@@ -132,6 +159,7 @@ import type {
   ApprovalCard,
   ApprovalMode,
   CollaborationLoop,
+  ExecutionProfile,
   Integration,
   MailAuthorizationJob,
   MailAuthorizationStatus,
@@ -146,6 +174,7 @@ import type {
   ProviderConnectionJob,
   ReportingLine,
   RunRecord,
+  RepeatableWork,
   TaskRunHistory,
   TaskTemplate,
   TaskPlan,
@@ -155,6 +184,9 @@ import type {
   RuntimeInputArtifact,
   RuntimeInputArtifactPreview,
   TelegramSetupStatus,
+  WorkspaceMemoryStatus,
+  WorkspaceMemoryView,
+  WorkspaceConversation,
 } from './types';
 
 type View = 'workspace' | 'today' | 'work' | 'approvals' | 'settings';
@@ -595,7 +627,18 @@ function App() {
                   onRuntimeSave={async (record, assignments) => {
                     mergePlan(await revisePlanRuntimes(record.plan_id, assignments));
                   }}
+                  onProfileSave={async (record, profile) => {
+                    mergePlan(await revisePlanExecutionProfile(record.plan_id, profile));
+                  }}
                   taskTemplates={bootstrap.task_templates}
+                  workspaceConversations={bootstrap.workspace_conversations || []}
+                  onOpenWorkspaceConversation={async (conversation) => {
+                    reviewWork(await getPlan(conversation.current_plan_id));
+                  }}
+                  onSaveConversationTemplate={async (conversation, name) => {
+                    await saveTaskTemplateFromPlan(conversation.current_plan_id, name);
+                    await refresh(true);
+                  }}
                   onSaveTaskTemplate={async (name, objective) => {
                     await saveTaskTemplate(name, objective);
                     await refresh(true);
@@ -613,6 +656,42 @@ function App() {
                       current?.blueprint_id === blueprint.blueprint_id ? null : current
                     ));
                     await refresh(true);
+                  }}
+                  repeatableWorks={bootstrap.repeatable_works || []}
+                  onPrepareRepeatableWork={async (work) => {
+                    mergePlan(await preparePlanRerun(work.source_plan_id));
+                  }}
+                  workspaceMemoryStatus={bootstrap.workspace_memory || {
+                    format: 'obsidian_markdown',
+                    candidate_count: 0,
+                    approved_count: 0,
+                    vault_path: 'workspace-memory/vault',
+                  }}
+                  onLoadWorkspaceMemories={getWorkspaceMemories}
+                  onCreateWorkspaceMemory={async (body) => {
+                    const row = await createWorkspaceMemoryCandidate(body);
+                    await refresh(true);
+                    return row;
+                  }}
+                  onProposeProcessMemory={async (work) => {
+                    const row = await proposeProcessMemory(work.source_plan_id);
+                    await refresh(true);
+                    return row;
+                  }}
+                  onApproveWorkspaceMemory={async (versionId, reason) => {
+                    const row = await approveWorkspaceMemory(versionId, reason);
+                    await refresh(true);
+                    return row;
+                  }}
+                  onRevokeWorkspaceMemory={async (versionId, reason) => {
+                    const row = await revokeWorkspaceMemory(versionId, reason);
+                    await refresh(true);
+                    return row;
+                  }}
+                  onRollbackWorkspaceMemory={async (versionId, reason) => {
+                    const row = await rollbackWorkspaceMemory(versionId, reason);
+                    await refresh(true);
+                    return row;
                   }}
                   onConfirm={async (record, approvalMode) => {
                     if (!record.plan_sha256) throw new Error(t('方案哈希缺失'));
@@ -689,6 +768,11 @@ function App() {
                     mergePlan(revision);
                     setWorkFocusPlanId(revision.plan_id);
                   }}
+                  onProfileSave={async (record, profile) => {
+                    const revision = await revisePlanExecutionProfile(record.plan_id, profile);
+                    mergePlan(revision);
+                    setWorkFocusPlanId(revision.plan_id);
+                  }}
                   onSaveBlueprint={async (record, name) => {
                     await saveTeamBlueprint(record.plan_id, name);
                     await refresh(true);
@@ -755,6 +839,9 @@ function App() {
         runtimeCapabilities={bootstrap?.runtime_capabilities || []}
         onRuntimeSave={async (record, assignments) => {
           mergePlan(await revisePlanRuntimes(record.plan_id, assignments));
+        }}
+        onProfileSave={async (record, profile) => {
+          mergePlan(await revisePlanExecutionProfile(record.plan_id, profile));
         }}
         onConfirm={async (record, approvalMode) => {
           if (!record.plan_sha256) throw new Error(t('方案哈希缺失'));
@@ -865,6 +952,50 @@ function IntegrationRow({ integrations }: { integrations?: Record<string, Integr
   );
 }
 
+function FeaturedWorkTemplateCard({
+  template,
+  language,
+  disabled,
+  onStart,
+}: {
+  template: FeaturedWorkTemplate;
+  language: UiLanguage;
+  disabled: boolean;
+  onStart: (template: FeaturedWorkTemplate) => void;
+}) {
+  const { t } = useLanguage();
+  const localized = localizedTaskPreset(template, language);
+  const recipe = localized.recipe;
+  if (!recipe) return null;
+  return (
+    <button
+      className="featured-work-card"
+      data-category={template.category}
+      type="button"
+      disabled={disabled}
+      aria-label={t('生成团队：{name}', { name: localized.title })}
+      onClick={() => onStart(template)}
+    >
+      <span className="featured-work-card-top">
+        <span className="featured-work-badge">{t('成熟 Work 模板')}</span>
+        <span>{t('{agents} 个 Agent · {stages} 个步骤', {
+          agents: recipe.agentCount,
+          stages: recipe.stageCount,
+        })}</span>
+      </span>
+      <strong>{localized.title}</strong>
+      <span className="featured-work-description">{localized.description}</span>
+      <span className="featured-work-line"><Network size={14} />{recipe.team}</span>
+      <span className="featured-work-line"><FileCheck2 size={14} />{recipe.outputs.join(' · ')}</span>
+      <span className="featured-work-line"><ShieldCheck size={14} />{recipe.checkpoint}</span>
+      <span className="featured-work-card-footer">
+        <span><CalendarClock size={14} />{recipe.cadence}</span>
+        <strong><Sparkles size={14} />{t('一键生成团队')}</strong>
+      </span>
+    </button>
+  );
+}
+
 function TaskPresetDialog({
   language,
   onClose,
@@ -940,25 +1071,38 @@ function TaskPresetDialog({
           {visiblePresets.length ? (
             <div className="task-preset-grid">
               {visiblePresets.map((preset) => {
-              const localized = localizedTaskPreset(preset, language);
-              const categoryLabel = TASK_PRESET_CATEGORIES.find((item) => item.id === preset.category)?.label[language];
-              return (
-                <button
-                  key={preset.id}
-                  className="task-preset-card"
-                  data-category={preset.category}
-                  type="button"
-                  onClick={() => onSelect(preset)}
-                >
-                  <span className="task-preset-card-top">
-                    <span className="task-preset-category">{categoryLabel}</span>
-                    <ArrowRight size={16} />
-                  </span>
-                  <strong>{localized.title}</strong>
-                  <span className="task-preset-description">{localized.description}</span>
-                  <span className="task-preset-action">{t('填入任务描述')}</span>
-                </button>
-              );
+                const featured = FEATURED_WORK_TEMPLATES.find((item) => item.id === preset.id);
+                const localized = localizedTaskPreset(featured || preset, language);
+                const categoryLabel = TASK_PRESET_CATEGORIES.find((item) => item.id === preset.category)?.label[language];
+                return (
+                  <button
+                    key={preset.id}
+                    className={`task-preset-card${localized.recipe ? ' featured' : ''}`}
+                    data-category={preset.category}
+                    type="button"
+                    onClick={() => onSelect(preset)}
+                  >
+                    <span className="task-preset-card-top">
+                      <span className="task-preset-category">
+                        {localized.recipe ? t('成熟 Work 模板') : categoryLabel}
+                      </span>
+                      <ArrowRight size={16} />
+                    </span>
+                    <strong>{localized.title}</strong>
+                    <span className="task-preset-description">{localized.description}</span>
+                    {localized.recipe && (
+                      <span className="task-preset-recipe">
+                        <Network size={13} />
+                        {t('{agents} 个 Agent · {stages} 个步骤', {
+                          agents: localized.recipe.agentCount,
+                          stages: localized.recipe.stageCount,
+                        })}
+                        <span>· {localized.recipe.cadence}</span>
+                      </span>
+                    )}
+                    <span className="task-preset-action">{t('填入任务描述')}</span>
+                  </button>
+                );
               })}
             </div>
           ) : (
@@ -1165,6 +1309,123 @@ function TaskTemplateDialog({
   );
 }
 
+function ConversationTemplateDialog({
+  conversation,
+  onClose,
+  onSave,
+}: {
+  conversation: WorkspaceConversation;
+  onClose: () => void;
+  onSave: (name: string) => Promise<void>;
+}) {
+  const { t } = useLanguage();
+  const [name, setName] = useState(conversation.title);
+  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) onClose();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [busy, onClose]);
+
+  const save = async () => {
+    const cleanName = name.trim();
+    if (!cleanName || !confirmed || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await onSave(cleanName);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('历史模板保存失败'));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-layer" role="dialog" aria-modal="true" aria-label={t('从历史保存模板')}>
+      <button
+        className="modal-backdrop"
+        type="button"
+        aria-label={t('关闭从历史保存模板')}
+        onClick={() => !busy && onClose()}
+      />
+      <section className="mail-setup-dialog conversation-template-dialog">
+        <header className="modal-header">
+          <div>
+            <span className="section-kicker">{t('对话历史')}</span>
+            <h2>{t('从历史保存模板')}</h2>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            disabled={busy}
+            title={t('关闭')}
+            aria-label={t('关闭从历史保存模板')}
+            onClick={onClose}
+          >
+            <X size={19} />
+          </button>
+        </header>
+        <form
+          className="task-template-content conversation-template-content"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void save();
+          }}
+        >
+          <div className="conversation-template-source">
+            <HistoryIcon size={18} />
+            <div>
+              <strong>{conversation.title}</strong>
+              <span>{t('{count} 个版本 · 来源方案 {id} · 哈希 {hash}', {
+                count: conversation.version_count,
+                id: shortId(conversation.current_plan_id),
+                hash: shortId(conversation.current_plan_sha256),
+              })}</span>
+              <p>{conversation.objective}</p>
+            </div>
+          </div>
+          <label className="conversation-template-name">
+            <span>{t('模板名称')}</span>
+            <input
+              autoFocus
+              value={name}
+              maxLength={100}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </label>
+          <label className="confirm-check conversation-template-confirm">
+            <input
+              type="checkbox"
+              checked={confirmed}
+              onChange={(event) => setConfirmed(event.target.checked)}
+            />
+            <span><ShieldCheck size={15} />{t('我确认将这个已审核方案保存为可复用任务模板')}</span>
+          </label>
+          <div className="conversation-template-boundary">
+            <ShieldCheck size={15} />
+            <span>{t('模板绑定此方案版本与哈希；保存不会启动规划或执行。')}</span>
+          </div>
+          {error && <InlineError text={error} />}
+          <div className="conversation-template-actions">
+            <button className="secondary-button" type="button" disabled={busy} onClick={onClose}>
+              {t('取消')}
+            </button>
+            <button className="primary-button" type="submit" disabled={!name.trim() || !confirmed || busy}>
+              {busy ? <LoaderCircle size={16} className="spin" /> : <Save size={16} />}
+              {t('保存模板')}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function TeamBlueprintDialog({
   blueprints,
   selectedBlueprint,
@@ -1281,13 +1542,26 @@ function WorkspaceView({
   onOrganizationSave,
   runtimeCapabilities,
   onRuntimeSave,
+  onProfileSave,
   taskTemplates,
+  workspaceConversations,
+  onOpenWorkspaceConversation,
+  onSaveConversationTemplate,
   onSaveTaskTemplate,
   onArchiveTaskTemplate,
   blueprints,
   selectedBlueprint,
   onBlueprintSelect,
   onArchiveBlueprint,
+  repeatableWorks,
+  onPrepareRepeatableWork,
+  workspaceMemoryStatus,
+  onLoadWorkspaceMemories,
+  onCreateWorkspaceMemory,
+  onProposeProcessMemory,
+  onApproveWorkspaceMemory,
+  onRevokeWorkspaceMemory,
+  onRollbackWorkspaceMemory,
   onConfirm,
   onAnswerInput,
   onControl,
@@ -1317,13 +1591,52 @@ function WorkspaceView({
     record: PlanRecord,
     assignments: AgentRuntimeAssignment[],
   ) => Promise<void>;
+  onProfileSave: (
+    record: PlanRecord,
+    profile: Exclude<ExecutionProfile, 'custom'>,
+  ) => Promise<void>;
   taskTemplates: TaskTemplate[];
+  workspaceConversations: WorkspaceConversation[];
+  onOpenWorkspaceConversation: (conversation: WorkspaceConversation) => Promise<void>;
+  onSaveConversationTemplate: (
+    conversation: WorkspaceConversation,
+    name: string,
+  ) => Promise<void>;
   onSaveTaskTemplate: (name: string, objective: string) => Promise<void>;
   onArchiveTaskTemplate: (template: TaskTemplate) => Promise<void>;
   blueprints: TeamBlueprint[];
   selectedBlueprint: TeamBlueprint | null;
   onBlueprintSelect: (blueprint: TeamBlueprint | null) => void;
   onArchiveBlueprint: (blueprint: TeamBlueprint) => Promise<void>;
+  repeatableWorks: RepeatableWork[];
+  onPrepareRepeatableWork: (work: RepeatableWork) => Promise<void>;
+  workspaceMemoryStatus: WorkspaceMemoryStatus;
+  onLoadWorkspaceMemories: (
+    query?: string,
+    includeHistory?: boolean,
+  ) => Promise<WorkspaceMemoryView[]>;
+  onCreateWorkspaceMemory: (body: {
+    kind: 'process' | 'knowledge';
+    title: string;
+    content: string;
+    tags: string[];
+    workspace?: string;
+    source_plan_id?: string | null;
+    supersedes_version_id?: string | null;
+  }) => Promise<WorkspaceMemoryView>;
+  onProposeProcessMemory: (work: RepeatableWork) => Promise<WorkspaceMemoryView>;
+  onApproveWorkspaceMemory: (
+    versionId: string,
+    reason?: string,
+  ) => Promise<WorkspaceMemoryView>;
+  onRevokeWorkspaceMemory: (
+    versionId: string,
+    reason?: string,
+  ) => Promise<WorkspaceMemoryView>;
+  onRollbackWorkspaceMemory: (
+    versionId: string,
+    reason: string,
+  ) => Promise<WorkspaceMemoryView>;
   onConfirm: (record: PlanRecord, approvalMode: ApprovalMode) => Promise<void>;
   onAnswerInput: (record: PlanRecord, requestId: string, answer: string) => Promise<void>;
   onControl: (record: PlanRecord, action: 'pause' | 'resume' | 'terminate') => Promise<void>;
@@ -1346,12 +1659,11 @@ function WorkspaceView({
   const [presetOpen, setPresetOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [blueprintOpen, setBlueprintOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [historyTemplateTarget, setHistoryTemplateTarget] = useState<WorkspaceConversation | null>(null);
+  const [conversationBusy, setConversationBusy] = useState('');
+  const [repeatableBusy, setRepeatableBusy] = useState('');
   const [error, setError] = useState('');
-  const quickStarts = [
-    t('每天早上汇总重要邮件，并列出需要回复的事项'),
-    t('检查所有自动化任务的运行状态，并生成异常报告'),
-    t('整理本周项目进展，输出下一步行动清单'),
-  ];
 
   useEffect(() => {
     setConfirmed(false);
@@ -1364,8 +1676,7 @@ function WorkspaceView({
     record && !['failed', 'cancelled', 'completed_unverified'].includes(record.status),
   );
 
-  const submit = async () => {
-    const objective = draft.trim();
+  const planObjective = async (objective: string) => {
     if (objective.length < 3 || submitting || locked) return;
     setSubmitting(true);
     setError('');
@@ -1383,6 +1694,16 @@ function WorkspaceView({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const submit = async () => {
+    await planObjective(draft.trim());
+  };
+
+  const startFeaturedTemplate = async (template: FeaturedWorkTemplate) => {
+    const objective = localizedTaskPreset(template, language).objective;
+    setDraft(objective);
+    await planObjective(objective);
   };
 
   const confirm = async () => {
@@ -1431,6 +1752,31 @@ function WorkspaceView({
     onBlueprintSelect(blueprint);
     setBlueprintOpen(false);
   }, [onBlueprintSelect]);
+  const prepareRepeatableWork = async (work: RepeatableWork) => {
+    if (submitting || repeatableBusy) return;
+    setRepeatableBusy(work.work_id);
+    setError('');
+    try {
+      await onPrepareRepeatableWork(work);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('无法准备这项可重复 Work'));
+    } finally {
+      setRepeatableBusy('');
+    }
+  };
+
+  const openWorkspaceConversation = async (conversation: WorkspaceConversation) => {
+    if (conversationBusy || submitting) return;
+    setConversationBusy(conversation.conversation_id);
+    setError('');
+    try {
+      await onOpenWorkspaceConversation(conversation);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('无法打开这段对话历史'));
+    } finally {
+      setConversationBusy('');
+    }
+  };
 
   return (
     <section className="workspace-shell" aria-label={t('AI 工作台')}>
@@ -1439,6 +1785,55 @@ function WorkspaceView({
           <div className="chat-empty">
             <div className="chat-empty-mark"><Sparkles size={24} /></div>
             <h2>{t('今天要完成什么？')}</h2>
+            {workspaceConversations.length > 0 && (
+              <section className="workspace-conversation-section" aria-labelledby="workspace-conversation-title">
+                <div className="featured-work-heading">
+                  <div>
+                    <span className="section-kicker">{t('对话历史')}</span>
+                    <strong id="workspace-conversation-title">{t('继续之前的规划')}</strong>
+                  </div>
+                  <small>{t('选择历史会恢复其最新方案版本；不会自动执行。')}</small>
+                </div>
+                <div className="workspace-conversation-list">
+                  {workspaceConversations.slice(0, 8).map((conversation) => (
+                    <article className="workspace-conversation-row" key={conversation.conversation_id}>
+                      <button
+                        className="workspace-conversation-open"
+                        type="button"
+                        disabled={Boolean(conversationBusy)}
+                        aria-label={t('打开对话：{title}', { title: conversation.title })}
+                        onClick={() => void openWorkspaceConversation(conversation)}
+                      >
+                        <span className="workspace-conversation-icon"><HistoryIcon size={17} /></span>
+                        <span className="workspace-conversation-copy">
+                          <strong>{conversation.title}</strong>
+                          <small>{t('{count} 个版本 · {time}', {
+                            count: conversation.version_count,
+                            time: formatTime(conversation.updated_at, language),
+                          })}</small>
+                        </span>
+                        <StatusBadge status={conversation.status} />
+                        {conversationBusy === conversation.conversation_id
+                          ? <LoaderCircle size={17} className="spin" />
+                          : <ChevronRight size={17} />}
+                      </button>
+                      <button
+                        className="workspace-conversation-template-button"
+                        type="button"
+                        disabled={!conversation.template_source_available || Boolean(conversationBusy)}
+                        title={conversation.template_source_available
+                          ? t('从历史创建模板')
+                          : t('此对话尚未形成完整可复用方案')}
+                        onClick={() => setHistoryTemplateTarget(conversation)}
+                      >
+                        <Save size={15} />
+                        <span>{t('保存为模板')}</span>
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
             {selectedBlueprint && (
               <div className="selected-blueprint" role="status">
                 <Network size={16} />
@@ -1448,20 +1843,66 @@ function WorkspaceView({
                 </button>
               </div>
             )}
-            <div className="quick-prompts">
-              {quickStarts.map((prompt) => (
-                <button key={prompt} type="button" onClick={() => setDraft(prompt)}>
-                  <MessageSquare size={15} />
-                  <span>{prompt}</span>
-                  <ChevronRight size={15} />
-                </button>
-              ))}
+            {repeatableWorks.length > 0 && (
+              <div className="repeatable-work-section">
+                <div className="featured-work-heading">
+                  <div>
+                    <span className="section-kicker">{t('我的可重复 Work')}</span>
+                    <strong>{t('沿用已经验证过的团队与流程')}</strong>
+                  </div>
+                  <small>{t('点击后生成待确认的新版本，不会直接执行。')}</small>
+                </div>
+                <div className="repeatable-work-list">
+                  {repeatableWorks.slice(0, 4).map((work) => (
+                    <button
+                      className="repeatable-work-row"
+                      type="button"
+                      key={work.work_id}
+                      disabled={Boolean(repeatableBusy)}
+                      onClick={() => void prepareRepeatableWork(work)}
+                    >
+                      <span className="repeatable-work-icon"><Repeat2 size={17} /></span>
+                      <span>
+                        <strong>{work.title}</strong>
+                        <small>{t('{agents} 个 Agent · 第 {version} 版 · {cadence}', {
+                          agents: work.agent_count,
+                          version: work.revision_number,
+                          cadence: t(cadenceOptions.find((item) => item.value === work.cadence)?.label || work.cadence),
+                        })}</small>
+                      </span>
+                      {repeatableBusy === work.work_id
+                        ? <LoaderCircle size={17} className="spin" />
+                        : <><span className="repeatable-work-action">{t('准备运行')}</span><ChevronRight size={17} /></>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="featured-work-section">
+              <div className="featured-work-heading">
+                <div>
+                  <span className="section-kicker">{t('重点 Work 模板')}</span>
+                  <strong>{t('从商业分析与专业证据包开始')}</strong>
+                </div>
+                <small>{t('一键生成可确认的 Agent 架构；确认前不会执行。')}</small>
+              </div>
+              <div className="featured-work-grid">
+                {FEATURED_WORK_TEMPLATES.slice(0, 4).map((template) => (
+                  <FeaturedWorkTemplateCard
+                    key={template.id}
+                    template={template}
+                    language={language}
+                    disabled={submitting || locked}
+                    onStart={(selected) => void startFeaturedTemplate(selected)}
+                  />
+                ))}
+              </div>
             </div>
             <button className="preset-library-trigger" type="button" onClick={() => setPresetOpen(true)}>
               <span className="preset-library-icon"><Library size={18} /></span>
               <span>
-                <strong>{t('浏览 27 个常用任务')}</strong>
-                <small>{t('覆盖运营、研究、增长、客户服务与专业工作流')}</small>
+                <strong>{t('浏览 31 个常用任务')}</strong>
+                <small>{t('含 10 个成熟模板，以及更多灵活任务起点')}</small>
               </span>
               <ChevronRight size={17} />
             </button>
@@ -1485,6 +1926,19 @@ function WorkspaceView({
               </span>
               <ChevronRight size={17} />
             </button>
+            <button className="preset-library-trigger memory-library-trigger" type="button" onClick={() => setMemoryOpen(true)}>
+              <span className="preset-library-icon"><BrainCircuit size={18} /></span>
+              <span>
+                <strong>{t('Workspace 记忆')}</strong>
+                <small>{workspaceMemoryStatus.approved_count
+                  ? t('{approved} 条已批准 · {candidates} 条待审核', {
+                    approved: workspaceMemoryStatus.approved_count,
+                    candidates: workspaceMemoryStatus.candidate_count,
+                  })
+                  : t('审核流程经验和知识后，供新 Work 只读使用')}</small>
+              </span>
+              <ChevronRight size={17} />
+            </button>
           </div>
         ) : (
           <>
@@ -1496,6 +1950,12 @@ function WorkspaceView({
                 )}
                 {record.source_blueprint_id && (
                   <small>{t('已参考团队蓝图 · {id}', { id: shortId(record.source_blueprint_id) })}</small>
+                )}
+                {record.memory_version_ids?.length > 0 && (
+                  <small>{t('已绑定 {count} 条已批准记忆 · {hash}', {
+                    count: record.memory_version_ids.length,
+                    hash: shortId(record.memory_snapshot_sha256),
+                  })}</small>
                 )}
               </div>
               <div className="chat-avatar user-avatar">{t('你')}</div>
@@ -1520,6 +1980,7 @@ function WorkspaceView({
                     onOrganizationSave={(lines, loops) => onOrganizationSave(record, lines, loops)}
                     runtimeCapabilities={runtimeCapabilities}
                     onRuntimeSave={(assignments) => onRuntimeSave(record, assignments)}
+                    onProfileSave={(profile) => onProfileSave(record, profile)}
                   />
                 )}
                 {['confirmed', 'dispatching', 'running', 'pause_requested', 'paused', 'resuming', 'cancel_requested', 'cancelled', 'awaiting_approval', 'awaiting_input', 'completed_unverified', 'failed'].includes(record.status) && (
@@ -1643,6 +2104,29 @@ function WorkspaceView({
           onClose={closeTeamBlueprints}
           onSelect={selectTeamBlueprint}
           onArchive={onArchiveBlueprint}
+        />
+      )}
+      {memoryOpen && (
+        <WorkspaceMemoryDialog
+          status={workspaceMemoryStatus}
+          repeatableWorks={repeatableWorks}
+          onClose={() => setMemoryOpen(false)}
+          onLoad={onLoadWorkspaceMemories}
+          onCreate={onCreateWorkspaceMemory}
+          onProposeProcess={onProposeProcessMemory}
+          onApprove={onApproveWorkspaceMemory}
+          onRevoke={onRevokeWorkspaceMemory}
+          onRollback={onRollbackWorkspaceMemory}
+        />
+      )}
+      {historyTemplateTarget && (
+        <ConversationTemplateDialog
+          conversation={historyTemplateTarget}
+          onClose={() => setHistoryTemplateTarget(null)}
+          onSave={async (name) => {
+            await onSaveConversationTemplate(historyTemplateTarget, name);
+            setHistoryTemplateTarget(null);
+          }}
         />
       )}
     </section>
@@ -1868,6 +2352,7 @@ function WorkView({
   onRevise,
   onOrganizationSave,
   onRuntimeSave,
+  onProfileSave,
   onSaveBlueprint,
   approvals,
   approvalsAvailable,
@@ -1897,6 +2382,10 @@ function WorkView({
   onRuntimeSave: (
     record: PlanRecord,
     assignments: AgentRuntimeAssignment[],
+  ) => Promise<void>;
+  onProfileSave: (
+    record: PlanRecord,
+    profile: Exclude<ExecutionProfile, 'custom'>,
   ) => Promise<void>;
   onSaveBlueprint: (record: PlanRecord, name: string) => Promise<void>;
   approvals: ApprovalCard[];
@@ -1957,6 +2446,7 @@ function WorkView({
   const canRerun = Boolean(
     selected?.plan && ['failed', 'cancelled', 'completed_unverified'].includes(selected.status),
   );
+  const canAdjustWork = Boolean(selected?.plan && canReviseWork(selected.status));
   const canFork = Boolean(selected?.plan && selected.plan_sha256 && selected.status !== 'planning');
   const currentWorkEnded = Boolean(
     selected && ['failed', 'cancelled', 'completed_unverified'].includes(selected.status),
@@ -2129,7 +2619,7 @@ function WorkView({
                     {rerunBusy
                       ? <LoaderCircle size={16} className="spin" />
                       : <RotateCcw size={16} />}
-                    {t(rerunBusy ? '准备中' : '重新运行')}
+                    {t(rerunBusy ? '准备中' : '快速复跑')}
                   </button>
                 )}
                 {canFork && (
@@ -2172,11 +2662,22 @@ function WorkView({
                         <p>{selected.plan.summary}</p>
                         <div className="plan-facts">
                           <span><Users size={15} />{selected.plan.agents.length} Agent</span>
+                          {selected.plan.execution_profile && (
+                            <span><Cpu size={15} />{t('执行档位：{profile}', { profile: t(executionProfileName(selected.plan.execution_profile)) })}</span>
+                          )}
                           <span><Clock3 size={15} />{t('约 {count} 分钟', { count: selected.plan.estimated_duration_minutes })}</span>
                           <span><CalendarClock size={15} />{selected.plan.cadence.update_interval}</span>
                           <span><Repeat2 size={15} />{t('{count} 个有界循环', { count: selected.plan.collaboration_loops.length })}</span>
                         </div>
                       </div>
+                      {canAdjustWork && (
+                        <TaskAdjustmentChat
+                          className="work-overview-adjustment"
+                          submitting={adjustmentBusy}
+                          onSubmit={reviseSelected}
+                        />
+                      )}
+                      {adjustmentError && <InlineError text={adjustmentError} />}
                       {!['planning', 'ready'].includes(selected.status) && (
                         <div className="work-overview-shortcuts">
                           <button
@@ -2206,8 +2707,6 @@ function WorkView({
                           <h3>{t('团队')}</h3>
                           <span>{selected.plan.agents.length} Agent</span>
                         </div>
-                        {selected.status === 'ready' && <TaskAdjustmentChat submitting={adjustmentBusy} onSubmit={reviseSelected} />}
-                        {adjustmentError && <InlineError text={adjustmentError} />}
                         <OrganizationChart
                           plan={selected.plan}
                           editable={selected.status === 'ready' && selected.plan.execution_mode === 'aion_team'}
@@ -2217,6 +2716,8 @@ function WorkView({
                           <RuntimeAssignments
                             agents={selected.plan.agents}
                             capabilities={runtimeCapabilities}
+                            executionProfile={selected.plan.execution_profile}
+                            onProfileSave={(profile) => onProfileSave(selected, profile)}
                             onSave={(assignments) => onRuntimeSave(selected, assignments)}
                           />
                         )}
@@ -2638,13 +3139,21 @@ function LibraryView({
           {visiblePresets.length ? (
             <div className="task-preset-grid library-grid">
               {visiblePresets.map((preset) => {
-                const localized = localizedTaskPreset(preset, language);
+                const featured = FEATURED_WORK_TEMPLATES.find((item) => item.id === preset.id);
+                const localized = localizedTaskPreset(featured || preset, language);
                 const categoryLabel = TASK_PRESET_CATEGORIES.find((item) => item.id === preset.category)?.label[language];
                 return (
-                  <button key={preset.id} className="task-preset-card" data-category={preset.category} type="button" onClick={() => onUsePreset(preset)}>
-                    <span className="task-preset-card-top"><span className="task-preset-category">{categoryLabel}</span><ArrowRight size={16} /></span>
+                  <button key={preset.id} className={`task-preset-card${localized.recipe ? ' featured' : ''}`} data-category={preset.category} type="button" onClick={() => onUsePreset(preset)}>
+                    <span className="task-preset-card-top"><span className="task-preset-category">{localized.recipe ? t('成熟 Work 模板') : categoryLabel}</span><ArrowRight size={16} /></span>
                     <strong>{localized.title}</strong>
                     <span className="task-preset-description">{localized.description}</span>
+                    {localized.recipe && (
+                      <span className="task-preset-recipe">
+                        <Network size={13} />
+                        {t('{agents} 个 Agent · {stages} 个步骤', { agents: localized.recipe.agentCount, stages: localized.recipe.stageCount })}
+                        <span>· {localized.recipe.cadence}</span>
+                      </span>
+                    )}
                     <span className="task-preset-action">{t('用于新工作')}</span>
                   </button>
                 );
@@ -4532,6 +5041,7 @@ function TaskDrawer({
   onOrganizationSave,
   runtimeCapabilities,
   onRuntimeSave,
+  onProfileSave,
   onConfirm,
   onAnswerInput,
   onControl,
@@ -4557,6 +5067,10 @@ function TaskDrawer({
   onRuntimeSave: (
     record: PlanRecord,
     assignments: AgentRuntimeAssignment[],
+  ) => Promise<void>;
+  onProfileSave: (
+    record: PlanRecord,
+    profile: Exclude<ExecutionProfile, 'custom'>,
   ) => Promise<void>;
   onConfirm: (record: PlanRecord, approvalMode: ApprovalMode) => Promise<void>;
   onAnswerInput: (record: PlanRecord, requestId: string, answer: string) => Promise<void>;
@@ -4705,6 +5219,7 @@ function TaskDrawer({
               onOrganizationSave={(lines, loops) => onOrganizationSave(record, lines, loops)}
               runtimeCapabilities={runtimeCapabilities}
               onRuntimeSave={(assignments) => onRuntimeSave(record, assignments)}
+              onProfileSave={(profile) => onProfileSave(record, profile)}
             />
           )}
 
@@ -4833,8 +5348,8 @@ function TaskAdjustmentChat({
       <div className="task-adjustment-chat-heading">
         <Bot size={18} />
         <div>
-          <strong>{t('用 AI 调整这项任务')}</strong>
-          <span>{t('基于当前方案生成新版本')}</span>
+          <strong>{t('直接对话调整这个 Work')}</strong>
+          <span>{t('可修改目标、步骤、Agent、层级、循环、节奏、产出和检查点')}</span>
         </div>
       </div>
       <div className="task-adjustment-suggestions" role="group" aria-label={t('常用任务调整')}>
@@ -4856,7 +5371,7 @@ function TaskAdjustmentChat({
         onChange={(event) => setInstruction(event.target.value)}
         maxLength={2000}
         rows={3}
-        placeholder={t('例如：引用核验不通过时，返回给解读 Agent 重新处理，最多两轮；其余内容保持不变。')}
+        placeholder={t('例如：把报告目标改为每周经营复盘，增加一名数据核验 Agent 向负责人汇报，并在数据不完整时返回重做，最多两轮。')}
       />
       <div className="task-adjustment-chat-footer">
         <span><ShieldCheck size={14} />{t('新方案待确认后运行')}</span>
@@ -4864,7 +5379,7 @@ function TaskAdjustmentChat({
           {onCancel && <button className="text-button" type="button" disabled={submitting} onClick={onCancel}>{t('取消')}</button>}
           <button className="primary-button" type="button" disabled={!ready} onClick={() => void onSubmit(instruction.trim())}>
             {submitting ? <LoaderCircle size={16} className="spin" /> : <Sparkles size={16} />}
-            {t('生成新方案')}
+            {t('生成修改版本')}
           </button>
         </div>
       </div>
@@ -5376,6 +5891,7 @@ function PlanReview({
   onOrganizationSave,
   runtimeCapabilities = [],
   onRuntimeSave,
+  onProfileSave,
 }: {
   plan: TaskPlan;
   hash: string;
@@ -5389,6 +5905,9 @@ function PlanReview({
   runtimeCapabilities?: RuntimeCapability[];
   onRuntimeSave?: (
     assignments: AgentRuntimeAssignment[],
+  ) => Promise<void>;
+  onProfileSave?: (
+    profile: Exclude<ExecutionProfile, 'custom'>,
   ) => Promise<void>;
 }) {
   const { language, t } = useLanguage();
@@ -5419,6 +5938,9 @@ function PlanReview({
         <p>{plan.summary}</p>
         <div className="plan-facts">
           <span><Users size={15} />{plan.agents.length} Agent</span>
+          {plan.execution_profile && (
+            <span><Cpu size={15} />{t('执行档位：{profile}', { profile: t(executionProfileName(plan.execution_profile)) })}</span>
+          )}
           {(plan.collaboration_loops || []).length > 0 && (
             <span><Repeat2 size={15} />{t('{count} 个有界循环', { count: plan.collaboration_loops.length })}</span>
           )}
@@ -5441,6 +5963,8 @@ function PlanReview({
         <RuntimeAssignments
           agents={plan.agents}
           capabilities={runtimeCapabilities}
+          executionProfile={plan.execution_profile}
+          onProfileSave={onProfileSave}
           onSave={onRuntimeSave}
         />
       )}
@@ -5477,13 +6001,26 @@ function PlanReview({
   );
 }
 
+function executionProfileName(profile: ExecutionProfile): string {
+  return {
+    fast: '快速',
+    balanced: '平衡',
+    deep: '深度',
+    custom: '自定义',
+  }[profile];
+}
+
 function RuntimeAssignments({
   agents,
   capabilities,
+  executionProfile,
+  onProfileSave,
   onSave,
 }: {
   agents: PlannedAgent[];
   capabilities: RuntimeCapability[];
+  executionProfile?: ExecutionProfile | null;
+  onProfileSave?: (profile: Exclude<ExecutionProfile, 'custom'>) => Promise<void>;
   onSave: (assignments: AgentRuntimeAssignment[]) => Promise<void>;
 }) {
   const { t } = useLanguage();
@@ -5492,6 +6029,7 @@ function RuntimeAssignments({
     model: string;
   }>>({});
   const [busy, setBusy] = useState(false);
+  const [profileBusy, setProfileBusy] = useState<Exclude<ExecutionProfile, 'custom'> | ''>('');
   const [error, setError] = useState('');
   useEffect(() => {
     setAssignments(Object.fromEntries(agents.map((agent) => [agent.name, {
@@ -5499,6 +6037,7 @@ function RuntimeAssignments({
       model: agent.model || 'default',
     }])));
     setError('');
+    setProfileBusy('');
   }, [agents]);
   const canSave = canSaveRuntimeRevision(agents, capabilities, assignments);
   const modelsFor = (capability: RuntimeCapability | undefined) => (
@@ -5512,7 +6051,7 @@ function RuntimeAssignments({
         }]
   );
   const save = async () => {
-    if (!canSave || busy) return;
+    if (!canSave || busy || profileBusy) return;
     setBusy(true);
     setError('');
     try {
@@ -5527,10 +6066,62 @@ function RuntimeAssignments({
       setBusy(false);
     }
   };
+  const applyProfile = async (profile: Exclude<ExecutionProfile, 'custom'>) => {
+    if (!onProfileSave || busy || profileBusy || executionProfile === profile) return;
+    setProfileBusy(profile);
+    setError('');
+    try {
+      await onProfileSave(profile);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('执行档位版本创建失败'));
+      setProfileBusy('');
+    }
+  };
+  const profiles: Array<{
+    id: Exclude<ExecutionProfile, 'custom'>;
+    icon: typeof Zap;
+    title: string;
+    detail: string;
+  }> = [
+    { id: 'fast', icon: Zap, title: '快速', detail: '适合重复运行，优先低延迟模型。' },
+    { id: 'balanced', icon: Scale, title: '平衡', detail: '新任务默认，在速度与质量之间平衡。' },
+    { id: 'deep', icon: BrainCircuit, title: '深度', detail: '适合首次或复杂分析，优先高质量模型。' },
+  ];
   return (
     <section className="review-section runtime-assignment-section">
       <div className="review-title"><h3>{t('运行时与模型')}</h3><span>{t('确认前可调整')}</span></div>
-      <p className="runtime-assignment-note">{t('先选择运行时，再选择它在本机公布的具体模型。保存会生成新的不可变方案版本，执行时不会自动换用其他模型。')}</p>
+      {onProfileSave && (
+        <div className="execution-profile-picker">
+          <div className="execution-profile-heading">
+            <span>{t('执行档位')}</span>
+            <small>{t('选择后生成新版本，并锁定下方每位 Agent 的确切模型。')}</small>
+          </div>
+          <div className="execution-profile-options">
+            {profiles.map((profile) => {
+              const Icon = profile.icon;
+              const selected = executionProfile === profile.id;
+              return (
+                <button
+                  type="button"
+                  key={profile.id}
+                  className={selected ? 'selected' : ''}
+                  aria-pressed={selected}
+                  disabled={Boolean(busy || profileBusy)}
+                  onClick={() => void applyProfile(profile.id)}
+                >
+                  {profileBusy === profile.id ? <LoaderCircle size={17} className="spin" /> : <Icon size={17} />}
+                  <span><strong>{t(profile.title)}</strong><small>{t(profile.detail)}</small></span>
+                  {selected && <Check size={15} />}
+                </button>
+              );
+            })}
+          </div>
+          {executionProfile === 'custom' && (
+            <div className="execution-profile-custom"><PencilLine size={14} />{t('当前为逐 Agent 自定义模型。')}</div>
+          )}
+        </div>
+      )}
+      <p className="runtime-assignment-note">{t('也可以逐项选择运行时和模型；手动保存后标记为自定义。执行时不会自动换用其他模型。')}</p>
       <div className="runtime-assignment-list">
         {agents.map((agent) => {
           const assignment = assignments[agent.name] || {
@@ -5607,7 +6198,7 @@ function RuntimeAssignments({
         })}
       </div>
       {!canSave && <div className="runtime-unavailable">{t('请选择至少一个有变化、且本机当前可用的运行时或模型版本。')}</div>}
-      <div className="runtime-save-row"><button className="secondary-button" type="button" disabled={!canSave || busy} onClick={() => void save()}>{busy ? <LoaderCircle size={16} className="spin" /> : <Save size={16} />}{t('保存为新版本')}</button></div>
+      <div className="runtime-save-row"><button className="secondary-button" type="button" disabled={!canSave || busy || Boolean(profileBusy)} onClick={() => void save()}>{busy ? <LoaderCircle size={16} className="spin" /> : <Save size={16} />}{t('保存为新版本')}</button></div>
       {error && <InlineError text={error} />}
     </section>
   );
@@ -5919,6 +6510,51 @@ function formatArtifactSize(size: number | null | undefined): string {
   return `${(size / 1024).toFixed(size < 10 * 1024 ? 1 : 0)} KB`;
 }
 
+function resultFactLabel(fact: ResultSummaryFact, t: Translate): string {
+  const labels: Record<ResultSummaryFact['kind'], string> = {
+    customer: '对象',
+    data_scope: '数据范围',
+    four_pillars: '四柱',
+    day_master: '日主',
+    engine: '确定性引擎',
+    subject: '主题',
+  };
+  return t(labels[fact.kind]);
+}
+
+function resultFactValue(fact: ResultSummaryFact, t: Translate): string {
+  return fact.kind === 'data_scope' && fact.value === 'synthetic'
+    ? t('合成演示数据')
+    : fact.value;
+}
+
+function resultCheckCopy(check: ResultSummaryCheck, t: Translate): { label: string; detail: string } {
+  if (check.kind === 'audit') {
+    return {
+      label: t('引用核验'),
+      detail: check.detail ? t('{count} 可追溯', { count: check.detail }) : t('审核记录已生成'),
+    };
+  }
+  if (check.kind === 'consistency') {
+    return {
+      label: t('一致性检查'),
+      detail: check.detail === '0'
+        ? t('未发现不一致')
+        : t('{count} 项待检查', { count: check.detail || '—' }),
+    };
+  }
+  if (check.kind === 'signoff') {
+    return {
+      label: t('人工审签'),
+      detail: t(check.state === 'pass' ? '已附签署记录' : '审签文件尚未成为已登记证据'),
+    };
+  }
+  return {
+    label: t('证据绑定'),
+    detail: t('{count} 个文件已绑定', { count: check.detail }),
+  };
+}
+
 function RunArtifactPreviewDialog({
   preview,
   onClose,
@@ -5961,6 +6597,7 @@ function RunArtifactPreviewDialog({
 function RunArtifactsPanel({ record }: { record: PlanRecord }) {
   const { t } = useLanguage();
   const [artifacts, setArtifacts] = useState<PlanArtifact[]>([]);
+  const [summaryPreviews, setSummaryPreviews] = useState<PlanArtifactPreview[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [previewLoading, setPreviewLoading] = useState('');
@@ -5969,12 +6606,24 @@ function RunArtifactsPanel({ record }: { record: PlanRecord }) {
   useEffect(() => {
     let cancelled = false;
     setArtifacts([]);
+    setSummaryPreviews([]);
     setLoading(true);
     setError('');
     setPreview(null);
     void getPlanArtifacts(record.plan_id)
-      .then((rows) => {
-        if (!cancelled) setArtifacts(rows);
+      .then(async (rows) => {
+        if (cancelled) return;
+        setArtifacts(rows);
+        const results = await Promise.allSettled(
+          selectResultPreviewArtifacts(rows).map((artifact) => (
+            getPlanArtifact(record.plan_id, artifact.name)
+          )),
+        );
+        if (!cancelled) {
+          setSummaryPreviews(results.flatMap((result) => (
+            result.status === 'fulfilled' ? [result.value] : []
+          )));
+        }
       })
       .catch(() => {
         if (!cancelled) setError(t('运行文件暂时无法读取'));
@@ -6001,6 +6650,10 @@ function RunArtifactsPanel({ record }: { record: PlanRecord }) {
   };
 
   const stageSummary = stageProgressSummary(record.execution?.progress?.stages || []);
+  const resultSummary = useMemo(
+    () => buildResultSummary(summaryPreviews, artifacts),
+    [artifacts, summaryPreviews],
+  );
   const expectsPdf = Boolean(record.plan?.artifacts.some((item) => /pdf/i.test(item)));
   const hasPdf = artifacts.some((artifact) => (
     artifact.mime === 'application/pdf' || artifact.name.toLowerCase().endsWith('.pdf')
@@ -6011,44 +6664,134 @@ function RunArtifactsPanel({ record }: { record: PlanRecord }) {
       <header className="run-artifacts-heading">
         <div>
           <span className="section-kicker">{t('本次运行')}</span>
-          <h3>{t('生成的文件')}</h3>
+          <h3>{t('最终结果')}</h3>
         </div>
-        <span>{t('{count} 个文件', { count: artifacts.length })}</span>
+        <span>{t('结论优先 · 证据可展开')}</span>
       </header>
-      <div className="run-result-facts">
-        <span><strong>{loading ? '—' : artifacts.length}</strong><small>{t('运行文件')}</small></span>
-        <span><strong>{stageSummary.observed ? `${stageSummary.completed}/${stageSummary.total}` : '—'}</strong><small>{t('Agent 上报阶段完成')}</small></span>
-        <span><strong>{record.execution?.outcome_verified ? t('已核验') : t('待核验')}</strong><small>{t('业务结果')}</small></span>
-      </div>
-      {loading && <div className="run-artifacts-loading"><LoaderCircle size={17} className="spin" />{t('正在读取运行文件')}</div>}
-      {!loading && artifacts.length > 0 && (
-        <div className="run-artifact-list">
-          {artifacts.map((artifact) => (
-            <article className="run-artifact-row" key={artifact.name}>
-              <span className="run-artifact-file-icon"><FileJson size={19} /></span>
-              <div className="run-artifact-copy">
-                <strong>{artifact.name}</strong>
-                <small>{formatArtifactSize(artifact.size)} · SHA-256 {artifact.sha256?.slice(0, 12) || '—'}...</small>
-                <span className={artifact.evidence_status === 'registered' ? 'registered' : undefined}>
-                  {t(artifact.evidence_status === 'registered'
-                    ? 'CAS 证据 · 已绑定本次执行'
-                    : '运行目录文件 · 尚未登记为结果证据')}
-                </span>
-              </div>
-              <button
-                className="secondary-button"
-                type="button"
-                disabled={!artifact.preview_supported || Boolean(previewLoading)}
-                onClick={() => void openArtifact(artifact)}
-              >
-                {previewLoading === artifact.name
-                  ? <LoaderCircle size={15} className="spin" />
-                  : artifact.artifact_type === 'candidate_knowledge_base' ? <BookOpen size={15} /> : <Search size={15} />}
-                {t(artifact.preview_supported ? '查看内容' : '暂不支持预览')}
-              </button>
-            </article>
+      {loading && <div className="run-artifacts-loading"><LoaderCircle size={17} className="spin" />{t('正在整理最终结果')}</div>}
+      {!loading && resultSummary.report && (
+        <section className="run-primary-report">
+          <span className="run-primary-report-icon"><FileCheck2 size={22} /></span>
+          <div>
+            <strong>{t('完整报告')}</strong>
+            <span>{resultSummary.report.name} · {formatArtifactSize(resultSummary.report.size)}</span>
+            <small>{t(resultSummary.report.evidence_status === 'registered'
+              ? '报告已按哈希绑定到本次运行，可直接打开。'
+              : '已发现报告文件，但尚未登记为本次运行证据。')}</small>
+          </div>
+          {resultSummary.report.evidence_status === 'registered' ? (
+            <a
+              className="primary-button"
+              href={planArtifactContentUrl(record.plan_id, resultSummary.report.name)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <ExternalLink size={16} />{t('打开完整报告')}
+            </a>
+          ) : (
+            <button className="secondary-button" type="button" disabled>
+              <FileCheck2 size={16} />{t('报告尚未登记')}
+            </button>
+          )}
+        </section>
+      )}
+      {!loading && resultSummary.facts.length > 0 && (
+        <dl className="run-summary-facts">
+          {resultSummary.facts.map((fact) => (
+            <div key={fact.kind}>
+              <dt>{resultFactLabel(fact, t)}</dt>
+              <dd>{resultFactValue(fact, t)}</dd>
+            </div>
           ))}
-        </div>
+        </dl>
+      )}
+      {!loading && resultSummary.conclusions.length > 0 && (
+        <section className="run-summary-conclusions">
+          <header>
+            <div><span className="section-kicker">{t('可读结果')}</span><h4>{t('主要结论')}</h4></div>
+            <span>{t('{count} 条', { count: resultSummary.conclusions.length })}</span>
+          </header>
+          <ol>
+            {resultSummary.conclusions.slice(0, 6).map((conclusion, index) => (
+              <li key={`${conclusion.source}-${conclusion.title}-${index}`}>
+                <span>{index + 1}</span>
+                <div>{conclusion.title && <strong>{conclusion.title}</strong>}<p>{conclusion.statement}</p></div>
+              </li>
+            ))}
+          </ol>
+          {resultSummary.conclusions.length > 6 && (
+            <details className="run-more-conclusions">
+              <summary>{t('查看其余 {count} 条结论', { count: resultSummary.conclusions.length - 6 })}<ChevronDown size={15} /></summary>
+              <ol start={7}>
+                {resultSummary.conclusions.slice(6).map((conclusion, index) => (
+                  <li key={`${conclusion.source}-${conclusion.title}-${index + 6}`}>
+                    <span>{index + 7}</span>
+                    <div>{conclusion.title && <strong>{conclusion.title}</strong>}<p>{conclusion.statement}</p></div>
+                  </li>
+                ))}
+              </ol>
+            </details>
+          )}
+        </section>
+      )}
+      {!loading && resultSummary.checks.length > 0 && (
+        <section className="run-summary-checks" aria-label={t('结果检查')}>
+          {resultSummary.checks.map((check) => {
+            const copy = resultCheckCopy(check, t);
+            return (
+              <div className={check.state} key={check.kind}>
+                {check.state === 'pass' ? <CheckCircle2 size={17} /> : <AlertTriangle size={17} />}
+                <span><strong>{copy.label}</strong><small>{copy.detail}</small></span>
+              </div>
+            );
+          })}
+        </section>
+      )}
+      {!loading && !resultSummary.hasReadableSummary && artifacts.length > 0 && (
+        <div className="run-summary-unavailable"><AlertTriangle size={16} /><span>{t('本次运行没有标准化的可读摘要；完整报告和技术证据仍可查看。')}</span></div>
+      )}
+      {!loading && artifacts.length > 0 && (
+        <details className="run-technical-evidence">
+          <summary>
+            <Database size={17} />
+            <span><strong>{t('技术证据')}</strong><small>{t('{count} 个文件 · 哈希与原始数据', { count: artifacts.length })}</small></span>
+            <ChevronDown size={16} />
+          </summary>
+          <div className="run-technical-evidence-body">
+            <div className="run-result-facts">
+              <span><strong>{artifacts.length}</strong><small>{t('运行文件')}</small></span>
+              <span><strong>{stageSummary.observed ? `${stageSummary.completed}/${stageSummary.total}` : '—'}</strong><small>{t('Agent 上报阶段完成')}</small></span>
+              <span><strong>{record.execution?.outcome_verified ? t('已核验') : t('待核验')}</strong><small>{t('业务结果')}</small></span>
+            </div>
+            <div className="run-artifact-list">
+              {artifacts.map((artifact) => (
+                <article className="run-artifact-row" key={artifact.name}>
+                  <span className="run-artifact-file-icon"><FileJson size={19} /></span>
+                  <div className="run-artifact-copy">
+                    <strong>{artifact.name}</strong>
+                    <small>{formatArtifactSize(artifact.size)} · SHA-256 {artifact.sha256?.slice(0, 12) || '—'}...</small>
+                    <span className={artifact.evidence_status === 'registered' ? 'registered' : undefined}>
+                      {t(artifact.evidence_status === 'registered'
+                        ? 'CAS 证据 · 已绑定本次执行'
+                        : '运行目录文件 · 尚未登记为结果证据')}
+                    </span>
+                  </div>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={!artifact.preview_supported || Boolean(previewLoading)}
+                    onClick={() => void openArtifact(artifact)}
+                  >
+                    {previewLoading === artifact.name
+                      ? <LoaderCircle size={15} className="spin" />
+                      : artifact.artifact_type === 'candidate_knowledge_base' ? <BookOpen size={15} /> : <Search size={15} />}
+                    {t(artifact.preview_supported ? '查看内容' : '暂不支持预览')}
+                  </button>
+                </article>
+              ))}
+            </div>
+          </div>
+        </details>
       )}
       {!loading && artifacts.length === 0 && !error && (
         <div className="work-empty compact-empty"><FileCheck2 size={24} /><strong>{t('未发现运行文件')}</strong><span>{t('Agent 回应或进程结束并不等于已经生成可交付文件。')}</span></div>

@@ -17,15 +17,43 @@ export interface TaskPreset {
   objective: LocalizedText;
 }
 
+export interface WorkTemplateRecipe {
+  agentCount: number;
+  stageCount: number;
+  cadence: LocalizedText;
+  team: LocalizedText;
+  outputs: Record<UiLanguage, string[]>;
+  checkpoint: LocalizedText;
+}
+
+export interface FeaturedWorkTemplate extends TaskPreset {
+  recipe: WorkTemplateRecipe;
+}
+
+export interface LocalizedWorkTemplateRecipe extends Omit<
+  WorkTemplateRecipe,
+  'cadence' | 'team' | 'outputs' | 'checkpoint'
+> {
+  cadence: string;
+  team: string;
+  outputs: string[];
+  checkpoint: string;
+}
+
 export interface LocalizedTaskPreset extends Omit<TaskPreset, 'title' | 'description' | 'objective'> {
   title: string;
   description: string;
   objective: string;
+  recipe?: LocalizedWorkTemplateRecipe;
 }
 
 export const TASK_PRESET_CATEGORIES: TaskPresetCategory[];
 export const TASK_PRESETS: TaskPreset[];
-export function localizedTaskPreset(preset: TaskPreset, language: UiLanguage): LocalizedTaskPreset;
+export const FEATURED_WORK_TEMPLATES: FeaturedWorkTemplate[];
+export function localizedTaskPreset(
+  preset: TaskPreset | FeaturedWorkTemplate,
+  language: UiLanguage,
+): LocalizedTaskPreset;
 export function filterTaskPresets(
   language: UiLanguage,
   category?: 'all' | TaskPresetCategoryId,

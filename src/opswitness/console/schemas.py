@@ -36,6 +36,15 @@ class ApprovalMode(StrEnum):
     MANUAL_ALL = "manual_all"
 
 
+class ExecutionProfile(StrEnum):
+    """A reviewed latency/quality intent; exact models remain hash-bound per agent."""
+
+    FAST = "fast"
+    BALANCED = "balanced"
+    DEEP = "deep"
+    CUSTOM = "custom"
+
+
 class PlannedAgent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -86,6 +95,7 @@ class TaskPlan(BaseModel):
     schema_version: Literal[1] = 1
     title: str = Field(min_length=1, max_length=120)
     summary: str = Field(min_length=1, max_length=1200)
+    execution_profile: ExecutionProfile | None = None
     execution_mode: Literal["aion_team", "workflow"]
     workflow_id: str | None = Field(default=None, min_length=1, max_length=100)
     agents: list[PlannedAgent] = Field(min_length=1, max_length=5)
@@ -229,6 +239,7 @@ class RuntimeRevisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     assignments: list[AgentRuntimeAssignment] = Field(min_length=1, max_length=5)
+    execution_profile: Literal[ExecutionProfile.CUSTOM] = ExecutionProfile.CUSTOM
     confirmed: Literal[True]
 
     @model_validator(mode="after")
@@ -248,6 +259,24 @@ class DeletePlanRequest(BaseModel):
 class RerunPlanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    execution_profile: Literal[
+        ExecutionProfile.FAST,
+        ExecutionProfile.BALANCED,
+        ExecutionProfile.DEEP,
+    ] = ExecutionProfile.FAST
+    confirmed: Literal[True]
+
+
+class ExecutionProfileRevisionRequest(BaseModel):
+    """Apply one model preset by creating a new immutable reviewed plan version."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    execution_profile: Literal[
+        ExecutionProfile.FAST,
+        ExecutionProfile.BALANCED,
+        ExecutionProfile.DEEP,
+    ]
     confirmed: Literal[True]
 
 
@@ -507,6 +536,8 @@ class PlanRecord(BaseModel):
     preferred_cadence: Literal["once", "daily", "weekdays", "weekly", "manual"] = "once"
     source_blueprint_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     source_blueprint_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    memory_snapshot_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    memory_version_ids: list[str] = Field(default_factory=list, max_length=20)
     created_at: str = Field(default_factory=utc_now)
     updated_at: str = Field(default_factory=utc_now)
     confirmed_at: str | None = None
@@ -658,6 +689,39 @@ class TeamBlueprintArchiveRequest(BaseModel):
     confirmed: Literal[True]
 
 
+class WorkspaceConversation(BaseModel):
+    """Read-only projection of one immutable plan revision chain."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    conversation_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    current_plan_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    current_plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    title: str = Field(min_length=1, max_length=120)
+    objective: str = Field(min_length=3, max_length=2000)
+    status: Literal[
+        "planning",
+        "ready",
+        "confirmed",
+        "dispatching",
+        "running",
+        "awaiting_approval",
+        "awaiting_input",
+        "pause_requested",
+        "paused",
+        "resuming",
+        "cancel_requested",
+        "cancelled",
+        "completed_unverified",
+        "failed",
+    ]
+    version_count: int = Field(ge=1, le=100)
+    created_at: str
+    updated_at: str
+    template_source_available: bool
+
+
 class TaskTemplate(BaseModel):
     """A private reusable task objective; selecting one never starts planning."""
 
@@ -669,7 +733,15 @@ class TaskTemplate(BaseModel):
     objective: str = Field(min_length=3, max_length=2000)
     created_at: str = Field(default_factory=utc_now)
     archived_at: str | None = None
+    source_plan_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    source_plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     template_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def validate_source(self) -> "TaskTemplate":
+        if (self.source_plan_id is None) != (self.source_plan_sha256 is None):
+            raise ValueError("task template source id and hash must be provided together")
+        return self
 
 
 class TaskTemplateSaveRequest(BaseModel):
@@ -680,9 +752,106 @@ class TaskTemplateSaveRequest(BaseModel):
     confirmed: Literal[True]
 
 
+class TaskTemplateFromPlanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=100)
+    confirmed: Literal[True]
+
+
 class TaskTemplateArchiveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    confirmed: Literal[True]
+
+
+class RepeatableWork(BaseModel):
+    """A read-only Work Blueprint projection backed by an immutable reviewed plan."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    work_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    source_plan_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    source_plan_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    title: str = Field(min_length=1, max_length=120)
+    objective: str = Field(min_length=3, max_length=2000)
+    revision_number: int = Field(ge=1, le=100)
+    agent_count: int = Field(ge=1, le=5)
+    cadence: Literal["once", "daily", "weekdays", "weekly", "manual"]
+    last_status: Literal["failed", "cancelled", "completed_unverified"]
+    updated_at: str
+    outcome_verified: bool = False
+
+
+class WorkspaceMemoryVersion(BaseModel):
+    """Immutable Obsidian-compatible memory document metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    memory_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    version_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    version_number: int = Field(ge=1, le=1000)
+    kind: Literal["process", "knowledge"]
+    title: str = Field(min_length=1, max_length=120)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    workspace: str = Field(default="", max_length=1024)
+    source_plan_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    source_plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    parent_version_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$",
+    )
+    created_at: str = Field(default_factory=utc_now)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    document_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    relative_path: str = Field(min_length=1, max_length=512)
+
+
+class WorkspaceMemoryView(WorkspaceMemoryVersion):
+    """Operator view: immutable content plus ledger-derived lifecycle state."""
+
+    state: Literal["candidate", "approved", "superseded", "revoked"]
+    active: bool = False
+    content: str = Field(min_length=1, max_length=24_000)
+    decided_at: str | None = None
+
+
+class WorkspaceMemoryCandidateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["process", "knowledge"]
+    title: str = Field(min_length=1, max_length=120)
+    content: str = Field(min_length=3, max_length=24_000)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    workspace: str = Field(default="", max_length=1024)
+    source_plan_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    supersedes_version_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$",
+    )
+    confirmed: Literal[True]
+
+
+class ProcessMemoryProposalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    confirmed: Literal[True]
+
+
+class WorkspaceMemoryDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(default="", max_length=500)
+    confirmed: Literal[True]
+
+
+class WorkspaceMemoryRollbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=3, max_length=500)
     confirmed: Literal[True]
 
 

@@ -20,4 +20,6 @@ export function canSaveRuntimeRevision(
 
 export function selectedBlueprintId(blueprint: { blueprint_id?: string } | null | undefined): string | null;
 
+export function canReviseWork(status: string): boolean;
+
 export function taskAdjustmentExamples(language?: 'en' | 'zh'): Array<{ label: string; instruction: string }>;

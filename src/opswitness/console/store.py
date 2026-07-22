@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from opswitness.console.schemas import PlanRecord, TaskTemplate, TeamBlueprint, utc_now
+from opswitness.console.schemas import (
+    PlanRecord,
+    TaskTemplate,
+    TeamBlueprint,
+    WorkspaceMemoryVersion,
+    utc_now,
+)
 from opswitness.fsutil import atomic_write
 
 
@@ -21,6 +28,10 @@ class BlueprintNotFound(ValueError):
 
 
 class TaskTemplateNotFound(ValueError):
+    pass
+
+
+class WorkspaceMemoryNotFound(ValueError):
     pass
 
 
@@ -294,3 +305,158 @@ class TaskTemplateStore:
             )
             + "\n"
         ).encode()
+
+
+class WorkspaceMemoryStore:
+    """Immutable Markdown memory versions with private machine-readable metadata."""
+
+    BODY_MARKER = "<!-- opswitness-memory-body -->\n"
+
+    def __init__(self, root: Path) -> None:
+        self.root = root.expanduser() / "workspace-memory"
+        self.vault_dir = self.root / "vault"
+        self.metadata_dir = self.root / ".opswitness" / "versions"
+
+    def _ensure(self) -> None:
+        for path in (self.root, self.vault_dir, self.metadata_dir):
+            if path.is_symlink():
+                raise ValueError("workspace memory directories must not be symlinks")
+            path.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.chmod(path, 0o700)
+
+    def _metadata_path(self, version_id: str) -> Path:
+        self._validate_id(version_id)
+        return self.metadata_dir / f"{version_id}.json"
+
+    def _document_path(self, version: WorkspaceMemoryVersion) -> Path:
+        self._validate_id(version.memory_id)
+        self._validate_id(version.version_id)
+        return (
+            self.vault_dir
+            / version.kind
+            / version.memory_id
+            / f"v{version.version_number:04d}-{version.version_id}.md"
+        )
+
+    @staticmethod
+    def _validate_id(value: str) -> None:
+        if not value or any(char not in "0123456789ABCDEFGHJKMNPQRSTVWXYZ" for char in value):
+            raise WorkspaceMemoryNotFound("invalid workspace memory id")
+
+    @classmethod
+    def render_document(cls, version: WorkspaceMemoryVersion, content: str) -> bytes:
+        def quoted(value: str) -> str:
+            return json.dumps(value, ensure_ascii=False)
+
+        lines = [
+            "---",
+            "opswitness_schema: 1",
+            f"memory_id: {quoted(version.memory_id)}",
+            f"version_id: {quoted(version.version_id)}",
+            f"version_number: {version.version_number}",
+            f"kind: {quoted(version.kind)}",
+            f"title: {quoted(version.title)}",
+            f"created_at: {quoted(version.created_at)}",
+            f"content_sha256: {quoted(version.content_sha256)}",
+        ]
+        if version.tags:
+            lines.append("tags:")
+            lines.extend(f"  - {quoted(tag)}" for tag in version.tags)
+        else:
+            lines.append("tags: []")
+        if version.workspace:
+            lines.append(f"workspace: {quoted(version.workspace)}")
+        if version.source_plan_id:
+            lines.append(f"source_plan_id: {quoted(version.source_plan_id)}")
+        if version.source_plan_sha256:
+            lines.append(f"source_plan_sha256: {quoted(version.source_plan_sha256)}")
+        if version.parent_version_id:
+            lines.append(f"parent_version_id: {quoted(version.parent_version_id)}")
+        lines.extend(
+            [
+                "---",
+                "",
+                f"# {version.title}",
+                "",
+                cls.BODY_MARKER.rstrip("\n"),
+                content.rstrip(),
+                "",
+            ]
+        )
+        return "\n".join(lines).encode()
+
+    def relative_document_path(self, version: WorkspaceMemoryVersion) -> str:
+        return str(self._document_path(version).relative_to(self.root))
+
+    def discard_uncommitted(self, version: WorkspaceMemoryVersion) -> None:
+        """Remove a version only when its immutable bytes still match the caller's record."""
+        metadata_path = self._metadata_path(version.version_id)
+        document_path = self._document_path(version)
+        if metadata_path.exists():
+            stored = WorkspaceMemoryVersion.model_validate_json(metadata_path.read_text())
+            if stored != version:
+                raise ValueError("workspace memory metadata changed during rollback")
+        if document_path.exists():
+            document = document_path.read_bytes()
+            if hashlib.sha256(document).hexdigest() != version.document_sha256:
+                raise ValueError("workspace memory document changed during rollback")
+        metadata_path.unlink(missing_ok=True)
+        document_path.unlink(missing_ok=True)
+
+    def create(self, version: WorkspaceMemoryVersion, content: str) -> WorkspaceMemoryVersion:
+        self._ensure()
+        metadata_path = self._metadata_path(version.version_id)
+        document_path = self._document_path(version)
+        if metadata_path.exists() or document_path.exists():
+            raise ValueError(f"workspace memory version already exists: {version.version_id}")
+        document = self.render_document(version, content)
+        if hashlib.sha256(document).hexdigest() != version.document_sha256:
+            raise ValueError("workspace memory document hash does not match")
+        document_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(document_path.parent, 0o700)
+        atomic_write(document_path, document, mode=0o600)
+        atomic_write(
+            metadata_path,
+            (
+                json.dumps(
+                    version.model_dump(mode="json"),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode(),
+            mode=0o600,
+        )
+        return version
+
+    def get(self, version_id: str) -> tuple[WorkspaceMemoryVersion, str]:
+        self._ensure()
+        metadata_path = self._metadata_path(version_id)
+        try:
+            if metadata_path.is_symlink():
+                raise ValueError("workspace memory metadata must not be a symlink")
+            version = WorkspaceMemoryVersion.model_validate_json(metadata_path.read_text())
+            document_path = self._document_path(version)
+            if document_path.is_symlink():
+                raise ValueError("workspace memory document must not be a symlink")
+            document = document_path.read_bytes()
+        except FileNotFoundError as exc:
+            raise WorkspaceMemoryNotFound(f"unknown workspace memory version: {version_id}") from exc
+        if hashlib.sha256(document).hexdigest() != version.document_sha256:
+            raise ValueError("workspace memory document integrity failed")
+        marker = self.BODY_MARKER.encode()
+        if marker not in document:
+            raise ValueError("workspace memory body marker is missing")
+        content = document.split(marker, 1)[1].decode().rstrip()
+        if hashlib.sha256(content.encode()).hexdigest() != version.content_sha256:
+            raise ValueError("workspace memory content integrity failed")
+        return version, content
+
+    def list_versions(self) -> list[WorkspaceMemoryVersion]:
+        self._ensure()
+        rows: list[WorkspaceMemoryVersion] = []
+        for path in sorted(self.metadata_dir.glob("*.json")):
+            if path.is_symlink():
+                raise ValueError("workspace memory metadata must not be a symlink")
+            rows.append(WorkspaceMemoryVersion.model_validate_json(path.read_text()))
+        return rows

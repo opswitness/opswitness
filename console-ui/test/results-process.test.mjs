@@ -36,19 +36,26 @@ test('History owns Process and Results for the exact selected run version', () =
   assert.doesNotMatch(history[0], /隐藏推理[^<]*显示/);
 });
 
-test('Historical Results fetches plan-scoped generated files and labels them unverified', () => {
+test('Historical Results leads with readable output and keeps raw evidence collapsible', () => {
   assert.match(typeSource, /export type PlanArtifact/);
   assert.match(typeSource, /evidence_status: 'workspace_unverified'/);
   assert.match(apiSource, /getPlanArtifacts/);
   assert.match(apiSource, /getPlanArtifact/);
+  assert.match(apiSource, /planArtifactContentUrl/);
   assert.match(
     apiSource,
     /plans\/\$\{encodeURIComponent\(planId\)\}\/artifacts\/\$\{encodeURIComponent\(artifactName\)\}/,
   );
   assert.match(appSource, /function RunArtifactsPanel/);
+  assert.match(appSource, /buildResultSummary/);
+  assert.match(appSource, /最终结果/);
+  assert.match(appSource, /打开完整报告/);
+  assert.match(appSource, /<details className="run-technical-evidence">/);
   assert.match(appSource, /运行目录文件 · 尚未登记为结果证据/);
   assert.match(appSource, /方案要求 PDF，但本次运行目录中未发现 PDF/);
   assert.match(appSource, /function RunArtifactPreviewDialog/);
+  assert.match(styleSource, /\.run-primary-report/);
+  assert.match(styleSource, /\.run-summary-conclusions/);
   assert.doesNotMatch(appSource, /dangerouslySetInnerHTML/);
 });
 

@@ -6,7 +6,7 @@ const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8
 const apiSource = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8');
 
 test('the workspace keeps common tasks, personal templates, and team blueprints together', () => {
-  const commonIndex = appSource.indexOf("t('浏览 27 个常用任务')");
+  const commonIndex = appSource.indexOf("t('浏览 31 个常用任务')");
   const personalIndex = appSource.indexOf("t('我的任务模板')", commonIndex);
   const blueprintIndex = appSource.indexOf("t('团队蓝图')", personalIndex);
   assert.ok(commonIndex >= 0);

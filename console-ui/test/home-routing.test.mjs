@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
+  canReviseWork,
   canSaveRuntimeRevision,
   homeActionView,
   observationPresentation,
@@ -85,14 +86,30 @@ test('new confirmations default to uninterrupted Auto with manual approval opt-i
   assert.match(appSource, /任务确认后，执行工具会自动单次放行并保留完整审计记录/);
 });
 
-test('ended work exposes a review-first rerun action', () => {
+test('ended work exposes a review-first fast rerun action', () => {
   const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
   const workView = appSource.match(/function WorkView\([\s\S]*?function SystemAutomationHistory/);
   assert.ok(workView);
   assert.match(workView[0], /\['failed', 'cancelled', 'completed_unverified'\]\.includes/);
   assert.match(workView[0], /onRerun/);
-  assert.match(workView[0], /重新运行/);
+  assert.match(workView[0], /快速复跑/);
   assert.match(appSource, /preparePlanRerun/);
+});
+
+test('execution profiles create immutable model-pinned versions without dispatching', () => {
+  const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const apiSource = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8');
+  const typeSource = readFileSync(new URL('../src/types.ts', import.meta.url), 'utf8');
+  assert.match(typeSource, /'fast' \| 'balanced' \| 'deep' \| 'custom'/);
+  assert.match(apiSource, /execution-profile/);
+  assert.match(apiSource, /executionProfile: 'fast' \| 'balanced' \| 'deep'/);
+  assert.match(apiSource, /executionProfile: 'fast' \| 'balanced' \| 'deep' = 'fast'/);
+  assert.match(appSource, /适合重复运行，优先低延迟模型/);
+  assert.match(appSource, /新任务默认，在速度与质量之间平衡/);
+  assert.match(appSource, /适合首次或复杂分析，优先高质量模型/);
+  assert.match(appSource, /选择后生成新版本，并锁定下方每位 Agent 的确切模型/);
+  assert.match(appSource, /执行时不会自动换用其他模型/);
+  assert.doesNotMatch(apiSource.match(/function revisePlanExecutionProfile[\s\S]*?\n}/)?.[0] || '', /confirmPlan|dispatch/);
 });
 
 test('Work history continues an exact ended Aion run as a new audited version', () => {
@@ -166,10 +183,37 @@ test('blueprint reuse submits only an opaque blueprint id', () => {
 });
 
 test('task adjustment chat offers a bounded loop draft without executing work', () => {
+  const examples = taskAdjustmentExamples();
   const loop = taskAdjustmentExamples().find((item) => item.label === 'Adjust collaboration loops');
   assert.ok(loop);
   assert.match(loop.instruction, /interpretation agent/);
   assert.match(loop.instruction, /at most two rounds/);
   assert.doesNotMatch(loop.instruction, /confirm and run/i);
-  assert.equal(taskAdjustmentExamples('zh')[0].label, '调整循环协作');
+  assert.equal(examples.length, 5);
+  assert.ok(taskAdjustmentExamples('zh').some((item) => item.label === '调整循环协作'));
+});
+
+test('Work overview offers AI revision for reviewable and ended versions only', () => {
+  for (const status of ['ready', 'failed', 'cancelled', 'completed_unverified']) {
+    assert.equal(canReviseWork(status), true);
+  }
+  for (const status of ['planning', 'confirmed', 'dispatching', 'running', 'awaiting_approval', 'awaiting_input']) {
+    assert.equal(canReviseWork(status), false);
+  }
+
+  const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  const workView = appSource.match(/function WorkView\([\s\S]*?function SystemAutomationHistory/);
+  assert.ok(workView);
+  assert.match(workView[0], /canAdjustWork/);
+  assert.match(workView[0], /className="work-overview-adjustment"/);
+  assert.ok(
+    workView[0].indexOf('work-overview-adjustment')
+      < workView[0].indexOf('work-overview-team'),
+  );
+
+  const adjustmentChat = appSource.match(/function TaskAdjustmentChat\([\s\S]*?function StepTrack/);
+  assert.ok(adjustmentChat);
+  assert.match(adjustmentChat[0], /直接对话调整这个 Work/);
+  assert.match(adjustmentChat[0], /生成修改版本/);
+  assert.doesNotMatch(adjustmentChat[0], /confirmPlan|dispatchPlan/);
 });

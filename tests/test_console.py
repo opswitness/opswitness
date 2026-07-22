@@ -28,6 +28,8 @@ from opswitness.console.schemas import (
     ContinueRunRequest,
     DeletePlanRequest,
     ExecutionApprovalModeRequest,
+    ExecutionProfile,
+    ExecutionProfileRevisionRequest,
     ExecutionProgress,
     ExecutionControlRequest,
     ExecutionState,
@@ -37,6 +39,7 @@ from opswitness.console.schemas import (
     OrganizationRevisionRequest,
     PlanRecord,
     PlanRequest,
+    ProcessMemoryProposalRequest,
     ProviderConnectionRequest,
     RerunPlanRequest,
     RevisePlanRequest,
@@ -44,10 +47,14 @@ from opswitness.console.schemas import (
     RuntimeInputAnswerRequest,
     TaskPlan,
     TaskTemplateArchiveRequest,
+    TaskTemplateFromPlanRequest,
     TaskTemplateSaveRequest,
     TelegramConfigureRequest,
     TeamBlueprintArchiveRequest,
     TeamBlueprintSaveRequest,
+    WorkspaceMemoryCandidateRequest,
+    WorkspaceMemoryDecisionRequest,
+    WorkspaceMemoryRollbackRequest,
 )
 from opswitness.console.service import (
     DISPATCH_INTERRUPTED,
@@ -75,6 +82,7 @@ from opswitness.console.service import (
     ConsoleUnavailable,
     RuntimeArtifactNotFound,
     _fleet_health,
+    _hashable_plan_payload,
     _mail_setup_detail,
     _paperclip_launchd_label,
 )
@@ -228,6 +236,7 @@ class FakeAion:
         self.revision_instruction = ""
         self.runtime_capabilities: list[dict] = []
         self.blueprint: dict | None = None
+        self.memory_snapshot: list[dict] = []
         self.stale_sessions: list[EphemeralSession] = []
         self.recovered_sessions: list[EphemeralSession] = []
         self.local_providers = {"ollama"}
@@ -338,6 +347,7 @@ class FakeAion:
         revision_instruction="",
         runtime_capabilities=None,
         blueprint=None,
+        memory_snapshot=None,
     ):
         del plan_id, request, catalog, assistant_id
         self.generated += 1
@@ -345,6 +355,7 @@ class FakeAion:
         self.revision_instruction = revision_instruction
         self.runtime_capabilities = list(runtime_capabilities or [])
         self.blueprint = blueprint
+        self.memory_snapshot = list(memory_snapshot or [])
         if progress is not None:
             progress("generating_plan", 30)
             progress("validating", 78)
@@ -688,10 +699,24 @@ def test_revision_prompt_carries_the_previous_plan_and_requires_a_real_change():
         _validate_revision_changed(previous.model_copy(deep=True), previous)
 
 
+def test_execution_profile_keeps_legacy_plan_hash_payload_unchanged():
+    legacy = _plan()
+    legacy_payload = _hashable_plan_payload(legacy)
+    assert legacy.execution_profile is None
+    assert "execution_profile" not in legacy_payload
+
+    profiled = legacy.model_copy(update={"execution_profile": ExecutionProfile.CUSTOM})
+    profiled_payload = _hashable_plan_payload(profiled)
+    assert profiled_payload["execution_profile"] == "custom"
+    assert profiled_payload != legacy_payload
+
+
 def test_plan_revision_is_append_only_hash_bound_and_blocks_the_parent(console_env):
     _, service, aion, paperclip = console_env
     requested = service.request_plan(PlanRequest(objective="生成研究摘要"))
     parent = service.draft_plan(requested.plan_id)
+    assert parent.plan is not None
+    assert parent.plan.execution_profile == ExecutionProfile.BALANCED
     instruction = (
         "调整协作循环：引用核验未通过时，返回给解读 Agent 重新处理，"
         "最多两轮；其余安排保持不变。SECRET-REVISION-ONLY"
@@ -720,6 +745,7 @@ def test_plan_revision_is_append_only_hash_bound_and_blocks_the_parent(console_e
     assert ready.status == "ready"
     assert ready.plan is not None
     assert ready.plan.title == "每周研究摘要"
+    assert ready.plan.execution_profile == ExecutionProfile.BALANCED
     assert ready.plan_sha256 != parent.plan_sha256
     assert aion.previous_plan == parent.plan
     assert aion.revision_instruction == instruction
@@ -750,6 +776,37 @@ def test_plan_revision_is_append_only_hash_bound_and_blocks_the_parent(console_e
     assert revision_event["payload"]["revision_number"] == 2
     assert "revision_instruction_sha256" in revision_event["payload"]
     assert "SECRET-REVISION-ONLY" not in json.dumps(events, ensure_ascii=False)
+
+
+def test_ended_work_can_create_an_unconfirmed_ai_revision_without_dispatch(console_env):
+    _, service, aion, paperclip = console_env
+    requested = service.request_plan(PlanRequest(objective="生成一份可重复经营报告"))
+    ready = service.draft_plan(requested.plan_id)
+    service.confirm_plan(
+        ready.plan_id,
+        ConfirmRequest(plan_sha256=str(ready.plan_sha256), confirmed=True),
+    )
+    service.dispatch_plan(ready.plan_id)
+    finished = service.refresh_execution(ready.plan_id)
+    assert finished.status == "completed_unverified"
+    dispatched_before = aion.dispatched
+    paperclip_before = paperclip.created
+
+    revision = service.request_plan_revision(
+        finished.plan_id,
+        RevisePlanRequest(
+            instruction="增加一名核验 Agent，并让它向负责人汇报；其他约束保持不变。"
+        ),
+    )
+
+    assert revision.status == "planning"
+    assert revision.parent_plan_id == finished.plan_id
+    assert revision.parent_plan_sha256 == finished.plan_sha256
+    assert revision.revision_number == finished.revision_number + 1
+    assert revision.execution is None
+    assert aion.dispatched == dispatched_before
+    assert paperclip.created == paperclip_before
+    assert service.ledger.read_all()[-1]["kind"] == "task_plan_revision_requested"
 
 
 def test_plan_revision_http_facade_requires_csrf(console_env, monkeypatch):
@@ -810,7 +867,17 @@ def test_ended_work_prepares_an_idempotent_reviewed_rerun_without_dispatch(conso
     assert rerun.parent_plan_id == finished.plan_id
     assert rerun.parent_plan_sha256 == finished.plan_sha256
     assert rerun.revision_number == finished.revision_number + 1
-    assert rerun.plan == finished.plan
+    assert rerun.plan is not None
+    assert finished.plan is not None
+    assert rerun.plan.execution_profile == ExecutionProfile.FAST
+    assert rerun.plan.title == finished.plan.title
+    assert rerun.plan.summary == finished.plan.summary
+    assert rerun.plan.agents != finished.plan.agents
+    assert [agent.name for agent in rerun.plan.agents] == [
+        agent.name for agent in finished.plan.agents
+    ]
+    assert [agent.model for agent in rerun.plan.agents] == ["sonnet", "gpt-5.4-mini"]
+    assert rerun.plan.stages == finished.plan.stages
     assert rerun.plan_sha256 != finished.plan_sha256
     assert rerun.approval_mode == ApprovalMode.AUTOMATIC
     assert rerun.execution is None
@@ -823,6 +890,7 @@ def test_ended_work_prepares_an_idempotent_reviewed_rerun_without_dispatch(conso
     assert event["payload"]["parent_plan_id"] == finished.plan_id
     assert event["payload"]["plan_sha256"] == rerun.plan_sha256
     assert event["payload"]["approval_mode"] == "automatic"
+    assert event["payload"]["execution_profile"] == "fast"
     assert "每天生成研究摘要" not in json.dumps(event, ensure_ascii=False)
 
 
@@ -863,6 +931,7 @@ def test_rerun_http_facade_requires_csrf_and_explicit_confirmation(console_env, 
         payload = accepted.json()
         assert payload["status"] == "ready"
         assert payload["parent_plan_id"] == finished.plan_id
+        assert payload["plan"]["execution_profile"] == "fast"
 
 
 def test_ended_aion_run_continues_same_context_as_new_audited_version(console_env):
@@ -962,6 +1031,54 @@ def test_continuation_captures_only_this_run_artifact_delta(console_env):
     assert [event["payload"]["logical_name"] for event in registered] == [
         "follow-up.pdf"
     ]
+
+
+def test_registered_pdf_content_is_cas_verified_and_workspace_files_are_denied(
+    monkeypatch, console_env
+):
+    settings, service, _, _ = console_env
+    running = _running_aion_plan(service)
+    artifact_dir = settings.console.state_dir / "executions" / running.plan_id / "artifacts"
+    artifact_dir.mkdir(parents=True, mode=0o700)
+    report = b"%PDF-1.7\nsynthetic OpsWitness report\n%%EOF\n"
+    (artifact_dir / "report.pdf").write_bytes(report)
+    finished = service.refresh_execution(running.plan_id)
+    assert finished.status == "completed_unverified"
+
+    artifact = service.get_plan_artifact_content(running.plan_id, "report.pdf")
+    assert artifact == {
+        "content": report,
+        "mime": "application/pdf",
+        "disposition": "inline",
+        "name": "report.pdf",
+        "sha256": hashlib.sha256(report).hexdigest(),
+    }
+
+    (artifact_dir / "late.pdf").write_bytes(b"not registered")
+    with pytest.raises(RuntimeArtifactNotFound, match="registered artifact not found"):
+        service.get_plan_artifact_content(running.plan_id, "late.pdf")
+
+    monkeypatch.setattr(service, "acquire_instance_lease", lambda: True)
+    monkeypatch.setattr(service, "recover_startup", lambda: {})
+    monkeypatch.setattr(service, "release_instance_lease", lambda: None)
+    app = create_app(settings, service=service)
+    endpoint = f"/api/v1/plans/{running.plan_id}/artifacts"
+    with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+        opened = client.get(f"{endpoint}/report.pdf/content")
+        assert opened.status_code == 200
+        assert opened.content == report
+        assert opened.headers["content-type"] == "application/pdf"
+        assert opened.headers["content-disposition"] == 'inline; filename="report.pdf"'
+        assert opened.headers["cache-control"] == "no-store"
+        assert opened.headers["x-content-type-options"] == "nosniff"
+        assert (
+            opened.headers["x-opswitness-artifact-sha256"]
+            == hashlib.sha256(report).hexdigest()
+        )
+        denied = client.get(f"{endpoint}/late.pdf/content")
+        assert denied.status_code == 404
+        traversal = client.get(f"{endpoint}/..%2Foutside.pdf/content")
+        assert traversal.status_code == 404
 
 
 def test_older_history_run_can_continue_after_latest_version_has_ended(console_env):
@@ -5208,6 +5325,62 @@ def test_home_action_queue_uses_fixed_priority_order(console_env):
     assert next(action for action in actions if action["kind"] == "operational")["priority"] == 3
 
 
+def test_home_bounds_historical_questions_errors_and_titles(console_env, monkeypatch):
+    settings, service, _, _ = console_env
+    question = "请补充完整的历史运行输入与约束。" * 60
+    waiting = service.draft_plan(
+        service.request_plan(PlanRequest(objective="等待输入的历史任务")).plan_id
+    )
+
+    def await_input(current):
+        current.status = "awaiting_input"
+        current.execution = ExecutionState.model_validate(
+            {
+                "kind": "aion_team",
+                "status": "awaiting_input",
+                "input_requests": [
+                    {
+                        "request_id": current.plan_id,
+                        "agent_name": "总控",
+                        "question": question,
+                        "question_sha256": hashlib.sha256(question.encode()).hexdigest(),
+                    }
+                ],
+            }
+        )
+        return current
+
+    service.store.mutate(waiting.plan_id, await_input)
+
+    long_objective = "旧任务包含很长的目标说明。" * 100
+    failed = service.request_plan(PlanRequest(objective=long_objective))
+
+    def fail(current):
+        current.status = "failed"
+        current.error = "历史失败详情。" * 70
+        return current
+
+    service.store.mutate(failed.plan_id, fail)
+
+    monkeypatch.setattr(service, "acquire_instance_lease", lambda: True)
+    monkeypatch.setattr(service, "recover_startup", lambda: {})
+    monkeypatch.setattr(service, "release_instance_lease", lambda: None)
+    app = create_app(settings, service=service)
+    with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+        response = client.get("/api/v1/bootstrap")
+
+    assert response.status_code == 200
+    actions = response.json()["home"]["action_queue"]
+    input_action = next(action for action in actions if action["action_id"] == f"input:{waiting.plan_id}")
+    failed_action = next(
+        action for action in actions if action["action_id"] == f"blocked:{failed.plan_id}"
+    )
+    assert len(input_action["summary"]) == 320
+    assert len(failed_action["summary"]) == 320
+    assert len(failed_action["title"]) <= 160
+    assert len(failed_action["title"]) < len(f"需要处理：{long_objective}")
+
+
 def test_team_blueprint_keeps_only_topology_and_is_ledgered(console_env):
     _, service, _, _ = console_env
     requested = service.request_plan(PlanRequest(objective="保存团队蓝图"))
@@ -5275,6 +5448,226 @@ def test_task_template_is_private_hash_ledgered_and_has_no_execution_side_effect
     assert service.list_task_templates() == []
     assert service.list_task_templates(include_archived=True)[0].template_id == template.template_id
     assert service.ledger.read_all()[-1]["kind"] == "task_template_archived"
+
+
+def test_workspace_conversation_history_restores_latest_revision_and_binds_template_source(
+    console_env,
+):
+    _, service, aion, paperclip = console_env
+    requested = service.request_plan(PlanRequest(objective="每周整理客户项目并提出下一步"))
+    parent = service.draft_plan(requested.plan_id)
+    revision = service.request_plan_revision(
+        parent.plan_id,
+        RevisePlanRequest(instruction="增加证据复核步骤，但不要启动执行。"),
+    )
+    current = service.draft_plan(revision.plan_id)
+    dispatched_before = aion.dispatched
+    issues_before = paperclip.created
+
+    conversations = service.list_workspace_conversations()
+    conversation = next(row for row in conversations if row.conversation_id == parent.plan_id)
+    assert conversation.current_plan_id == current.plan_id
+    assert conversation.current_plan_sha256 == current.plan_sha256
+    assert conversation.version_count == 2
+    assert conversation.template_source_available is True
+    assert service.dashboard()["workspace_conversations"][0]["current_plan_id"] == current.plan_id
+
+    template = service.save_task_template_from_plan(
+        current.plan_id,
+        TaskTemplateFromPlanRequest(name="客户项目周报", confirmed=True),
+    )
+    assert template.objective == current.objective
+    assert template.source_plan_id == current.plan_id
+    assert template.source_plan_sha256 == current.plan_sha256
+    assert aion.dispatched == dispatched_before
+    assert paperclip.created == issues_before
+    event = service.ledger.read_all()[-1]
+    assert event["kind"] == "task_template_saved"
+    assert event["payload"]["source_plan_id"] == current.plan_id
+    assert event["payload"]["source_plan_sha256"] == current.plan_sha256
+
+
+def test_workspace_conversation_http_routes_require_confirmed_csrf_write(
+    console_env,
+    monkeypatch,
+):
+    settings, service, _, _ = console_env
+    ready = service.draft_plan(
+        service.request_plan(PlanRequest(objective="保存历史规划模板")).plan_id
+    )
+    monkeypatch.setattr(service, "acquire_instance_lease", lambda: True)
+    monkeypatch.setattr(service, "recover_startup", lambda: {})
+    monkeypatch.setattr(service, "release_instance_lease", lambda: None)
+    app = create_app(settings, service=service)
+    csrf = app.state.csrf_token
+
+    with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+        history = client.get("/api/v1/workspace-conversations")
+        denied = client.post(
+            f"/api/v1/plans/{ready.plan_id}/task-template",
+            json={"name": "历史模板", "confirmed": True},
+        )
+        accepted = client.post(
+            f"/api/v1/plans/{ready.plan_id}/task-template",
+            json={"name": "历史模板", "confirmed": True},
+            headers={"X-QD-CSRF": csrf},
+        )
+
+    assert history.status_code == 200
+    assert history.json()[0]["current_plan_id"] == ready.plan_id
+    assert denied.status_code == 403
+    assert accepted.status_code == 201
+    assert accepted.json()["source_plan_id"] == ready.plan_id
+    assert accepted.json()["source_plan_sha256"] == ready.plan_sha256
+
+
+def test_ended_work_is_a_repeatable_blueprint_and_preparing_it_has_no_execution_side_effects(
+    console_env,
+):
+    _, service, aion, paperclip = console_env
+    running = _running_aion_plan(service)
+    ended = service.refresh_execution(running.plan_id)
+    dispatched_before = aion.dispatched
+    issues_before = paperclip.created
+
+    works = service.list_repeatable_works()
+    selected = next(row for row in works if row.source_plan_id == ended.plan_id)
+    assert selected.work_id == ended.plan_id
+    assert selected.source_plan_sha256 == ended.plan_sha256
+    assert selected.agent_count == 2
+    assert selected.last_status == "completed_unverified"
+    assert service.dashboard()["repeatable_works"][0]["source_plan_id"] == ended.plan_id
+
+    prepared = service.prepare_plan_rerun(
+        selected.source_plan_id,
+        RerunPlanRequest(confirmed=True),
+    )
+    assert prepared.status == "ready"
+    assert prepared.parent_plan_id == ended.plan_id
+    assert prepared.execution is None
+    assert aion.dispatched == dispatched_before
+    assert paperclip.created == issues_before
+
+
+def test_workspace_memory_is_private_immutable_and_only_approved_versions_reach_planning(
+    console_env,
+):
+    settings, service, aion, _ = console_env
+    content = "## Proven process\nAlways verify citations before publishing."
+    candidate = service.create_workspace_memory_candidate(
+        WorkspaceMemoryCandidateRequest(
+            kind="process",
+            title="Citation review",
+            content=content,
+            tags=["review", "evidence"],
+            confirmed=True,
+        )
+    )
+
+    assert candidate.state == "candidate"
+    assert candidate.active is False
+    document = settings.console.state_dir / "workspace-memory" / candidate.relative_path
+    metadata = (
+        settings.console.state_dir
+        / "workspace-memory"
+        / ".opswitness"
+        / "versions"
+        / f"{candidate.version_id}.json"
+    )
+    assert document.stat().st_mode & 0o777 == 0o600
+    assert metadata.stat().st_mode & 0o777 == 0o600
+    assert "opswitness_schema: 1" in document.read_text()
+    assert content in document.read_text()
+    assert content not in json.dumps(service.ledger.read_all(), ensure_ascii=False)
+
+    without_memory = service.request_plan(PlanRequest(objective="候选记忆不能进入规划"))
+    assert without_memory.memory_version_ids == []
+    service.draft_plan(without_memory.plan_id)
+    assert aion.memory_snapshot == []
+
+    approved = service.approve_workspace_memory(
+        candidate.version_id,
+        WorkspaceMemoryDecisionRequest(reason="Reviewed by operator", confirmed=True),
+    )
+    assert approved.state == "approved"
+    assert approved.active is True
+    requested = service.request_plan(PlanRequest(objective="使用已批准流程记忆"))
+    assert requested.memory_version_ids == [candidate.version_id]
+    assert requested.memory_snapshot_sha256 is not None
+    ready = service.draft_plan(requested.plan_id)
+    assert aion.memory_snapshot[0]["version_id"] == candidate.version_id
+    assert aion.memory_snapshot[0]["content"] == content
+    assert ready.plan_sha256 is not None
+
+    service.revoke_workspace_memory(
+        candidate.version_id,
+        WorkspaceMemoryDecisionRequest(reason="No longer applicable", confirmed=True),
+    )
+    with pytest.raises(ConsoleConflict, match="memory changed"):
+        service.confirm_plan(
+            ready.plan_id,
+            ConfirmRequest(plan_sha256=ready.plan_sha256, confirmed=True),
+        )
+
+
+def test_workspace_memory_revision_supersedes_and_rollback_restores_an_exact_version(console_env):
+    _, service, _, _ = console_env
+    first = service.create_workspace_memory_candidate(
+        WorkspaceMemoryCandidateRequest(
+            kind="knowledge",
+            title="Research standard",
+            content="Use primary sources and keep citations.",
+            confirmed=True,
+        )
+    )
+    service.approve_workspace_memory(
+        first.version_id,
+        WorkspaceMemoryDecisionRequest(confirmed=True),
+    )
+    second = service.create_workspace_memory_candidate(
+        WorkspaceMemoryCandidateRequest(
+            kind="knowledge",
+            title="Research standard",
+            content="Use primary sources, record dates, and keep citations.",
+            supersedes_version_id=first.version_id,
+            confirmed=True,
+        )
+    )
+    assert second.memory_id == first.memory_id
+    assert second.version_number == 2
+    service.approve_workspace_memory(
+        second.version_id,
+        WorkspaceMemoryDecisionRequest(reason="Expanded review rule", confirmed=True),
+    )
+    assert service.get_workspace_memory(first.version_id).state == "superseded"
+    assert service.get_workspace_memory(second.version_id).active is True
+
+    restored = service.rollback_workspace_memory(
+        first.version_id,
+        WorkspaceMemoryRollbackRequest(reason="Restore the simpler verified rule", confirmed=True),
+    )
+    assert restored.state == "approved"
+    assert restored.active is True
+    assert service.get_workspace_memory(second.version_id).state == "superseded"
+
+
+def test_process_memory_proposal_is_deterministic_and_stays_candidate(console_env):
+    _, service, aion, _ = console_env
+    running = _running_aion_plan(service)
+    ended = service.refresh_execution(running.plan_id)
+    generated_before = aion.generated
+    proposed = service.propose_process_memory(
+        ended.plan_id,
+        ProcessMemoryProposalRequest(title="Weekly research process", confirmed=True),
+    )
+
+    assert proposed.kind == "process"
+    assert proposed.state == "candidate"
+    assert proposed.source_plan_id == ended.plan_id
+    assert ended.plan_sha256 in proposed.content
+    assert "## Team structure" in proposed.content
+    assert "## Repeatable stages" in proposed.content
+    assert aion.generated == generated_before
 
 
 def test_blueprint_is_safe_planning_input_and_hash_bound(console_env):
@@ -5405,6 +5798,132 @@ def test_runtime_revision_is_immutable_validated_and_has_no_dispatch_side_effect
     assert paperclip.created == 0
 
 
+def test_execution_profile_revision_pins_exact_models_in_an_immutable_child(console_env):
+    _, service, aion, paperclip = console_env
+    capabilities = [
+        {
+            "runtime": "claude_code",
+            "available": True,
+            "models": [
+                {"id": "default"},
+                {"id": "claude-haiku-test"},
+                {"id": "claude-sonnet-test"},
+                {"id": "claude-opus-test"},
+            ],
+        },
+        {
+            "runtime": "codex_cli",
+            "available": True,
+            "models": [
+                {"id": "default"},
+                {"id": "gpt-mini-test"},
+                {"id": "gpt-codex-test"},
+                {"id": "gpt-pro-test"},
+            ],
+        },
+        {
+            "runtime": "aion_cli",
+            "available": False,
+            "models": [{"id": "default"}],
+        },
+    ]
+    service.runtime_capabilities = lambda: capabilities  # type: ignore[method-assign]
+    parent = service.draft_plan(
+        service.request_plan(PlanRequest(objective="档位模型选择")).plan_id
+    )
+    assert parent.plan is not None
+    assert parent.plan.execution_profile == ExecutionProfile.BALANCED
+    assert [agent.model for agent in parent.plan.agents] == [
+        "claude-sonnet-test",
+        "gpt-codex-test",
+    ]
+
+    child = service.revise_plan_execution_profile(
+        parent.plan_id,
+        ExecutionProfileRevisionRequest(
+            execution_profile=ExecutionProfile.FAST,
+            confirmed=True,
+        ),
+    )
+    assert child.status == "ready"
+    assert child.parent_plan_id == parent.plan_id
+    assert child.parent_plan_sha256 == parent.plan_sha256
+    assert child.plan_sha256 != parent.plan_sha256
+    assert child.plan is not None
+    assert child.plan.execution_profile == ExecutionProfile.FAST
+    assert [agent.model for agent in child.plan.agents] == [
+        "claude-haiku-test",
+        "gpt-mini-test",
+    ]
+    assert parent.plan.execution_profile == ExecutionProfile.BALANCED
+    assert [agent.model for agent in parent.plan.agents] == [
+        "claude-sonnet-test",
+        "gpt-codex-test",
+    ]
+    assert all("所选模型已按本机能力表写入方案" in agent.runtime_reason for agent in child.plan.agents)
+    assert aion.dispatched == 0
+    assert paperclip.created == 0
+    event = service.ledger.read_all()[-1]
+    assert event["kind"] == "task_plan_execution_profile_revised"
+    assert event["payload"]["execution_profile"] == "fast"
+    assert event["payload"]["plan_sha256"] == child.plan_sha256
+
+    unavailable = service.draft_plan(
+        service.request_plan(PlanRequest(objective="档位拒绝不可用运行时")).plan_id
+    )
+    service.runtime_capabilities = lambda: [  # type: ignore[method-assign]
+        {**capabilities[0], "available": False},
+        capabilities[1],
+        capabilities[2],
+    ]
+    with pytest.raises(ConsoleConflict, match="runtime is unavailable"):
+        service.revise_plan_execution_profile(
+            unavailable.plan_id,
+            ExecutionProfileRevisionRequest(
+                execution_profile=ExecutionProfile.DEEP,
+                confirmed=True,
+            ),
+        )
+    assert aion.dispatched == 0
+    assert paperclip.created == 0
+
+
+def test_execution_profile_http_facade_requires_csrf_and_confirmation(
+    console_env, monkeypatch
+):
+    settings, service, aion, paperclip = console_env
+    parent = service.draft_plan(
+        service.request_plan(PlanRequest(objective="HTTP 执行档位")).plan_id
+    )
+    monkeypatch.setattr(service, "acquire_instance_lease", lambda: True)
+    monkeypatch.setattr(service, "recover_startup", lambda: {})
+    monkeypatch.setattr(service, "release_instance_lease", lambda: None)
+    app = create_app(settings, service=service)
+    csrf = app.state.csrf_token
+    path = f"/api/v1/plans/{parent.plan_id}/execution-profile"
+    body = {"execution_profile": "deep", "confirmed": True}
+
+    with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+        assert client.post(path, json=body).status_code == 403
+        assert (
+            client.post(
+                path,
+                json={**body, "confirmed": False},
+                headers={"X-QD-CSRF": csrf},
+            ).status_code
+            == 422
+        )
+        accepted = client.post(path, json=body, headers={"X-QD-CSRF": csrf})
+        assert accepted.status_code == 201
+        payload = accepted.json()
+        assert payload["parent_plan_id"] == parent.plan_id
+        assert payload["plan"]["execution_profile"] == "deep"
+        assert all(agent["model"] for agent in payload["plan"]["agents"])
+
+    assert aion.dispatched == 0
+    assert paperclip.created == 0
+
+
 def test_runtime_and_team_blueprint_http_facades_require_csrf_and_confirmation(
     console_env, monkeypatch
 ):
@@ -5524,6 +6043,55 @@ def test_task_template_http_facade_requires_csrf_and_confirmation(console_env, m
         assert archived.json()["archived_at"] is not None
     assert aion.dispatched == 0
     assert paperclip.created == 0
+
+
+def test_workspace_memory_http_facade_requires_csrf_confirmation_and_keeps_body_on_demand(
+    console_env,
+    monkeypatch,
+):
+    settings, service, _, _ = console_env
+    monkeypatch.setattr(service, "acquire_instance_lease", lambda: True)
+    monkeypatch.setattr(service, "recover_startup", lambda: {})
+    monkeypatch.setattr(service, "release_instance_lease", lambda: None)
+    app = create_app(settings, service=service)
+    csrf = app.state.csrf_token
+    body = {
+        "kind": "process",
+        "title": "Weekly review",
+        "content": "Review evidence, unresolved risks, and next actions.",
+        "tags": ["weekly"],
+        "confirmed": True,
+    }
+    with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+        assert client.post("/api/v1/workspace-memory/candidates", json=body).status_code == 403
+        assert (
+            client.post(
+                "/api/v1/workspace-memory/candidates",
+                json={**body, "confirmed": False},
+                headers={"X-QD-CSRF": csrf},
+            ).status_code
+            == 422
+        )
+        created = client.post(
+            "/api/v1/workspace-memory/candidates",
+            json=body,
+            headers={"X-QD-CSRF": csrf},
+        )
+        assert created.status_code == 201
+        version_id = created.json()["version_id"]
+        approved = client.post(
+            f"/api/v1/workspace-memory/{version_id}/approve",
+            json={"reason": "Operator reviewed", "confirmed": True},
+            headers={"X-QD-CSRF": csrf},
+        )
+        assert approved.status_code == 200
+        assert approved.json()["active"] is True
+        listed = client.get("/api/v1/workspace-memory", params={"query": "unresolved"})
+        assert listed.status_code == 200
+        assert listed.json()[0]["version_id"] == version_id
+        detail = client.get(f"/api/v1/workspace-memory/{version_id}")
+        assert detail.status_code == 200
+        assert detail.json()["content"] == body["content"]
 
 
 def test_member_observations_are_safe_signals_not_outcome_evidence(console_env, monkeypatch):

@@ -44,6 +44,7 @@ export type ApprovalCard = {
 };
 
 export type ApprovalMode = 'automatic' | 'automatic_safe' | 'manual_all';
+export type ExecutionProfile = 'fast' | 'balanced' | 'deep' | 'custom';
 
 export type PlannedAgent = {
   name: string;
@@ -71,6 +72,7 @@ export type TaskPlan = {
   schema_version: 1;
   title: string;
   summary: string;
+  execution_profile?: ExecutionProfile | null;
   execution_mode: 'aion_team' | 'workflow';
   workflow_id: string | null;
   agents: PlannedAgent[];
@@ -234,6 +236,8 @@ export type PlanRecord = {
   preferred_cadence: string;
   source_blueprint_id?: string | null;
   source_blueprint_sha256?: string | null;
+  memory_snapshot_sha256?: string | null;
+  memory_version_ids: string[];
   created_at: string;
   updated_at: string;
   confirmed_at?: string | null;
@@ -307,7 +311,72 @@ export type TaskTemplate = {
   objective: string;
   created_at: string;
   archived_at?: string | null;
+  source_plan_id?: string | null;
+  source_plan_sha256?: string | null;
   template_sha256: string;
+};
+
+export type WorkspaceConversation = {
+  schema_version: 1;
+  conversation_id: string;
+  current_plan_id: string;
+  current_plan_sha256?: string | null;
+  title: string;
+  objective: string;
+  status: PlanRecord['status'];
+  version_count: number;
+  created_at: string;
+  updated_at: string;
+  template_source_available: boolean;
+};
+
+export type RepeatableWork = {
+  schema_version: 1;
+  work_id: string;
+  source_plan_id: string;
+  source_plan_sha256: string;
+  title: string;
+  objective: string;
+  revision_number: number;
+  agent_count: number;
+  cadence: TaskPlan['cadence']['kind'];
+  last_status: 'failed' | 'cancelled' | 'completed_unverified';
+  updated_at: string;
+  outcome_verified: boolean;
+};
+
+export type WorkspaceMemoryState = 'candidate' | 'approved' | 'superseded' | 'revoked';
+
+export type WorkspaceMemorySummary = {
+  schema_version: 1;
+  memory_id: string;
+  version_id: string;
+  version_number: number;
+  kind: 'process' | 'knowledge';
+  title: string;
+  tags: string[];
+  workspace: string;
+  source_plan_id?: string | null;
+  source_plan_sha256?: string | null;
+  parent_version_id?: string | null;
+  created_at: string;
+  content_sha256: string;
+  document_sha256: string;
+  relative_path: string;
+  state: WorkspaceMemoryState;
+  active: boolean;
+  decided_at?: string | null;
+};
+
+export type WorkspaceMemoryView = WorkspaceMemorySummary & {
+  content: string;
+};
+
+export type WorkspaceMemoryStatus = {
+  format: 'obsidian_markdown';
+  candidate_count: number;
+  approved_count: number;
+  vault_path: string;
 };
 
 export type RuntimeCapability = {
@@ -480,6 +549,10 @@ export type Bootstrap = {
   home: HomeSummary;
   task_templates: TaskTemplate[];
   team_blueprints: TeamBlueprint[];
+  repeatable_works: RepeatableWork[];
+  workspace_conversations: WorkspaceConversation[];
+  workspace_memories: WorkspaceMemorySummary[];
+  workspace_memory: WorkspaceMemoryStatus;
   runtime_capabilities: RuntimeCapability[];
   console_access: {
     exposure: 'loopback' | 'private';

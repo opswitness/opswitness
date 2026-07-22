@@ -99,6 +99,19 @@ export const TASK_PRESETS = [
     },
   },
   {
+    id: 'company-commercial-analysis',
+    category: 'decide',
+    title: { en: 'Company commercial analysis report', zh: '公司商业分析报告' },
+    description: {
+      en: 'Turn company evidence into a market, business-model, economics, and risk brief.',
+      zh: '把公司证据整理成市场、商业模式、经营质量与风险简报。',
+    },
+    objective: {
+      en: 'Create a company commercial-analysis task for a company and decision question I will specify. Use only the company materials I provide and dated, publicly accessible primary sources. Plan company-research, market-and-competition, financial-evidence, and decision-review agents that produce a company profile, customer and revenue model, market and competitor map, operating and unit-economics analysis where supported, material changes, risks, counterarguments, source ledger, and a decision brief. Every material claim and number must cite its source, date, and any calculation; distinguish reported facts, calculations, and inference, and flag unavailable evidence. Do not contact the company, bypass access controls, make an investment or legal conclusion, invent valuation precision, or take the recommended action automatically.',
+      zh: '为我随后指定的公司和决策问题创建一个公司商业分析任务。只使用我提供的公司资料和带日期、公开可访问的一手来源。规划公司研究、市场与竞争、财务证据、决策复核四个 Agent，输出公司画像、客户与收入模式、市场与竞品地图、有证据支持的经营与单位经济分析、重大变化、风险、反方观点、来源账本和决策简报。每项重要结论与数字必须标注来源、日期和计算过程；区分已报告事实、计算结果与推断，并标记不可获得的证据。不要联系公司、绕过访问限制、作出投资或法律结论、编造精确估值，也不要自动执行建议。',
+    },
+  },
+  {
     id: 'source-backed-research',
     category: 'decide',
     title: { en: 'Source-backed research brief', zh: '可溯源深度研究' },
@@ -294,6 +307,45 @@ export const TASK_PRESETS = [
     },
   },
   {
+    id: 'cpa-month-end-workpaper-pack',
+    category: 'specialist',
+    title: { en: 'CPA/EA month-end workpaper pack', zh: 'CPA/EA 月结与报税前工作底稿包' },
+    description: {
+      en: 'Prepare traceable tie-outs, missing-document lists, and exceptions for licensed review.',
+      zh: '为持牌复核准备可追溯对账、缺件清单与异常工作底稿。',
+    },
+    objective: {
+      en: 'Create a month-end and pre-tax-preparation workpaper task for a CPA or EA using only the source documents, general-ledger export, prior-period workpapers, and approved mapping or checklist I provide. Plan document-intake, deterministic-reconciliation, exception-review, and licensed-review-preparation agents that tie amounts and dates to source records, identify missing or duplicate documents, surface unexplained variances and tax-field questions, preserve calculation formulas, and produce a review index with source/page/cell references. Deliver an exception pack for the CPA or EA to review and sign. Do not post journal entries, change books, initiate payment, choose a tax position, prepare or file a return, represent the taxpayer, or present the pack as tax advice or a completed filing.',
+      zh: '只使用我提供的源单据、总账导出、上期工作底稿以及已批准的字段映射或检查清单，为 CPA 或 EA 创建月结与报税前工作底稿任务。规划单据归集、确定性对账、异常复核、持牌审签准备四个 Agent，将金额和日期逐项关联到源记录，识别缺失或重复单据、未解释差异和待确认税务字段，保留计算公式，并生成带来源、页码或单元格引用的复核索引。交付供 CPA 或 EA 审阅并签字的异常包。不要入账或修改账簿、发起付款、选择税务立场、准备或提交税表、代理纳税人，也不得把该工作包表述为税务意见或已完成申报。',
+    },
+  },
+  {
+    id: 'customs-entry-support-pack',
+    category: 'specialist',
+    title: { en: 'Customs entry-support evidence pack', zh: '报关行进口申报支持证据包' },
+    description: {
+      en: 'Check import-document completeness and preserve a broker-reviewable evidence trail.',
+      zh: '检查进口单证完整性，并形成可供报关员复核的证据链。',
+    },
+    objective: {
+      en: 'Create an import entry-support evidence task for a licensed U.S. customs broker using only the commercial invoice, packing list, transport document, purchase order, product specifications, supplier-origin evidence, prior approved rulings, and broker checklist I provide. Plan document-extraction, cross-document-reconciliation, discrepancy-review, and broker-signoff-preparation agents that build a document matrix, compare parties, quantities, weights, values, currencies, product descriptions, and dates, identify missing or conflicting evidence, preserve source/page references, and assemble a five-year retention index. The licensed customs broker must determine HTS classification, customs value, origin, admissibility, and filing. Do not make those determinations, transmit an entry, communicate with CBP, alter source documents, or claim that the evidence pack constitutes customs compliance.',
+      zh: '只使用我提供的商业发票、装箱单、运输单证、采购订单、产品规格、供应商原产地证据、已批准的既往裁定和报关行检查清单，为美国持牌报关行创建进口申报支持证据任务。规划单证提取、跨文档对账、差异复核、报关员审签准备四个 Agent，生成单证矩阵，核对交易方、数量、重量、金额、币种、品名和日期，识别缺失或冲突证据，保留来源与页码引用，并整理五年留档索引。HTS 分类、海关估价、原产地、准入性和正式申报必须由持牌报关员决定。不要作出这些判断、传输 entry、联系 CBP、修改源文件，也不得宣称该证据包本身即构成海关合规。',
+    },
+  },
+  {
+    id: 'commercial-insurance-renewal-pack',
+    category: 'specialist',
+    title: { en: 'Commercial P&C renewal readiness pack', zh: '商业财产与责任险续保资料包' },
+    description: {
+      en: 'Check submission completeness and conflicts before licensed broker review.',
+      zh: '在持牌经纪人复核前检查续保资料完整性与冲突。',
+    },
+    objective: {
+      en: 'Create a commercial property-and-casualty renewal-readiness task for a licensed insurance producer using only the ACORD forms, loss runs, financial statements, exposure schedules, current policies, prior submissions, and broker checklist I provide. Plan submission-intake, cross-document-consistency, exception-review, and broker-signoff-preparation agents that produce a document matrix, stale-data and missing-item list, conflicts across locations, payroll, revenue, vehicles, limits, and loss history, plus a source-linked broker review brief. Clearly label client-provided, carrier-provided, calculated, and inferred fields. The licensed producer must decide coverage, limits, markets, representations, and placement. Do not recommend coverage, certify an application, obtain or negotiate quotes, contact carriers, bind or alter insurance, submit forms, or present the pack as insurance advice.',
+      zh: '只使用我提供的 ACORD 表格、loss runs、财务报表、exposure schedule、现有保单、既往 submission 和经纪人检查清单，为持牌保险 producer 创建商业财产与责任险续保资料准备任务。规划资料归集、跨文档一致性、异常复核、经纪人审签准备四个 Agent，输出单证矩阵、过期资料与缺件清单，检查营业地点、工资、收入、车辆、限额和损失记录之间的冲突，并生成带来源链接的经纪人复核简报。明确区分客户提供、保险公司提供、计算得出和推断字段。保障范围、限额、市场、声明与 placement 必须由持牌 producer 决定。不要推荐保障、认证申请、获取或谈判报价、联系保险公司、bind 或修改保险、提交表格，也不得把资料包表述为保险意见。',
+    },
+  },
+  {
     id: 'client-onboarding-plan',
     category: 'serve',
     title: { en: 'Client onboarding plan', zh: '客户 Onboarding 计划' },
@@ -360,12 +412,202 @@ export const TASK_PRESETS = [
   },
 ];
 
+function workTemplate(id, recipe) {
+  const preset = TASK_PRESETS.find((item) => item.id === id);
+  if (!preset) throw new Error(`unknown built-in work template: ${id}`);
+  return { ...preset, recipe };
+}
+
+export const FEATURED_WORK_TEMPLATES = [
+  workTemplate('company-commercial-analysis', {
+    agentCount: 4,
+    stageCount: 6,
+    cadence: { en: 'On demand or quarterly', zh: '按需或每季度' },
+    team: {
+      en: 'Company researcher -> market analyst -> financial verifier -> decision editor',
+      zh: '公司研究 -> 市场分析 -> 财务核验 -> 决策编辑',
+    },
+    outputs: {
+      en: ['Commercial analysis', 'Source ledger', 'Decision brief'],
+      zh: ['商业分析报告', '来源账本', '决策简报'],
+    },
+    checkpoint: {
+      en: 'Human decision; no investment, legal, or external action',
+      zh: '最终决策必须由人作出；不自动进行投资、法律或外部行动',
+    },
+  }),
+  workTemplate('cpa-month-end-workpaper-pack', {
+    agentCount: 4,
+    stageCount: 6,
+    cadence: { en: 'Monthly and pre-filing', zh: '每月及报税前' },
+    team: {
+      en: 'Document intake -> deterministic tie-out -> exception reviewer -> CPA/EA review prep',
+      zh: '单据归集 -> 确定性对账 -> 异常复核 -> CPA/EA 审签准备',
+    },
+    outputs: {
+      en: ['Tie-out workpapers', 'Exception list', 'Licensed review index'],
+      zh: ['对账工作底稿', '异常与缺件清单', '持牌复核索引'],
+    },
+    checkpoint: {
+      en: 'CPA/EA signs; no posting, payment, tax position, or filing',
+      zh: '必须由 CPA/EA 审签；不入账、不付款、不选税务立场、不申报',
+    },
+  }),
+  workTemplate('customs-entry-support-pack', {
+    agentCount: 4,
+    stageCount: 6,
+    cadence: { en: 'Per shipment or entry', zh: '每票货物或 entry' },
+    team: {
+      en: 'Document extractor -> reconciliation analyst -> discrepancy reviewer -> broker review prep',
+      zh: '单证提取 -> 跨单证对账 -> 差异复核 -> 报关员审签准备',
+    },
+    outputs: {
+      en: ['Document matrix', 'Discrepancy list', 'Retention evidence index'],
+      zh: ['单证矩阵', '差异与缺件清单', '留档证据索引'],
+    },
+    checkpoint: {
+      en: 'Licensed broker decides classification, value, origin, and filing',
+      zh: '分类、估价、原产地与申报必须由持牌报关员决定',
+    },
+  }),
+  workTemplate('commercial-insurance-renewal-pack', {
+    agentCount: 4,
+    stageCount: 6,
+    cadence: { en: 'Per renewal', zh: '每次续保' },
+    team: {
+      en: 'Submission intake -> consistency analyst -> exception reviewer -> producer review prep',
+      zh: '资料归集 -> 一致性分析 -> 异常复核 -> Producer 审签准备',
+    },
+    outputs: {
+      en: ['Submission matrix', 'Conflict and missing-item list', 'Broker review brief'],
+      zh: ['Submission 矩阵', '冲突与缺件清单', '经纪人复核简报'],
+    },
+    checkpoint: {
+      en: 'Licensed producer approves; no advice, submission, quoting, or binding',
+      zh: '必须由持牌 Producer 批准；不提供保险意见、不提交、不报价、不出单',
+    },
+  }),
+  workTemplate('weekly-operator-review', {
+    agentCount: 3,
+    stageCount: 5,
+    cadence: { en: 'Weekly', zh: '每周' },
+    team: {
+      en: 'Operations lead -> evidence reviewer -> report editor',
+      zh: '运营负责人 -> 证据复核 -> 报告编辑',
+    },
+    outputs: {
+      en: ['Operating review', 'Exception list', 'Five next actions'],
+      zh: ['经营复盘', '异常清单', '五项下一步行动'],
+    },
+    checkpoint: {
+      en: 'Human review before any operational change',
+      zh: '执行任何运营变更前，必须由负责人完成人工确认',
+    },
+  }),
+  workTemplate('project-status-risk-review', {
+    agentCount: 3,
+    stageCount: 5,
+    cadence: { en: 'Weekly or manual', zh: '每周或手动' },
+    team: {
+      en: 'Progress collector -> dependency analyst -> executive reviewer',
+      zh: '进度汇总 -> 依赖分析 -> 管理复核',
+    },
+    outputs: {
+      en: ['Status table', 'Blockers', 'Decision queue'],
+      zh: ['状态表', '阻塞项', '待决策清单'],
+    },
+    checkpoint: {
+      en: 'Human review before dates or owners change',
+      zh: '修改交付日期或负责人之前，必须完成人工确认',
+    },
+  }),
+  workTemplate('source-backed-research', {
+    agentCount: 3,
+    stageCount: 5,
+    cadence: { en: 'On demand', zh: '按需运行' },
+    team: {
+      en: 'Research lead -> source verifier -> decision editor',
+      zh: '研究负责人 -> 来源核验 -> 决策编辑',
+    },
+    outputs: {
+      en: ['Research brief', 'Source ledger', 'Recommendation'],
+      zh: ['研究简报', '来源账本', '决策建议'],
+    },
+    checkpoint: {
+      en: 'Human decision after evidence review',
+      zh: '完成证据复核后，必须由人工作出最终决策',
+    },
+  }),
+  workTemplate('content-repurposing', {
+    agentCount: 3,
+    stageCount: 4,
+    cadence: { en: 'On demand', zh: '按需运行' },
+    team: {
+      en: 'Source extractor -> channel adapter -> fact checker',
+      zh: '原稿提取 -> 渠道适配 -> 事实核验',
+    },
+    outputs: {
+      en: ['Channel drafts', 'Claims checklist', 'Source map'],
+      zh: ['多平台草稿', '事实清单', '来源映射'],
+    },
+    checkpoint: {
+      en: 'Human approval before publication',
+      zh: '任何内容对外发布之前，必须取得人工批准',
+    },
+  }),
+  workTemplate('client-onboarding-plan', {
+    agentCount: 3,
+    stageCount: 5,
+    cadence: { en: 'Per client', zh: '每位客户一次' },
+    team: {
+      en: 'Setup planner -> dependency tracker -> handoff reviewer',
+      zh: '设置规划 -> 依赖跟踪 -> 交接复核',
+    },
+    outputs: {
+      en: ['Milestone plan', 'Dependency log', 'Handoff checklist'],
+      zh: ['里程碑计划', '依赖清单', '交接检查表'],
+    },
+    checkpoint: {
+      en: 'Human approval before account or access changes',
+      zh: '创建账户或修改访问权限之前，必须取得人工批准',
+    },
+  }),
+  workTemplate('bazi-report-demo', {
+    agentCount: 3,
+    stageCount: 5,
+    cadence: { en: 'Demo run', zh: '演示运行' },
+    team: {
+      en: 'Deterministic chart lead -> citation verifier -> report editor',
+      zh: '确定性排盘负责人 -> 引用核验 -> 报告编辑',
+    },
+    outputs: {
+      en: ['Chart JSON', 'Citation audit', 'Signed-off PDF'],
+      zh: ['命盘 JSON', '引用审计', '审签 PDF'],
+    },
+    checkpoint: {
+      en: 'Mandatory human sign-off; synthetic data only',
+      zh: '报告必须完成人工审签，并且只能使用合成数据',
+    },
+  }),
+];
+
 export function localizedTaskPreset(preset, language) {
-  return {
+  const localized = {
     ...preset,
     title: preset.title[language],
     description: preset.description[language],
     objective: preset.objective[language],
+  };
+  if (!preset.recipe) return localized;
+  return {
+    ...localized,
+    recipe: {
+      ...preset.recipe,
+      cadence: preset.recipe.cadence[language],
+      team: preset.recipe.team[language],
+      outputs: preset.recipe.outputs[language],
+      checkpoint: preset.recipe.checkpoint[language],
+    },
   };
 }
 

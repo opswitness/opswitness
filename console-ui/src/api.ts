@@ -15,6 +15,8 @@ import type {
   ReportingLine,
   RuntimeInputArtifact,
   RuntimeInputArtifactPreview,
+  WorkspaceConversation,
+  WorkspaceMemoryView,
   TaskTemplate,
   TeamBlueprint,
   TelegramSetupStatus,
@@ -103,10 +105,13 @@ export function revisePlan(planId: string, instruction: string): Promise<PlanRec
   });
 }
 
-export function preparePlanRerun(planId: string): Promise<PlanRecord> {
+export function preparePlanRerun(
+  planId: string,
+  executionProfile: 'fast' | 'balanced' | 'deep' = 'fast',
+): Promise<PlanRecord> {
   return api(`/api/v1/plans/${encodeURIComponent(planId)}/rerun`, {
     method: 'POST',
-    body: JSON.stringify({ confirmed: true }),
+    body: JSON.stringify({ execution_profile: executionProfile, confirmed: true }),
   });
 }
 
@@ -174,6 +179,16 @@ export function revisePlanRuntimes(
   });
 }
 
+export function revisePlanExecutionProfile(
+  planId: string,
+  executionProfile: 'fast' | 'balanced' | 'deep',
+): Promise<PlanRecord> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/execution-profile`, {
+    method: 'POST',
+    body: JSON.stringify({ execution_profile: executionProfile, confirmed: true }),
+  });
+}
+
 export function deletePlan(planId: string): Promise<{
   plan_id: string;
   deleted: true;
@@ -217,10 +232,86 @@ export function saveTaskTemplate(name: string, objective: string): Promise<TaskT
   });
 }
 
+export function saveTaskTemplateFromPlan(planId: string, name: string): Promise<TaskTemplate> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/task-template`, {
+    method: 'POST',
+    body: JSON.stringify({ name, confirmed: true }),
+  });
+}
+
+export function getWorkspaceConversations(): Promise<WorkspaceConversation[]> {
+  return api('/api/v1/workspace-conversations');
+}
+
 export function archiveTaskTemplate(templateId: string): Promise<TaskTemplate> {
   return api(`/api/v1/task-templates/${encodeURIComponent(templateId)}/archive`, {
     method: 'POST',
     body: JSON.stringify({ confirmed: true }),
+  });
+}
+
+export function getWorkspaceMemories(
+  query = '',
+  includeHistory = true,
+): Promise<WorkspaceMemoryView[]> {
+  const params = new URLSearchParams();
+  if (query.trim()) params.set('query', query.trim());
+  params.set('include_history', String(includeHistory));
+  return api(`/api/v1/workspace-memory?${params.toString()}`);
+}
+
+export function createWorkspaceMemoryCandidate(body: {
+  kind: 'process' | 'knowledge';
+  title: string;
+  content: string;
+  tags: string[];
+  workspace?: string;
+  source_plan_id?: string | null;
+  supersedes_version_id?: string | null;
+}): Promise<WorkspaceMemoryView> {
+  return api('/api/v1/workspace-memory/candidates', {
+    method: 'POST',
+    body: JSON.stringify({ ...body, confirmed: true }),
+  });
+}
+
+export function proposeProcessMemory(
+  planId: string,
+  title?: string,
+): Promise<WorkspaceMemoryView> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/memory-candidates`, {
+    method: 'POST',
+    body: JSON.stringify({ title: title?.trim() || null, confirmed: true }),
+  });
+}
+
+export function approveWorkspaceMemory(
+  versionId: string,
+  reason = '',
+): Promise<WorkspaceMemoryView> {
+  return api(`/api/v1/workspace-memory/${encodeURIComponent(versionId)}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ reason, confirmed: true }),
+  });
+}
+
+export function revokeWorkspaceMemory(
+  versionId: string,
+  reason = '',
+): Promise<WorkspaceMemoryView> {
+  return api(`/api/v1/workspace-memory/${encodeURIComponent(versionId)}/revoke`, {
+    method: 'POST',
+    body: JSON.stringify({ reason, confirmed: true }),
+  });
+}
+
+export function rollbackWorkspaceMemory(
+  versionId: string,
+  reason: string,
+): Promise<WorkspaceMemoryView> {
+  return api(`/api/v1/workspace-memory/${encodeURIComponent(versionId)}/rollback`, {
+    method: 'POST',
+    body: JSON.stringify({ reason, confirmed: true }),
   });
 }
 
@@ -283,6 +374,10 @@ export function getPlanArtifact(
   return api(
     `/api/v1/plans/${encodeURIComponent(planId)}/artifacts/${encodeURIComponent(artifactName)}`,
   );
+}
+
+export function planArtifactContentUrl(planId: string, artifactName: string): string {
+  return `/api/v1/plans/${encodeURIComponent(planId)}/artifacts/${encodeURIComponent(artifactName)}/content`;
 }
 
 export function connectProvider(
