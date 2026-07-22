@@ -178,6 +178,21 @@ export type PlanArtifactPreview = PlanArtifact & {
   content: unknown;
 };
 
+export type PlanningAttachmentUpload = {
+  name: string;
+  media_type: string;
+  content_base64: string;
+};
+
+export type PlanningAttachment = {
+  attachment_id: string;
+  storage_plan_id: string;
+  name: string;
+  media_type: string;
+  size_bytes: number;
+  sha256: string;
+};
+
 export type ExecutionState = {
   kind: 'aion_team' | 'workflow';
   status:
@@ -234,6 +249,7 @@ export type PlanRecord = {
   constraints: string;
   workspace: string;
   preferred_cadence: string;
+  attachments?: PlanningAttachment[];
   source_blueprint_id?: string | null;
   source_blueprint_sha256?: string | null;
   memory_snapshot_sha256?: string | null;

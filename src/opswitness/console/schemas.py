@@ -175,6 +175,47 @@ class TaskPlan(BaseModel):
         return {agent.name: agent.reports_to for agent in self.agents}
 
 
+class PlanningAttachmentUpload(BaseModel):
+    """One explicitly selected planning input; bytes are never persisted in plan JSON."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=160)
+    media_type: str = Field(default="application/octet-stream", min_length=1, max_length=100)
+    content_base64: str = Field(min_length=1, max_length=7_000_000)
+
+    @model_validator(mode="after")
+    def validate_safe_metadata(self) -> "PlanningAttachmentUpload":
+        self.name = self.name.strip()
+        if (
+            not self.name
+            or self.name in {".", ".."}
+            or "/" in self.name
+            or "\\" in self.name
+            or any(ord(char) < 32 for char in self.name)
+        ):
+            raise ValueError("attachment name must be a plain filename")
+        extension = "." + self.name.rsplit(".", 1)[-1].casefold() if "." in self.name else ""
+        if extension not in {
+            ".csv",
+            ".docx",
+            ".jpeg",
+            ".jpg",
+            ".json",
+            ".md",
+            ".pdf",
+            ".png",
+            ".txt",
+            ".webp",
+            ".xlsx",
+        }:
+            raise ValueError("attachment file type is not supported")
+        self.media_type = self.media_type.strip().casefold()
+        if not self.media_type or any(ord(char) < 32 for char in self.media_type):
+            raise ValueError("attachment media type is invalid")
+        return self
+
+
 class PlanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -183,6 +224,20 @@ class PlanRequest(BaseModel):
     workspace: str = Field(default="", max_length=1024)
     preferred_cadence: Literal["once", "daily", "weekdays", "weekly", "manual"] = "once"
     blueprint_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    attachments: list[PlanningAttachmentUpload] = Field(default_factory=list, max_length=5)
+
+
+class PlanningAttachment(BaseModel):
+    """Immutable local material descriptor bound into a plan version hash."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    attachment_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    storage_plan_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    name: str = Field(min_length=1, max_length=160)
+    media_type: str = Field(min_length=1, max_length=100)
+    size_bytes: int = Field(ge=1, le=5 * 1024 * 1024)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class RevisePlanRequest(BaseModel):
@@ -534,6 +589,7 @@ class PlanRecord(BaseModel):
     constraints: str = ""
     workspace: str = ""
     preferred_cadence: Literal["once", "daily", "weekdays", "weekly", "manual"] = "once"
+    attachments: list[PlanningAttachment] = Field(default_factory=list, max_length=5)
     source_blueprint_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     source_blueprint_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     memory_snapshot_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")

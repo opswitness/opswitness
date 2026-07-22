@@ -36,3 +36,8 @@ These limitations are release promises, not a hidden backlog.
     readiness packs. They do not post books, choose tax positions, file returns or entries, determine
     customs treatment, recommend coverage, negotiate quotes, bind insurance, or replace the licensed
     professional's review and signature.
+14. **Planning attachments are bounded and are not a document-ingestion platform.** A plan accepts
+    at most five files, 5 MiB each and 15 MiB total. Text, Markdown, CSV, JSON, and PDF receive bounded
+    excerpts; Word, Excel, and image content is not parsed during planning and no OCR is provided.
+    Attached content is sent to the selected planning model, so credentials and unauthorized or
+    unnecessarily sensitive documents must not be attached.

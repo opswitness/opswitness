@@ -10,6 +10,7 @@ not that Stable durability or an SLA is available.
 | Local Workspace and Work UI | Supported | Loopback, single operator |
 | Plan review, immutable revisions, rerun and fork | Supported | Confirmation required before dispatch |
 | Workspace planning conversation history | Source-complete; fresh RC required | Immutable Plan-chain projection; restore and template save have no execution side effect |
+| Workspace planning materials | Source-complete; fresh RC required | Up to 5 allowlisted files, 5 MiB each / 15 MiB total; hash-bound, private and read-only; bounded text/PDF excerpts, no Office parsing or OCR |
 | Built-in Work template catalog | Source-complete; fresh RC required | 31 bilingual starting points and 10 concrete recipes; professional evidence packs stop at licensed review |
 | Repeatable Work | Source-complete; fresh RC required | Latest ended reviewed Work prepares an unconfirmed child; never one-click dispatch |
 | Auditable Workspace Memory | Source-complete; fresh RC required | Local Obsidian-compatible Markdown; candidates require human approval; planning reads approved hash-bound snapshots only |

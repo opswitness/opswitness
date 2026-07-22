@@ -169,6 +169,7 @@ import type {
   HomeAction,
   PlanArtifact,
   PlanArtifactPreview,
+  PlanningAttachmentUpload,
   PlanRecord,
   PlannedAgent,
   ProviderConnectionJob,
@@ -218,6 +219,14 @@ const cadenceOptions = [
   { value: 'weekly', label: '每周' },
   { value: 'manual', label: '手动' },
 ] as const;
+
+const PLANNING_ATTACHMENT_MAX_FILES = 5;
+const PLANNING_ATTACHMENT_MAX_FILE_BYTES = 5 * 1024 * 1024;
+const PLANNING_ATTACHMENT_MAX_TOTAL_BYTES = 15 * 1024 * 1024;
+const PLANNING_ATTACHMENT_EXTENSIONS = new Set([
+  '.csv', '.docx', '.jpeg', '.jpg', '.json', '.md', '.pdf', '.png', '.txt', '.webp', '.xlsx',
+]);
+const PLANNING_ATTACHMENT_ACCEPT = Array.from(PLANNING_ATTACHMENT_EXTENSIONS).join(',');
 
 const statusLabel: Record<string, string> = {
   planning: '规划中',
@@ -294,6 +303,30 @@ function inferCadence(objective: string): 'once' | 'daily' | 'weekdays' | 'weekl
   if (/(每周|周报|weekly)/.test(text)) return 'weekly';
   if (/(手动|按需|manual)/.test(text)) return 'manual';
   return 'once';
+}
+
+function planningAttachmentExtension(name: string): string {
+  const index = name.lastIndexOf('.');
+  return index >= 0 ? name.slice(index).toLocaleLowerCase() : '';
+}
+
+function formatPlanningAttachmentSize(size: number): string {
+  if (size < 1024) return `${size.toLocaleString()} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(size < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function encodePlanningAttachment(file: File): Promise<PlanningAttachmentUpload> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const chunks: string[] = [];
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)));
+  }
+  return {
+    name: file.name,
+    media_type: file.type || 'application/octet-stream',
+    content_base64: window.btoa(chunks.join('')),
+  };
 }
 
 function translatedHomeAction(action: HomeAction, t: Translate): { title: string; summary: string } {
@@ -1579,6 +1612,7 @@ function WorkspaceView({
     workspace: string;
     preferred_cadence: string;
     blueprint_id?: string | null;
+    attachments?: PlanningAttachmentUpload[];
   }) => Promise<void>;
   onRevise: (record: PlanRecord, instruction: string) => Promise<void>;
   onOrganizationSave: (
@@ -1663,6 +1697,7 @@ function WorkspaceView({
   const [historyTemplateTarget, setHistoryTemplateTarget] = useState<WorkspaceConversation | null>(null);
   const [conversationBusy, setConversationBusy] = useState('');
   const [repeatableBusy, setRepeatableBusy] = useState('');
+  const [planningAttachments, setPlanningAttachments] = useState<File[]>([]);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -1681,14 +1716,19 @@ function WorkspaceView({
     setSubmitting(true);
     setError('');
     try {
+      const encodedAttachments = await Promise.all(
+        planningAttachments.map((file) => encodePlanningAttachment(file)),
+      );
       await onPlan({
         objective,
         constraints: '',
         workspace: '',
         preferred_cadence: inferCadence(objective),
         blueprint_id: selectedBlueprintId(selectedBlueprint),
+        attachments: encodedAttachments,
       });
       setDraft('');
+      setPlanningAttachments([]);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('规划请求失败'));
     } finally {
@@ -1734,7 +1774,45 @@ function WorkspaceView({
 
   const restart = () => {
     setDraft('');
+    setPlanningAttachments([]);
     onRestart();
+  };
+
+  const selectPlanningAttachments = (incoming: FileList | null) => {
+    if (!incoming || incoming.length === 0 || submitting || locked) return;
+    setError('');
+    const next = [...planningAttachments];
+    const known = new Set(next.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
+    for (const file of Array.from(incoming)) {
+      const identity = `${file.name}:${file.size}:${file.lastModified}`;
+      if (known.has(identity)) continue;
+      if (next.length >= PLANNING_ATTACHMENT_MAX_FILES) {
+        setError(t('每次规划最多附加 5 个文件。'));
+        return;
+      }
+      if (!PLANNING_ATTACHMENT_EXTENSIONS.has(planningAttachmentExtension(file.name))) {
+        setError(t('不支持此文件类型：{name}', { name: file.name }));
+        return;
+      }
+      if (file.size <= 0) {
+        setError(t('不能附加空文件：{name}', { name: file.name }));
+        return;
+      }
+      if (file.size > PLANNING_ATTACHMENT_MAX_FILE_BYTES) {
+        setError(t('文件超过 5 MB：{name}', { name: file.name }));
+        return;
+      }
+      if (
+        next.reduce((sum, item) => sum + item.size, 0) + file.size
+        > PLANNING_ATTACHMENT_MAX_TOTAL_BYTES
+      ) {
+        setError(t('附加文件总大小不能超过 15 MB。'));
+        return;
+      }
+      next.push(file);
+      known.add(identity);
+    }
+    setPlanningAttachments(next);
   };
 
   const closePresetLibrary = useCallback(() => setPresetOpen(false), []);
@@ -1968,6 +2046,19 @@ function WorkspaceView({
                     hash: shortId(record.memory_snapshot_sha256),
                   })}</small>
                 )}
+                {(record.attachments?.length ?? 0) > 0 && (
+                  <div className="chat-bound-materials">
+                    <span><FileUp size={14} />{t('已绑定 {count} 份规划材料', { count: record.attachments?.length ?? 0 })}</span>
+                    <ul>
+                      {(record.attachments ?? []).map((attachment) => (
+                        <li key={attachment.attachment_id}>
+                          <span>{attachment.name}</span>
+                          <small>{formatPlanningAttachmentSize(attachment.size_bytes)} · SHA-256 {attachment.sha256.slice(0, 10)}…</small>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
               <div className="chat-avatar user-avatar">{t('你')}</div>
             </div>
@@ -2061,6 +2152,29 @@ function WorkspaceView({
             void submit();
           }}
         >
+          {planningAttachments.length > 0 && (
+            <div className="planning-attachment-list" aria-label={t('已选择的规划材料')}>
+              {planningAttachments.map((file, index) => (
+                <div className="planning-attachment-row" key={`${file.name}:${file.size}:${file.lastModified}`}>
+                  <FileUp size={15} />
+                  <span>
+                    <strong>{file.name}</strong>
+                    <small>{formatPlanningAttachmentSize(file.size)}</small>
+                  </span>
+                  <button
+                    type="button"
+                    title={t('移除文件：{name}', { name: file.name })}
+                    aria-label={t('移除文件：{name}', { name: file.name })}
+                    disabled={submitting || locked}
+                    onClick={() => setPlanningAttachments((files) => files.filter((_, itemIndex) => itemIndex !== index))}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+              <p><ShieldCheck size={13} />{t('文件内容会发送给当前规划模型；请勿上传密码、API key 或未授权资料。')}</p>
+            </div>
+          )}
           <textarea
             aria-label={t('任务描述')}
             value={draft}
@@ -2077,7 +2191,26 @@ function WorkspaceView({
             }}
           />
           <div className="chat-composer-actions">
-            <span><ShieldCheck size={14} />{t('先规划，确认后运行')}</span>
+            <div className="chat-composer-context">
+              <label
+                className={`planning-attachment-button${submitting || locked ? ' disabled' : ''}`}
+                title={t('附加规划材料')}
+              >
+                <FileUp size={15} />
+                <span>{t('附加文件')}</span>
+                <input
+                  type="file"
+                  multiple
+                  accept={PLANNING_ATTACHMENT_ACCEPT}
+                  disabled={submitting || locked}
+                  onChange={(event) => {
+                    selectPlanningAttachments(event.currentTarget.files);
+                    event.currentTarget.value = '';
+                  }}
+                />
+              </label>
+              <span className="chat-planning-boundary"><ShieldCheck size={14} />{t('先规划，确认后运行')}</span>
+            </div>
             <button
               className="chat-send-button"
               type="submit"

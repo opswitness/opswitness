@@ -47,6 +47,13 @@ source as an objective-only task template. The template records the source Plan 
 provenance, while team structure, runtime state, approvals, replies, artifacts, and evidence remain
 outside the template.
 
+Before planning, the operator may attach up to five explicitly selected local materials (5 MiB each,
+15 MiB total). Text, Markdown, CSV, JSON, and PDF receive bounded planning excerpts; Word, Excel,
+and image files are visible to planning by metadata only. Every material is stored privately,
+content-hashed into the immutable Plan identity, and revalidated before confirmation. The confirmed
+Aion team receives hash-verified read-only copies in its execution workspace. File bodies and names
+do not enter the append-only ledger; it records only the material count and manifest hash.
+
 OpsWitness also keeps an Obsidian-compatible private **Workspace Memory** vault for process lessons
 and sourced knowledge. Agents can propose candidates; only human-approved, immutable versions are
 included read-only in a new planning snapshot. Approval, supersession, revocation, and rollback are
@@ -181,6 +188,9 @@ Every session enters the chat-first **Workspace** by default: one plain-language
 inline execution brief with a proposed Agent team, runtime and model recommendation, stages, cadence,
 checkpoints, artifacts, and risks. While planning, the page shows persisted external stages, elapsed
 time, and a conservative duration range; it never exposes or fabricates model chain-of-thought. The
+composer also accepts bounded local materials before planning and lets the operator inspect or remove
+each selection. Their content is sent only to the currently selected planning model as described
+above; credentials and unauthorized documents must not be attached. The
 operator may revise each proposed runtime and its advertised model before confirmation, which creates a new immutable child
 plan and hash. The review surface also offers Fast, Balanced, and Deep profiles and immediately shows
 the resulting model selection for each Agent. These profiles prioritize latency or quality; they do

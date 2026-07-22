@@ -10,6 +10,7 @@ import type {
   PairingInvitation,
   PlanArtifact,
   PlanArtifactPreview,
+  PlanningAttachmentUpload,
   PlanRecord,
   ProviderConnectionJob,
   ReportingLine,
@@ -90,6 +91,7 @@ export function requestPlan(body: {
   workspace: string;
   preferred_cadence: string;
   blueprint_id?: string | null;
+  attachments?: PlanningAttachmentUpload[];
 }): Promise<PlanRecord> {
   return api('/api/v1/plans', { method: 'POST', body: JSON.stringify(body) });
 }

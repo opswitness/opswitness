@@ -968,6 +968,53 @@ button:disabled {
   font-size: 11px;
 }
 
+.chat-bound-materials {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+  border-top: 1px solid #c9dcd7;
+  padding-top: 9px;
+}
+
+.chat-bound-materials > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.chat-bound-materials ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-bound-materials li {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-bound-materials li > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-bound-materials li small {
+  flex: 0 0 auto;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  white-space: nowrap;
+}
+
 .chat-assistant-content {
   display: grid;
   min-width: 0;
@@ -1044,6 +1091,81 @@ button:disabled {
   font-size: 13px;
 }
 
+.planning-attachment-list {
+  display: grid;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+  background: #f8faf9;
+}
+
+.planning-attachment-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 20px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 7px;
+  color: #3e514b;
+}
+
+.planning-attachment-row > svg {
+  color: var(--teal);
+}
+
+.planning-attachment-row > span {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.planning-attachment-row strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planning-attachment-row small {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.planning-attachment-row button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.planning-attachment-row button:hover:not(:disabled) {
+  background: #e9eeec;
+  color: var(--danger);
+}
+
+.planning-attachment-list > p {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.planning-attachment-list > p svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--teal);
+}
+
 .chat-composer textarea:focus-visible {
   outline: 0;
 }
@@ -1057,7 +1179,14 @@ button:disabled {
   padding: 5px 8px 8px 14px;
 }
 
-.chat-composer-actions > span {
+.chat-composer-context {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.chat-planning-boundary {
   display: inline-flex;
   min-width: 0;
   align-items: center;
@@ -1067,8 +1196,43 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
-.chat-composer-actions > span svg {
+.chat-planning-boundary svg {
   color: var(--teal);
+}
+
+.planning-attachment-button {
+  display: inline-flex;
+  min-height: 30px;
+  cursor: pointer;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: #fbfcfb;
+  padding: 5px 8px;
+  color: #41534d;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.planning-attachment-button:hover:not(.disabled) {
+  border-color: #86aaa3;
+  color: var(--teal);
+}
+
+.planning-attachment-button.disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.planning-attachment-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .chat-send-button {
@@ -8296,6 +8460,29 @@ input::placeholder {
   .chat-composer-actions {
     min-height: 41px;
     padding: 4px 6px 6px 12px;
+  }
+
+  .chat-composer-context {
+    flex-wrap: wrap;
+    gap: 5px 8px;
+  }
+
+  .planning-attachment-button {
+    min-height: 28px;
+  }
+
+  .planning-attachment-row > span {
+    display: grid;
+    gap: 1px;
+  }
+
+  .chat-bound-materials li {
+    display: grid;
+    gap: 1px;
+  }
+
+  .chat-bound-materials li small {
+    white-space: normal;
   }
 
   .alert-banner {

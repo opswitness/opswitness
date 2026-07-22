@@ -88,6 +88,16 @@ Plan id/hash in the template record and append-only event. The reusable payload 
 wording only; organization, runtime, approvals, operator replies, artifacts, and run evidence are
 not copied.
 
+Workspace planning materials are a separate immutable input channel. The JSON API accepts at most
+five allowlisted files, 5 MiB each and 15 MiB in total. OpsWitness decodes them into a private `0700`
+material root, publishes each blob read-only, and binds name, media type, size, content SHA-256, and
+opaque material id into the Plan hash. The planner receives only bounded text/PDF excerpts plus
+metadata; Office files and images remain metadata-only during planning. Before confirmation and
+again before execution, OpsWitness opens every blob without following symlinks and rechecks mode,
+size, and digest. Aion team execution receives read-only copies and a relative manifest under its
+workspace. The ledger stores the count and manifest digest, never file names or bodies. Attached
+plans cannot use the allowlisted workflow launcher because that runtime has no material contract.
+
 Workspace Memory is a separate future-context authority, governed by
 [ADR-0008](adr/0008-repeatable-work-and-auditable-workspace-memory.md). Obsidian-compatible Markdown
 holds immutable process/knowledge versions; ledger events hold candidate, approval,
@@ -407,6 +417,7 @@ paid users ultimately see the vertical workbench, not the generic operations sur
 | metadata-only mail monitor | `src/opswitness/mail.py`, `console/`, `console-ui/` | ✅ adapter + setup/revoke UI; live OAuth and AionUi schedule pending |
 | repeatable Work + Workspace Memory | `src/opswitness/console/service.py`, `store.py`, `console-ui/src/workspace-memory-dialog.tsx` | ✅ source + tests: ended-Work projection, review-first preparation, Obsidian-compatible immutable versions, approval/revoke/rollback, approved planning snapshot; fresh RC/canary pending |
 | Workspace conversation history | `src/opswitness/console/service.py`, `schemas.py`, `console-ui/src/App.tsx` | ✅ source + tests: immutable Plan-chain projection, exact latest-version restore, provenance-bound objective template, zero execution side effect; fresh RC/canary pending |
+| Workspace planning materials | `src/opswitness/console/service.py`, `schemas.py`, `aionui.py`, `console-ui/src/App.tsx` | ✅ source + tests: bounded upload, immutable Plan-hash binding, private read-only storage, tamper rejection, bounded planner excerpts, and hash-verified Aion execution copies; fresh RC/canary pending |
 | local operator console | `src/opswitness/console/`, `console-ui/` | ✅ sole operator surface + default Workspace chatbox with planning history/presets/templates/blueprints + optional Today + unified Work details + immutable runtime revisions + independent hash-bound Work forks + evidence-only member observation, bounded live activity, and plan-bound AionUi team-task stage telemetry + evidence-first Aion pause/continue/terminate controls + provider account/Console login, one-time OpenAI CLI stdin handoff, Anthropic Keychain + apiKeyHelper, DeepSeek/xAI Keychain connections, official Grok account flow, and fixed-loopback Ollama/LM Studio discovery plus hidden AionUi registration + planning/progress + graphical hierarchy/bounded loops + ledger-folded run history + approval facade + Gmail/Telegram + responsive UI; real run-control acceptance, DeepSeek/Grok execution adapters, local-model live acceptance, and production canary remain pending |
 | install doctor / secure services / disaster recovery | `src/opswitness/doctor.py`, `service.py`, `backup.py` | ✅ five secret-free templates + installed-command drift check; soak pending |
 | gate (PreToolUse `defer` → Paperclip approval → resume) | `gate.py`, `gated_claude.py` | ✅ M3 code + two live approval/resume drills |

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import fcntl
 import hashlib
+import io
 import json
 import mimetypes
 import os
@@ -19,6 +22,7 @@ from typing import Any, Callable, Literal, cast
 from uuid import UUID
 
 import httpx
+from pypdf import PdfReader
 
 from opswitness.artifacts import (
     artifact_records,
@@ -59,6 +63,8 @@ from opswitness.console.schemas import (
     MailOAuthClientRequest,
     MailSummaryJob,
     OrganizationRevisionRequest,
+    PlanningAttachment,
+    PlanningAttachmentUpload,
     PlanRecord,
     PlanRequest,
     PlanningProgress,
@@ -172,6 +178,11 @@ _RUNTIME_ARTIFACT_PREVIEW_LIMIT = 1024 * 1024
 _RUNTIME_ARTIFACT_CONTENT_LIMIT = 25 * 1024 * 1024
 _CONSOLE_ARTIFACT_LIMIT = 100
 _CONTINUATION_BASELINE = ".artifact-baseline.json"
+_PLANNING_ATTACHMENT_FILE_LIMIT = 5 * 1024 * 1024
+_PLANNING_ATTACHMENT_TOTAL_LIMIT = 15 * 1024 * 1024
+_PLANNING_ATTACHMENT_EXCERPT_LIMIT = 40_000
+_PLANNING_ATTACHMENT_TOTAL_EXCERPT_LIMIT = 100_000
+_PLANNING_TEXT_EXTENSIONS = {".csv", ".json", ".md", ".txt"}
 TELEGRAM_TEST_FAILED = "Telegram test delivery failed; inspect local diagnostics."
 PLAN_GENERATION_FAILED = "plan_generation_failed"
 PLAN_GENERATION_FAILED_DETAIL = "Planning failed; check the AI connection and create a new plan."
@@ -819,6 +830,10 @@ def _execution_plan_sha(record: PlanRecord, plan: TaskPlan | None = None) -> str
         "preferred_cadence": record.preferred_cadence,
         "plan": _hashable_plan_payload(selected_plan),
     }
+    if record.attachments:
+        envelope["attachments"] = [
+            attachment.model_dump(mode="json") for attachment in record.attachments
+        ]
     if record.parent_plan_id is not None:
         envelope["revision"] = {
             "parent_plan_id": record.parent_plan_id,
@@ -2581,6 +2596,205 @@ class ConsoleService:
         self._deliver_aion_approval(recorded)
         return {"approval_id": approval_id, "status": desired, "reconciled": False}
 
+    def _plan_material_root(self, storage_plan_id: str, *, create: bool) -> Path:
+        state_root = self.settings.console.state_dir.expanduser()
+        materials_root = state_root / "materials"
+        plan_root = materials_root / storage_plan_id
+        for path in (state_root, materials_root, plan_root):
+            if path.exists() and (path.is_symlink() or not path.is_dir()):
+                raise ValueError("planning material storage is unavailable")
+            if create:
+                path.mkdir(parents=True, exist_ok=True, mode=0o700)
+                os.chmod(path, 0o700)
+            elif not path.exists():
+                raise ConsoleConflict(
+                    "planning material is unavailable; create a new plan"
+                )
+            elif stat.S_IMODE(path.stat().st_mode) != 0o700:
+                raise ConsoleConflict("planning material directory permissions are unsafe")
+        if not plan_root.is_dir() or plan_root.is_symlink():
+            raise ValueError("planning material storage is unavailable")
+        return plan_root
+
+    def _store_plan_attachments(
+        self,
+        plan_id: str,
+        uploads: list[PlanningAttachmentUpload],
+    ) -> list[PlanningAttachment]:
+        if not uploads:
+            return []
+        decoded: list[tuple[PlanningAttachmentUpload, bytes, str, str]] = []
+        total_bytes = 0
+        for upload in uploads:
+            try:
+                content = base64.b64decode(upload.content_base64, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError("attachment content is not valid base64") from exc
+            if not content:
+                raise ValueError("attachment must not be empty")
+            if len(content) > _PLANNING_ATTACHMENT_FILE_LIMIT:
+                raise ValueError("attachment exceeds the 5 MB file limit")
+            total_bytes += len(content)
+            if total_bytes > _PLANNING_ATTACHMENT_TOTAL_LIMIT:
+                raise ValueError("attachments exceed the 15 MB total limit")
+            media_type = upload.media_type
+            if media_type == "application/octet-stream":
+                guessed, _ = mimetypes.guess_type(upload.name)
+                if guessed:
+                    media_type = guessed.casefold()
+            decoded.append(
+                (upload, content, media_type, hashlib.sha256(content).hexdigest())
+            )
+
+        root = self._plan_material_root(plan_id, create=True)
+        attachments: list[PlanningAttachment] = []
+        for upload, content, media_type, content_sha256 in decoded:
+            attachment_id = new_ulid()
+            target = root / attachment_id
+            if target.exists() or target.is_symlink():
+                raise ValueError("planning material identity collision")
+            atomic_write(target, content, mode=0o400)
+            attachment = PlanningAttachment(
+                attachment_id=attachment_id,
+                storage_plan_id=plan_id,
+                name=upload.name,
+                media_type=media_type,
+                size_bytes=len(content),
+                sha256=content_sha256,
+            )
+            if self._read_plan_attachment(attachment) != content:
+                raise ValueError("planning material verification failed")
+            attachments.append(attachment)
+        return attachments
+
+    def _read_plan_attachment(self, attachment: PlanningAttachment) -> bytes:
+        root = self._plan_material_root(attachment.storage_plan_id, create=False)
+        source = root / attachment.attachment_id
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            fd = os.open(source, flags)
+        except OSError as exc:
+            raise ConsoleConflict("planning material is unavailable; create a new plan") from exc
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode) or stat.S_IMODE(before.st_mode) != 0o400:
+                raise ConsoleConflict("planning material permissions are unsafe")
+            if before.st_size != attachment.size_bytes:
+                raise ConsoleConflict("planning material size changed; create a new plan")
+            chunks: list[bytes] = []
+            remaining = _PLANNING_ATTACHMENT_FILE_LIMIT + 1
+            while remaining > 0:
+                chunk = os.read(fd, min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            content = b"".join(chunks)
+            after = os.fstat(fd)
+            if (
+                before.st_ino != after.st_ino
+                or before.st_size != after.st_size
+                or before.st_mtime_ns != after.st_mtime_ns
+            ):
+                raise ConsoleConflict("planning material changed while being read")
+        finally:
+            os.close(fd)
+        if len(content) != attachment.size_bytes:
+            raise ConsoleConflict("planning material size changed; create a new plan")
+        if hashlib.sha256(content).hexdigest() != attachment.sha256:
+            raise ConsoleConflict("planning material hash changed; create a new plan")
+        return content
+
+    def _planning_attachment_payloads(self, record: PlanRecord) -> list[dict[str, Any]]:
+        payloads: list[dict[str, Any]] = []
+        remaining = _PLANNING_ATTACHMENT_TOTAL_EXCERPT_LIMIT
+        for attachment in record.attachments:
+            content = self._read_plan_attachment(attachment)
+            excerpt = ""
+            extraction_status = "metadata_only"
+            extension = Path(attachment.name).suffix.casefold()
+            if extension in _PLANNING_TEXT_EXTENSIONS and remaining > 0:
+                excerpt = content.decode("utf-8-sig", errors="replace").replace("\x00", "")
+                extraction_status = "included"
+            elif extension == ".pdf" and remaining > 0:
+                try:
+                    reader = PdfReader(io.BytesIO(content), strict=False)
+                    if reader.is_encrypted:
+                        extraction_status = "encrypted"
+                    else:
+                        fragments: list[str] = []
+                        extracted_length = 0
+                        extraction_limit = min(
+                            remaining,
+                            _PLANNING_ATTACHMENT_EXCERPT_LIMIT,
+                        )
+                        for page_index in range(min(len(reader.pages), 100)):
+                            fragment = reader.pages[page_index].extract_text() or ""
+                            fragments.append(fragment)
+                            extracted_length += len(fragment)
+                            if extracted_length >= extraction_limit:
+                                break
+                        excerpt = "\n".join(fragments).replace("\x00", "")
+                        extraction_status = "included" if excerpt.strip() else "unavailable"
+                except Exception:
+                    extraction_status = "unavailable"
+            limit = min(remaining, _PLANNING_ATTACHMENT_EXCERPT_LIMIT)
+            excerpt_was_truncated = len(excerpt) > limit
+            excerpt = excerpt[:limit]
+            remaining -= len(excerpt)
+            payload: dict[str, Any] = {
+                "name": attachment.name,
+                "media_type": attachment.media_type,
+                "size_bytes": attachment.size_bytes,
+                "sha256": attachment.sha256,
+                "extraction_status": extraction_status,
+            }
+            if excerpt:
+                payload["excerpt"] = excerpt
+                payload["excerpt_truncated"] = excerpt_was_truncated
+            payloads.append(payload)
+        return payloads
+
+    def _materialize_execution_inputs(
+        self,
+        record: PlanRecord,
+        workspace: Path,
+    ) -> list[dict[str, Any]]:
+        if not record.attachments:
+            return []
+        ops_root = workspace / ".opswitness"
+        inputs_root = ops_root / "inputs"
+        plan_root = inputs_root / record.plan_id
+        for path in (ops_root, inputs_root, plan_root):
+            if path.exists() and (path.is_symlink() or not path.is_dir()):
+                raise ConsoleConflict("execution material directory is unavailable")
+            path.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.chmod(path, 0o700)
+
+        manifest: list[dict[str, Any]] = []
+        for index, attachment in enumerate(record.attachments, start=1):
+            content = self._read_plan_attachment(attachment)
+            source_name = Path(attachment.name)
+            safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "-", source_name.stem).strip(".-")
+            safe_stem = safe_stem[:80] or "material"
+            suffix = source_name.suffix.casefold()
+            target = plan_root / f"{index:02d}-{safe_stem}{suffix}"
+            if target.exists() or target.is_symlink():
+                if target.is_symlink() or self._artifact_file_digest(target) != attachment.sha256:
+                    raise ConsoleConflict("execution material target changed; create a new plan")
+            else:
+                atomic_write(target, content, mode=0o400)
+            manifest.append(
+                {
+                    "name": attachment.name,
+                    "relative_path": target.relative_to(workspace).as_posix(),
+                    "media_type": attachment.media_type,
+                    "size_bytes": attachment.size_bytes,
+                    "sha256": attachment.sha256,
+                }
+            )
+        return manifest
+
     def request_plan(self, request: PlanRequest) -> PlanRecord:
         workspace = self._normalise_requested_workspace(request.workspace)
         request = request.model_copy(update={"workspace": workspace})
@@ -2596,7 +2810,20 @@ class ConsoleService:
             if blueprint.archived_at is not None:
                 raise ValueError("selected team blueprint is archived")
         plan_id = new_ulid()
-        request_hash = _canonical_sha256(request.model_dump(mode="json"))
+        attachments = self._store_plan_attachments(plan_id, request.attachments)
+        request_payload = request.model_dump(mode="json", exclude={"attachments"})
+        if attachments:
+            request_payload["attachments"] = [
+                attachment.model_dump(mode="json") for attachment in attachments
+            ]
+        request_hash = _canonical_sha256(request_payload)
+        attachment_manifest_sha256 = (
+            _canonical_sha256(
+                [attachment.model_dump(mode="json") for attachment in attachments]
+            )
+            if attachments
+            else None
+        )
         self._append(
             "task_plan_requested",
             plan_id,
@@ -2610,6 +2837,8 @@ class ConsoleService:
                 "source_blueprint_sha256": blueprint.blueprint_sha256 if blueprint else None,
                 "memory_snapshot_sha256": memory_snapshot_sha256,
                 "memory_version_count": len(memory_version_ids),
+                "attachment_count": len(attachments),
+                "attachment_manifest_sha256": attachment_manifest_sha256,
             },
         )
         started_at = utc_now()
@@ -2622,6 +2851,7 @@ class ConsoleService:
             constraints=request.constraints,
             workspace=request.workspace,
             preferred_cadence=request.preferred_cadence,
+            attachments=attachments,
             source_blueprint_id=blueprint.blueprint_id if blueprint else None,
             source_blueprint_sha256=blueprint.blueprint_sha256 if blueprint else None,
             memory_snapshot_sha256=memory_snapshot_sha256,
@@ -2706,6 +2936,7 @@ class ConsoleService:
                 constraints=parent.constraints,
                 workspace=parent.workspace,
                 preferred_cadence=parent.preferred_cadence,
+                attachments=[item.model_copy(deep=True) for item in parent.attachments],
                 source_blueprint_id=parent.source_blueprint_id,
                 source_blueprint_sha256=parent.source_blueprint_sha256,
                 memory_snapshot_sha256=memory_snapshot_sha256,
@@ -2785,6 +3016,7 @@ class ConsoleService:
                 constraints=source.constraints,
                 workspace=source.workspace,
                 preferred_cadence=source.preferred_cadence,
+                attachments=[item.model_copy(deep=True) for item in source.attachments],
                 source_blueprint_id=source.source_blueprint_id,
                 source_blueprint_sha256=source.source_blueprint_sha256,
                 memory_snapshot_sha256=source.memory_snapshot_sha256,
@@ -2928,6 +3160,7 @@ class ConsoleService:
                 constraints=source.constraints,
                 workspace=source.workspace,
                 preferred_cadence=source.preferred_cadence,
+                attachments=[item.model_copy(deep=True) for item in source.attachments],
                 source_blueprint_id=source.source_blueprint_id,
                 source_blueprint_sha256=source.source_blueprint_sha256,
                 memory_snapshot_sha256=source.memory_snapshot_sha256,
@@ -2962,10 +3195,9 @@ class ConsoleService:
                 ),
             )
             record.plan_sha256 = _execution_plan_sha(record)
-            self._prepare_run_artifact_boundary(
-                record,
-                self._aion_team_workspace(source),
-            )
+            workspace = self._aion_team_workspace(source)
+            self._prepare_run_artifact_boundary(record, workspace)
+            self._materialize_execution_inputs(record, workspace)
             self._append(
                 "task_plan_continuation_requested",
                 record.plan_id,
@@ -3160,6 +3392,7 @@ class ConsoleService:
                 constraints=source.constraints,
                 workspace=source.workspace,
                 preferred_cadence=source.preferred_cadence,
+                attachments=[item.model_copy(deep=True) for item in source.attachments],
                 source_blueprint_id=source.source_blueprint_id,
                 source_blueprint_sha256=source.source_blueprint_sha256,
                 memory_snapshot_sha256=source.memory_snapshot_sha256,
@@ -3264,6 +3497,7 @@ class ConsoleService:
                 constraints=parent.constraints,
                 workspace=parent.workspace,
                 preferred_cadence=parent.preferred_cadence,
+                attachments=[item.model_copy(deep=True) for item in parent.attachments],
                 source_blueprint_id=parent.source_blueprint_id,
                 source_blueprint_sha256=parent.source_blueprint_sha256,
                 memory_snapshot_sha256=parent.memory_snapshot_sha256,
@@ -3376,6 +3610,7 @@ class ConsoleService:
                 constraints=parent.constraints,
                 workspace=parent.workspace,
                 preferred_cadence=parent.preferred_cadence,
+                attachments=[item.model_copy(deep=True) for item in parent.attachments],
                 source_blueprint_id=parent.source_blueprint_id,
                 source_blueprint_sha256=parent.source_blueprint_sha256,
                 memory_snapshot_sha256=parent.memory_snapshot_sha256,
@@ -3477,6 +3712,7 @@ class ConsoleService:
                 constraints=parent.constraints,
                 workspace=parent.workspace,
                 preferred_cadence=parent.preferred_cadence,
+                attachments=[item.model_copy(deep=True) for item in parent.attachments],
                 source_blueprint_id=parent.source_blueprint_id,
                 source_blueprint_sha256=parent.source_blueprint_sha256,
                 memory_snapshot_sha256=parent.memory_snapshot_sha256,
@@ -4209,6 +4445,7 @@ class ConsoleService:
             if not any(entry.get("available") is True for entry in runtime_capabilities):
                 raise ConsoleUnavailable("no local agent runtime is ready")
             memory_snapshot = self._record_workspace_memory_snapshot(record)
+            planning_attachments = self._planning_attachment_payloads(record)
             previous_plan: TaskPlan | None = None
             if record.parent_plan_id is not None:
                 parent = self.store.get(record.parent_plan_id)
@@ -4252,7 +4489,10 @@ class ConsoleService:
                 runtime_capabilities=runtime_capabilities,
                 blueprint=blueprint_payload,
                 memory_snapshot=memory_snapshot,
+                planning_attachments=planning_attachments,
             )
+            if record.attachments and plan.execution_mode != "aion_team":
+                raise ConsoleConflict("plans with attached materials require an Agent team")
             if previous_plan is None:
                 target_profile = ExecutionProfile.BALANCED
             else:
@@ -4276,6 +4516,7 @@ class ConsoleService:
                     "source_blueprint_sha256": record.source_blueprint_sha256,
                     "memory_snapshot_sha256": record.memory_snapshot_sha256,
                     "memory_version_count": len(record.memory_version_ids),
+                    "attachment_count": len(record.attachments),
                     "execution_profile": str(target_profile),
                 },
             )
@@ -4323,6 +4564,8 @@ class ConsoleService:
                 raise ConsoleConflict("stored plan inputs changed; replan before confirming")
             if request.plan_sha256 != current.plan_sha256:
                 raise ConsoleConflict("plan hash changed; refresh before confirming")
+            for attachment in current.attachments:
+                self._read_plan_attachment(attachment)
             self._record_workspace_memory_snapshot(current)
             self._append(
                 "task_plan_confirmed",
@@ -5357,6 +5600,7 @@ class ConsoleService:
             else:
                 workspace = self._execution_workspace(record)
                 self._prepare_run_artifact_boundary(record, workspace)
+                execution_materials = self._materialize_execution_inputs(record, workspace)
                 launched = self.aion.dispatch_plan(
                     plan_id=record.plan_id,
                     plan=plan,
@@ -5364,6 +5608,7 @@ class ConsoleService:
                     constraints=record.constraints,
                     workspace=workspace,
                     paperclip_issue_id=issue_id,
+                    materials=execution_materials,
                 )
                 execution = ExecutionState(
                     kind="aion_team",
@@ -5398,6 +5643,7 @@ class ConsoleService:
                     "paperclip_issue_id": issue_id,
                     "execution_mode": plan.execution_mode,
                     "approval_mode": str(execution.approval_mode),
+                    "attachment_count": len(record.attachments),
                     **remote,
                 },
                 fsync=True,
