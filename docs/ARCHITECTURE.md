@@ -30,13 +30,16 @@ and multi-user identity are excluded from this release.
 
 ## Product position
 
-> **本地优先的 AI Workforce 总工作台：把已有的 Claude、Codex、AionUi、Paperclip 和自动化任务，变成一个可规划、可确认、可看见、可审计的团队。**
+> **一人公司的可重复 AI 工作台：说出目标，确认团队和流程，一键运行、复用和追溯。**
 
 This is a product-door statement, not a claim that OpsWitness replaces every layer underneath it.
-The local-first console is the one ordinary place where an operator can describe an outcome, review
-the proposed task plan and reporting hierarchy, confirm the immutable plan hash, watch active
-work, graphically set bounded collaboration loops, make task-bound approval decisions inline, and read evidence-backed
-daily summaries. The chat-first Workspace remains the default top-level entry for every session.
+Codex, Claude, AionUi, and other runtimes do the specialist work. OpsWitness owns the reusable Work
+contract around them: goal, plan, Agent architecture, runtime assignments, versions, runs, outputs,
+attention, and evidence. The local-first console is the one ordinary place where an operator can
+describe an outcome, review the proposed task plan and reporting hierarchy, confirm the immutable
+plan hash, watch active work, graphically set bounded collaboration loops, make task-bound approval
+decisions inline, and read evidence-backed history. The chat-first Workspace remains the default
+top-level entry for every session.
 The optional Today action view is temporarily hidden from navigation; its summary model remains
 available for later restoration, and any legacy Today target resolves to Workspace. Confirmation
 never redirects away from the chatbox. Work keeps the
@@ -118,6 +121,11 @@ The distinction is essential: Paperclip remains the bought control plane, AionUi
 remain execution adapters, and OpsWitness remains the local trust/evidence bridge plus the simple
 operator experience. It does not become a second scheduler, generic workflow engine, agent runtime,
 or mutable employee directory.
+
+The product-level simplicity and repeatability contract is defined in
+[PRODUCT-VISION.md](PRODUCT-VISION.md). Architecture work must preserve that ordinary flow even
+when new adapters are added: Workspace -> review -> confirm -> Work -> History/Results -> Run again,
+revise, or fork. Adapter growth must not create new ordinary top-level operating paths.
 
 Reporting lines and iterative collaboration are intentionally different graphs. Direct management
 remains one acyclic rooted tree. A collaboration loop may return to a prior agent or the same agent,
@@ -319,9 +327,10 @@ evidence-oriented MCP surface.
 
 Two kinds of doors, two opposite rules:
 
-**Platform layer (open source): spine plus one thin local door.** `qd` and the ledger remain the
-operational spine. The local console is the ordinary user entry for AI connection, planning,
-confirmation, approval, evidence, and integrations. It owns no scheduler, agent runtime, or DAG;
+**Platform layer (open source): spine plus one thin local door.** `opswitness` and the ledger remain
+the operational spine. The local console is the ordinary first-use experience for a one-person
+company: create a reusable Work, confirm it, operate it, then run it again or evolve it without
+rebuilding the process. It owns no scheduler, agent runtime, model chat surface, or DAG;
 each dependency stays replaceable because the console calls versioned local adapters instead of
 absorbing their state machines. The CLI and Telegram remain fallbacks, not competing setup paths.
 

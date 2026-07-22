@@ -4,7 +4,7 @@
 > `v0.1.0-alpha.1`. Public distribution remains blocked until the identifier is reserved,
 > the private remote passes required checks, and `PUBLIC_RELEASE_APPROVED=true` is set.
 
-**Run long-lived AI work with approvals, evidence, and recoverable execution.**
+**Turn one-off AI work into repeatable company operations.**
 
 OpsWitness is a local-first bridge that puts your *existing* scheduled scripts and headless
 coding agents (Claude Code, Codex) under a real control plane —
@@ -12,20 +12,28 @@ coding agents (Claude Code, Codex) under a real control plane —
 
 ## Product positioning
 
-> **本地优先的 AI Workforce 总工作台：把已有的 Claude、Codex、AionUi、Paperclip 和自动化任务，变成一个可规划、可确认、可看见、可审计的团队。**
+> **一人公司的可重复 AI 工作台：说出目标，确认团队和流程，一键运行、复用和追溯。**
 
-OpsWitness is the ordinary operator door, not another agent runtime or control plane. An
-operator describes an outcome in the local console; OpsWitness drafts a bounded team and
-execution plan, makes its cadence, risks, artifacts, and approval checkpoints reviewable, and
-starts nothing until the exact plan is confirmed. It then delegates execution to replaceable
-adapters such as AionUi, Claude Code, Codex, Paperclip, and existing automation, while the local
-ledger remains the evidence authority for what actually ran.
+OpsWitness is the ordinary first door for a one-person company, not another coding assistant,
+agent runtime, or control plane. An operator describes an outcome in the local console; OpsWitness
+drafts a bounded team and execution plan, makes its cadence, risks, artifacts, and approval
+checkpoints reviewable, and starts nothing until the exact plan is confirmed. It then delegates
+execution to replaceable adapters such as AionUi, Claude Code, Codex, Paperclip, and existing
+automation, while the local ledger remains the evidence authority for what actually ran.
+
+The core object is a reusable **Work**, not a disposable chat. Work keeps the reviewed plan, Agent
+architecture, immutable versions, independent run history, outputs, approvals, and provenance
+together. The operator can prepare another run from one clear action, revise it as a new version,
+or fork it into an independent Work without rebuilding the process from scratch. Run again still
+returns to exact-plan confirmation before dispatch.
 
 The product promise is deliberately narrower than "autonomous company": one simple local surface
 for planning, confirmation, live work visibility, approvals, evidence, and daily operational
 summaries -- without asking an operator to understand or routinely open the specialist systems
 behind it.
 
+The durable product goal and the simplicity tests for future features are recorded in
+[PRODUCT-VISION.md](docs/PRODUCT-VISION.md).
 Commercial packaging and its open-core boundary are recorded in
 [COMMERCIALIZATION.md](docs/COMMERCIALIZATION.md).
 

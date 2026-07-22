@@ -17,6 +17,12 @@ OpsWitness commercializes as an **open local core plus paid vertical delivery, t
 team operations**. It does not begin as a generic freemium product with an artificial
 feature paywall or a token-execution tax.
 
+The Community product is first designed as the simple repeatable-work operating layer for a
+one-person company. It does not compete with Codex or Claude for deep execution. It makes their
+one-off work reusable through reviewed Work definitions, Agent architecture, immutable versions,
+Run again, Fork work, History, Results, and locally owned evidence. This positioning is governed by
+[PRODUCT-VISION.md](PRODUCT-VISION.md) and remains the product filter for both free and paid work.
+
 > Free software establishes trust. Paid vertical workbenches establish early revenue.
 > Shared governance and managed operations become the later recurring business.
 
@@ -51,6 +57,10 @@ that make OpsWitness credible:
 - fixed-loopback Ollama and LM Studio discovery/connection through the hidden local adapter, with
   no vendor proxy, remote endpoint, or OpsWitness token markup;
 - core AionUi, Paperclip, Claude Code, and Codex adapter boundaries.
+
+Community must remain sufficient for a solo operator to build an unlimited library of repeatable
+company Work. Founder Pro may make that library easier to maintain, connect, back up, and recover,
+but it must not remove the first-use flow or repeatability primitives from the free edition.
 
 Safety, evidence, data export, and the ability to leave the product are not upsell levers.
 Charging for those would conflict with the trust/evidence position and make the free edition

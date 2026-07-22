@@ -1,5 +1,15 @@
 # OpsWitness Readiness
 
+## Product-goal record (2026-07-21)
+
+The durable product target is now explicit in [PRODUCT-VISION.md](PRODUCT-VISION.md): OpsWitness is
+the simple repeatable-work operating layer for a one-person company, not a replacement for Codex,
+Claude, or the underlying Agent runtimes. The ordinary path remains Workspace -> reviewed plan and
+team -> confirmation -> Work -> History/Results -> Run again, revise, or fork. Future capabilities
+must preserve this path, hide adapter complexity by default, and strengthen repeatability rather
+than add another general Agent platform surface. This documentation decision changes no Alpha
+release, canary, security, or durability gate.
+
 ## Community Alpha release-candidate update (2026-07-21)
 
 The approved source migration targets `v0.1.0-alpha.1` (`0.1.0a1` in Python metadata) with

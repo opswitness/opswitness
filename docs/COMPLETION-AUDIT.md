@@ -1,5 +1,12 @@
 # OpsWitness Completion Audit
 
+Product-direction update, 2026-07-21: [PRODUCT-VISION.md](PRODUCT-VISION.md) now records the
+one-person-company first-use contract. OpsWitness does not try to replace Codex or Claude; it turns
+their one-off work and other local automation into reusable Work with a reviewed Agent structure,
+immutable versions, independent runs, History/Results, a clear Run again path, and provenance-bound
+forks. README, Architecture, Readiness, and Commercialization use the same boundary. This is a
+documentation and prioritization decision only; it does not close any release or runtime gate.
+
 Community Alpha update, 2026-07-20: the release candidate is normalized as
 `OpsWitness v0.1.0-alpha.1` / Python `0.1.0a1`. The package/module rename preserves compatibility at
 the CLI, configuration, data-root, launchd, and known Keychain boundaries without rewriting any
