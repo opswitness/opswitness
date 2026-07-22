@@ -86,6 +86,20 @@ hash-bound proposal without moving through a separate task drawer. This is a pre
 the existing plan state machine, not a direct chat-to-run path and not a second conversation or
 orchestration backend.
 
+The empty Workspace also lists prior planning conversations. This is a read-only projection of
+immutable Plan revision chains, not a mutable transcript store. Selecting a row restores the latest
+intact Plan in that chain to the existing review surface and performs no new planning, confirmation,
+or execution. The row may explicitly create an objective-only TaskTemplate bound to the exact source
+Plan id/hash; missing or invalid source hashes fail closed.
+
+Workspace also owns the two ordinary reuse surfaces defined by
+[ADR-0008](0008-repeatable-work-and-auditable-workspace-memory.md). **My repeatable Work** is derived
+from ended immutable Work chains and prepares a reviewable child without dispatching. **Workspace
+Memory** lets the operator search, propose, approve, supersede, revoke, and roll back private
+Obsidian-compatible process or knowledge versions. The bootstrap response exposes only bounded
+memory metadata and counts; bodies are loaded on demand, and only approved snapshots reach the
+planner.
+
 The panel currently labelled **Task teams** inside Today is a read-only active-work summary, not a
 second task or team object. It folds the same immutable plan ids used by Work and includes only
 `confirmed`, `dispatching`, `running`, `awaiting_approval`, and `awaiting_input` records. Its member badges are bounded
@@ -111,8 +125,10 @@ event, or rerun the task. Failed records are never backfilled this way.
 
 `Run again` is a review action, not an execution shortcut. It is available only for failed or
 `completed_unverified` work with an intact reviewed plan. The action creates an idempotent ready
-child version containing the same plan, the default `automatic` approval mode, parent hash, a new
-version number, and a new confirmation hash. It appends `task_plan_rerun_prepared` without task
+child version that preserves plan structure while resolving the default `fast` execution profile
+to locally advertised per-Agent model ids. The child uses the default `automatic` approval mode,
+parent hash, a new version number, and a new confirmation hash. It appends
+`task_plan_rerun_prepared` without task
 plaintext and makes no AionUi or Paperclip dispatch call. The operator may opt into manual approval,
 then must review and confirm the new hash before a new execution can start.
 
@@ -168,6 +184,14 @@ confirmation. Exact model ids, rolling aliases, and the unpinned runtime default
 states. An unavailable runtime, unadvertised model, incomplete assignment set, or unknown Agent is
 rejected. Dispatch passes the hash-bound model id and does not auto-fallback.
 
+Fast, Balanced, and Deep are deterministic review-time presets over the same sanitized catalog.
+New plans resolve Balanced, Run again resolves Fast, and Deep is opt-in. Applying a preset creates
+an immutable child plan with every selected model id visible before confirmation; direct per-Agent
+edits create Custom. The dispatcher never re-evaluates a profile. A preset prioritizes latency or
+quality but cannot promise elapsed time because provider queues, tools, collaboration, approvals,
+and operator input remain separate run-time factors. A missing profile is preserved for legacy plan
+hash compatibility rather than inferred after the fact.
+
 Task changes are chat-first. The operator describes a desired change, such as returning a failed
 citation check to a named Agent for at most two iterations, and OpsWitness uses the same immutable
 revision contract to draft a complete replacement plan. It cannot mutate or dispatch the reviewed
@@ -178,6 +202,11 @@ The empty **Workspace** exposes a static, searchable bilingual catalog of 27
 common task presets grouped into
 operations, research and decision support, growth, customer operations, and specialist workflows.
 A preset is only an authored objective with conservative approval and side-effect constraints.
+Six entries are additionally marked as proven Work templates. Their static recipe metadata records
+the intended Agent count, stage count, handoff chain, cadence, expected outputs, and human checkpoint.
+Three appear directly on the empty Workspace; their dedicated Generate-team button sends the authored
+objective to the planner, but the resulting plan remains unconfirmed and cannot dispatch. Recipe
+metadata is planning context, not a pre-approved or hard-coded runtime graph.
 Category and full-text filtering operate entirely over the in-browser static catalog and send no
 query to the backend. Choosing one sets the browser-local composer text and closes the catalog; it
 does not call the planning API, create a private plan record, select a runtime, or dispatch work.
@@ -193,7 +222,9 @@ Agent topology. Records live only under the private console state directory as m
 save and archive transitions require CSRF plus explicit confirmation and append hash-only ledger
 events. The ledger never receives the template name or objective. Search is browser-local, deletion
 is a recoverable archive transition, and selecting a template only fills the composer. Neither save
-nor selection may invoke planning, confirmation, Paperclip, AionUi, or an Agent runtime.
+nor selection may invoke planning, confirmation, Paperclip, AionUi, or an Agent runtime. Templates
+saved from planning history retain source Plan id/hash provenance but do not retain Agent topology,
+runtime state, approvals, replies, artifacts, or evidence.
 
 The top-level **Work** view deliberately combines the former Tasks and Team navigation because both
 were lists of the same plan-scoped object. It does not combine their storage models. A work item is
@@ -201,6 +232,13 @@ the operator's goal and current plan version; its Team tab is the plan-scoped hi
 collaboration graph; Activity is evidence-only execution telemetry; Outputs separates expected
 artifacts from verified outcome evidence; Settings owns blueprint saving and visibility deletion.
 Each run remains independently identified.
+
+The Work Overview is also the ordinary evolution surface. A natural-language adjustment may change
+the objective, summary, stages, Agent roster and roles, reporting lines, bounded collaboration loops,
+cadence, outputs, or checkpoints. The server accepts only a `ready`, `failed`, `cancelled`, or
+`completed_unverified` source with an intact plan hash. It records the source id/hash and instruction
+hash, then creates a new immutable planning child. It never patches the selected plan, confirms the
+child, or dispatches a runtime. Active versions remain hash-locked and cannot use this path.
 
 History is not a separate top-level product object. A selected Work item's **Activity** tab owns the
 bounded signals for its current execution; its **History** tab owns the immutable run chain and each
@@ -393,7 +431,8 @@ cleanup recovery does not replay planning or execution.
 ## Evidence and privacy
 
 The ledger records `task_plan_requested`, `task_plan_revision_requested`,
-`task_plan_organization_revised`, `task_plan_runtime_revised`, `task_plan_drafted`, `task_plan_failed`,
+`task_plan_organization_revised`, `task_plan_runtime_revised`,
+`task_plan_execution_profile_revised`, `task_plan_drafted`, `task_plan_failed`,
 `task_plan_confirmed`, `task_plan_deleted`, `task_execution_requested`, `task_execution_dispatched`,
 `task_input_requested`, `task_input_answered`, `task_input_delivered`,
 `task_execution_failed`, `task_execution_finished`, `aion_ephemeral_recovery_started`,

@@ -1,5 +1,37 @@
 # OpsWitness Completion Audit
 
+Planning-history, Repeatable-work and Workspace-Memory update, 2026-07-22: Workspace now derives a
+read-only conversation list from immutable Plan revision chains, restores the latest intact version
+for review, and can save an explicitly confirmed objective template bound to the exact source Plan
+id/hash. This path cannot call planning, confirmation, Paperclip, AionUi, or execution. The source also derives one-click
+review-first reuse from the latest ended, intact Work version rather than creating a duplicate Work
+database. It also implements private Obsidian-compatible process/knowledge memory with immutable
+candidate versions, explicit human approval, supersession, revocation, exact-version rollback,
+hash-only ledger evidence, and approved-only planning snapshots. Historical plans keep their old
+canonical hash because the optional memory envelope is absent. Backend tests cover no-dispatch
+preparation, candidate isolation, approval injection, revoke-before-confirm denial, revision,
+rollback, and HTTP confirmation/CSRF boundaries; frontend tests cover the ordinary Workspace path
+and confirmed memory lifecycle APIs. [ADR-0008](adr/0008-repeatable-work-and-auditable-workspace-memory.md)
+is the design authority.
+
+This is post-freeze product code. No earlier RC artifact or canary validates it. Publication now
+requires a new clean artifact, isolated installation, browser acceptance, and a new append-only
+canary while preserving every prior passed, failed, and in-progress record exactly as written.
+
+Local smoke acceptance on 2026-07-22 verified a wheel built from the working tree, retained an exact
+uv-tool rollback copy, installed the package, restarted only the console, loaded the packaged
+repeatable-Work and Workspace-Memory assets at `127.0.0.1:8765`, and obtained a fully green
+real-host doctor verdict. Because the wheel was not produced from a clean release commit, this
+evidence validates local usability only and does not close the RC, canary, or publication gates.
+
+Execution-profile source update, 2026-07-21: ready plans can now create immutable Fast, Balanced,
+or Deep child versions whose per-Agent model ids are selected only from the sanitized local catalog
+and bound into the new plan hash. New Work defaults to Balanced, Run again defaults to Fast, and
+manual model edits are Custom. Presets do not dispatch, silently fall back, or claim a wall-clock
+SLA. Legacy plans omit the absent profile from canonical hashing. Because this is post-RC product
+code, the existing `alpha-rc-2` canary cannot validate this build; a new clean artifact and canary
+are required before publication, without rewriting any prior contract.
+
 Product-direction update, 2026-07-21: [PRODUCT-VISION.md](PRODUCT-VISION.md) now records the
 one-person-company first-use contract. OpsWitness does not try to replace Codex or Claude; it turns
 their one-off work and other local automation into reusable Work with a reviewed Agent structure,
@@ -16,12 +48,14 @@ build manifest, SPDX SBOM, and GitHub attestation. The GitHub organization, priv
 domain are reserved; Draft PR #1 is green on Linux, macOS, DCO, and gitleaks. Private Release
 validation and rollback-safe production migration now pass. The independent `alpha-rc-1` contract
 failed its frozen cadence contract after a host sleep gap (`7,504.433s > 1,200s`) and remains
-immutable failure evidence. At the latest recorded check, its independent replacement
-`alpha-rc-2` has five successful runs, zero failures, zero projection backlog, and only the
-unelapsed 24-hour minimum outstanding. Publication remains blocked on that duration gate,
-professional brand review, and final public-main Release acceptance as recorded in READINESS.
-Mobile access is not advertised in Alpha and remains a separate Beta acceptance gate. The legacy
-`m2-canary` also permanently
+immutable failure evidence. Its independent replacement `alpha-rc-2` also failed: the
+authoritative status recomputed at `2026-07-22T13:29:01.947352+00:00` reports 36 starts, 36
+successes, zero task failures, zero projection backlog, and a `14,820.799s > 1,200s` hard cadence
+gap. Its 24-hour minimum was also still pending. Publication now requires a clean build of the
+post-freeze source, exact-artifact install and browser smoke, and a fresh append-only
+`alpha-rc-3`, plus professional brand review and final public-main Release acceptance as recorded
+in READINESS. Mobile access is not advertised in Alpha and remains a separate Beta acceptance
+gate. The legacy `m2-canary` also permanently
 failed its frozen cadence contract (`50,171s > 25,920s`) and is never promoted to Alpha evidence.
 
 Operational snapshot: 2026-07-13 21:24 PDT. The source-only console updates below were recorded
@@ -35,14 +69,22 @@ snapshot.
 |---|---|---|
 | M0 trusted baseline | Process-tree supervisor, shared schedule classification, append-only lifecycle, full tests | Complete |
 | M1 install and recovery tooling | Doctor, secure service exec, encrypted backup/isolated restore, five secret-free launchd templates | Complete in source |
-| M2 permanent install and soak | Postgres/Paperclip/services run OpsWitness `0.1.0a1`; real doctor is fully green; both failed contracts are retained; `alpha-rc-2` has started under a dedicated wake assertion | In progress: Alpha duration gate, then feed/SOX seven-day Stable soak |
+| M2 permanent install and soak | Postgres/Paperclip/services run OpsWitness `0.1.0a1`; real doctor was green for the installed RC; `alpha-rc-1`, `alpha-rc-2`, and `m2-canary` are retained as failed contracts | In progress: clean post-freeze RC and fresh `alpha-rc-3`, then feed/SOX seven-day Stable soak |
 | M3 Claude gate | Two live defer/approval/resume/consume drills and 60-second recovery service | Complete for non-interactive `qd gated-claude` only |
 | M4 artifact/eval/signoff | Atomic CAS, ledger authority, live projection/reconciliation and restore evidence | Complete |
-| M5 Community Alpha | Private remote/PR CI, private Release validation, verified downloadable artifacts, blank install, production RC migration, browser smoke, and a running independent Alpha canary exist | Release candidate: blocked by 24-hour canary completion, professional review and public-main release gates; mobile remains unpromoted Beta |
+| M5 Community Alpha | Private remote/PR CI, an earlier private Release validation, verified downloadable artifacts, blank install, production RC migration, and browser smoke exist; both Alpha canaries failed and current source is post-freeze | Release candidate: blocked by a clean exact-source RC, fresh passing 24-hour `alpha-rc-3`, professional review, and public-main release gates; mobile remains unpromoted Beta |
 | M6 paid practitioner Pilot | Offer, privacy contract, technical boundary and success criteria exist | Blocked by written paid commitment/deposit; product code intentionally absent |
-| Local total console | Default chat-first Workspace, AI-expanded execution brief, persisted planning stages and time range, provider connection facade, versioned plan revision, independent hash-bound Work forks, evidence-preserving deletion, graphical hierarchy and bounded collaboration loops, evidence-backed Auto/manual approval modes with task-local decisions, resumable runtime operator questions, plan-bound AionUi team-task stage telemetry, ledger-folded immutable run history with exact-context continuation, hash-bound confirmation, atomic dispatch/recovery, fixed-error privacy boundary, single-instance lease, per-request private AionUi workspaces, responsive UI and packaged assets | Complete in source; stable install/KeepAlive service waits for canary maintenance window |
+| Local total console | Default chat-first Workspace, immutable planning conversation history with exact restore and provenance-bound template creation, AI-expanded execution brief, derived repeatable Work preparation, candidate-first approved Workspace Memory, persisted planning stages and time range, provider connection facade, immutable Fast/Balanced/Deep model-profile revisions plus Custom per-Agent selection, versioned plan revision, independent hash-bound Work forks, evidence-preserving deletion, graphical hierarchy and bounded collaboration loops, evidence-backed Auto/manual approval modes with task-local decisions, resumable runtime operator questions, plan-bound AionUi team-task stage telemetry, ledger-folded immutable run history with exact-context continuation, hash-bound confirmation, atomic dispatch/recovery, fixed-error privacy boundary, single-instance lease, per-request private AionUi workspaces, responsive UI and packaged assets | Complete in source; the post-freeze build requires a fresh artifact, browser acceptance, and new canary |
 
 ## Source console change record
+
+2026-07-21 Work-overview adjustment update: the selected Work now exposes its natural-language AI
+revision box directly below the current summary instead of hiding it inside the ready-only team
+editor. Ready and ended versions may request changes to goals, stages, Agent roles, reporting lines,
+bounded loops, cadence, outputs, and checkpoints. Every request creates an unconfirmed immutable
+child plan bound to the source id/hash; it neither mutates prior runs nor dispatches execution.
+Running and otherwise active versions remain locked. Backend and frontend regression tests cover
+ended-source revision, zero dispatch side effects, status eligibility, and Overview placement.
 
 2026-07-16 Work-history continuation update: Work now owns a dedicated History tab that follows the
 immutable parent chain and exposes each run's evidence timeline. An ended Aion run can be selected
@@ -90,8 +132,9 @@ Source/fake-runtime acceptance passed without operating the user's live task; re
 acceptance remains a readiness item.
 
 2026-07-15 rerun update: failed and `completed_unverified` Work items now expose a visible
-`Run again` action beside `Open full plan`. The action idempotently prepares the same reviewed plan
-as a new immutable child version, resets its review default to `automatic`, records only
+`Run again` action beside `Open full plan`. The original action idempotently prepared the same reviewed
+plan as a new immutable child version. The 2026-07-21 profile update preserves its structure but now
+defaults the child to Fast with advertised per-Agent model ids. It resets review to `automatic`, records only
 hash/provenance metadata, and returns to Workspace review. Manual approval remains selectable; it
 cannot dispatch until the new hash is explicitly confirmed.
 
@@ -267,10 +310,11 @@ must not be reset or reused as `alpha-rc-1`.
 
 ## Safe remaining sequence
 
-1. Let the existing `alpha-rc-2` contract reach its frozen 24-hour minimum. Keep the Mac open,
-   powered and ventilated while its dedicated wake assertion runs. Any failure must remain
-   append-only; do not reset or relabel the failed `alpha-rc-1` or `m2-canary`, and do not
-   checkpoint Alpha until every contract check passes.
+1. Preserve failed `alpha-rc-1`, failed `alpha-rc-2`, and failed `m2-canary` unchanged. Freeze and
+   commit the current source, build a clean private Release artifact from that exact commit,
+   install and smoke-test the artifact, then start a distinct append-only `alpha-rc-3`. Keep the
+   Mac open, powered, and ventilated; do not checkpoint Alpha until every frozen 24-hour contract
+   check passes.
 2. Complete professional confusing-similarity review. Keep private HTTPS, pairing, and PWA
    unadvertised until the separate physical iPhone Safari/Chrome Beta acceptance passes.
 3. Only after the blocking gates pass, merge privately, publish the repository, enable required checks and

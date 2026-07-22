@@ -1,8 +1,9 @@
 # OpsWitness
 
 > **Community Alpha release candidate.** The source is being prepared as
-> `v0.1.0-alpha.1`. Public distribution remains blocked until the identifier is reserved,
-> the private remote passes required checks, and `PUBLIC_RELEASE_APPROVED=true` is set.
+> `v0.1.0-alpha.1`. The identifier and private remote are reserved, but this post-freeze source
+> requires a fresh RC artifact, browser smoke, append-only canary, brand review, and final
+> `PUBLIC_RELEASE_APPROVED=true` before public distribution.
 
 **Turn one-off AI work into repeatable company operations.**
 
@@ -12,7 +13,7 @@ coding agents (Claude Code, Codex) under a real control plane —
 
 ## Product positioning
 
-> **一人公司的可重复 AI 工作台：说出目标，确认团队和流程，一键运行、复用和追溯。**
+> **OpsWitness 帮助一人公司把一个想法自动变成可重复的 AI 团队流程，并通过一键运行、版本历史和可验证结果长期经营。**
 
 OpsWitness is the ordinary first door for a one-person company, not another coding assistant,
 agent runtime, or control plane. An operator describes an outcome in the local console; OpsWitness
@@ -25,7 +26,31 @@ The core object is a reusable **Work**, not a disposable chat. Work keeps the re
 architecture, immutable versions, independent run history, outputs, approvals, and provenance
 together. The operator can prepare another run from one clear action, revise it as a new version,
 or fork it into an independent Work without rebuilding the process from scratch. Run again still
-returns to exact-plan confirmation before dispatch.
+returns to exact-plan confirmation before dispatch. New Work starts on the **Balanced** execution
+profile; Run again prepares a **Fast** child version by default; **Deep** remains an explicit choice
+for first-pass or complex work. A profile is never a runtime hint: OpsWitness resolves it to the
+locally advertised model id for every Agent, writes those choices into a new immutable plan and
+hash, and shows them before confirmation.
+
+The operating model is `Work Blueprint -> Run -> Revision`. Workspace derives **My repeatable
+Work** from the latest ended, intact version of each Work: one action prepares a new reviewable
+child, but never dispatches it. Task templates still reuse objective wording only, while team
+blueprints reuse role topology only. This keeps one obvious full-process reuse path without adding
+a second mutable Work database.
+
+Workspace also preserves **planning conversation history** as a read-only projection of immutable
+Plan revision chains. Selecting an earlier conversation restores its latest intact Plan version to
+review; it does not create, confirm, or run anything. The operator may save that exact reviewed
+source as an objective-only task template. The template records the source Plan id and hash for
+provenance, while team structure, runtime state, approvals, replies, artifacts, and evidence remain
+outside the template.
+
+OpsWitness also keeps an Obsidian-compatible private **Workspace Memory** vault for process lessons
+and sourced knowledge. Agents can propose candidates; only human-approved, immutable versions are
+included read-only in a new planning snapshot. Approval, supersession, revocation, and rollback are
+hash-bound ledger events, while the memory body stays in local `0600` Markdown files. History and
+CAS artifacts do not become memory merely because they exist. See
+[ADR-0008](docs/adr/0008-repeatable-work-and-auditable-workspace-memory.md).
 
 The product promise is deliberately narrower than "autonomous company": one simple local surface
 for planning, confirmation, live work visibility, approvals, evidence, and daily operational
@@ -62,7 +87,7 @@ It adds the three things the platforms don't cover:
 | **`opswitness wrap`** | Zero-modification onboarding for launchd/cron jobs: runs land in a local append-only ledger (crash-safe JSONL + SQLite index) and are projected into Paperclip as issues/comments/work-products ([ADR-0001](docs/adr/0001-run-ledger-write-model.md)). Never breaks the wrapped job (offline spool, exit-code mirroring). | Paperclip's watchdog only verifies its *own* issue trees; external heartbeat runs are read-only by design — nothing monitors external scheduled scripts. |
 | **`opswitness gate`** | Fail-closed, *tool-call-level* human approval for non-interactive Claude Code via the official PreToolUse defer contract: defer → Paperclip board decision → same-session resume. Every transition lands in the local evidence ledger. | Paperclip approvals are issue-level sign-offs ([#3017](https://github.com/paperclipai/paperclip/issues/3017) is open); hobby hooks have no independent evidence ledger behind them. |
 | **`opswitness artifacts`** | Authoritative artifact events in the local ledger; queries served by the disposable SQLite index; content stored content-addressed (attachment / immutable blob); Paperclip work-products are a rebuildable projection. | Work-products carry no content hashes and no server-side idempotency (`externalId` has no unique constraint) — evidence-grade artifacts need an authority outside the platform. |
-| **`opswitness console`** | Serves one local operator UI. The original chat-first **Workspace** remains the default top-level entry: describe an outcome, choose a common task, private template, or team blueprint, review the six-section brief and exact hash, then confirm without being redirected away. New plans default to evidence-recorded automatic single-use approval; a switch makes every execution tool manual. Manual approvals and bounded Agent questions share one task-local attention panel in **Work**: the operator reviews, approves/rejects, or replies without navigating away, while the global Approval view remains a cross-task queue. Active Aion team work keeps a fixed **Start/Continue · Pause · End** control group in its overview: only a runtime-confirmed pause enables Continue, End requires a second confirmation, and every request and confirmed transition is append-only. The same overview binds AionUi's structured team work items to the confirmed plan stages, showing each Agent's reported pending/running/blocked/completed state and a bounded content-free activity timeline. These are execution observations, never hidden reasoning or business-outcome proof. The optional **Today** action view is temporarily hidden from navigation while its backend summary remains available for later restoration. **Work** combines only the former Tasks and Team navigation for each goal, its task-scoped team, activity, outputs, and settings. Ended or terminated work exposes **Run again**, which prepares the same reviewed plan as a new hash-bound child version and returns to confirmation without dispatching it. Any reviewed Work can instead be **forked** into an independent top-level Work: plan/team/settings are copied, source id/hash are bound into the new hash, and no run, approval, reply, or output state crosses the boundary. Task changes are chat-first and always create a new immutable plan version before execution. | AionUi and Paperclip each expose a useful specialist UI, but neither provides one evidence-aware entry for daily operations, plan review, organization review, and confirmed execution. The console delegates to both; it is not a second control plane or agent runtime. |
+| **`opswitness console`** | Serves one local operator UI. The original chat-first **Workspace** remains the default top-level entry: describe an outcome, choose a common task, private template, or team blueprint, review the six-section brief and exact hash, then confirm without being redirected away. New plans default to evidence-recorded automatic single-use approval; a switch makes every execution tool manual. Manual approvals and bounded Agent questions share one task-local attention panel in **Work**: the operator reviews, approves/rejects, or replies without navigating away, while the global Approval view remains a cross-task queue. Active Aion team work keeps a fixed **Start/Continue · Pause · End** control group in its overview: only a runtime-confirmed pause enables Continue, End requires a second confirmation, and every request and confirmed transition is append-only. The same overview binds AionUi's structured team work items to the confirmed plan stages, showing each Agent's reported pending/running/blocked/completed state and a bounded content-free activity timeline. These are execution observations, never hidden reasoning or business-outcome proof. The optional **Today** action view is temporarily hidden from navigation while its backend summary remains available for later restoration. **Work** combines only the former Tasks and Team navigation for each goal, its task-scoped team, activity, outputs, and settings. Ended or terminated work exposes **Run again**, which preserves the reviewed structure while preparing a Fast, model-pinned, hash-bound child version and returns to confirmation without dispatching it. Any reviewed Work can instead be **forked** into an independent top-level Work: plan/team/settings are copied, source id/hash are bound into the new hash, and no run, approval, reply, or output state crosses the boundary. Task changes are chat-first and always create a new immutable plan version before execution. | AionUi and Paperclip each expose a useful specialist UI, but neither provides one evidence-aware entry for daily operations, plan review, organization review, and confirmed execution. The console delegates to both; it is not a second control plane or agent runtime. |
 | **`opswitness workflow`** | Register a fixed, shell-free workflow once, then launch it asynchronously from AionUi's native **Run now** button. Dispatch order, single-workflow concurrency, and terminal state are ledger evidence. | AionUi supplies the button and agent session; OpsWitness supplies the command allowlist and evidence boundary. No second workflow engine or generic remote shell is built. |
 | **`opswitness mail`** | Run one administrator-fixed Gmail query through pinned `gws`, returning only sender, subject, date, and message id. First-time setup privately imports a Google Desktop OAuth client, then binds Gmail readonly OAuth and model-metadata transmission to two explicit acknowledgements. Evidence contains counts and hashes, never mail fields, client secrets, or OAuth output. | AionUi supplies the model runtime and optional daily scheduler. OpsWitness revalidates the private Desktop client boundary, encrypted OAuth, live token, readonly scope, and explicit model-metadata consent; its isolated mail MCP exposes no fleet mutation, body, draft, send, delete, or runtime-query tool. |
 | **`opswitness soak`** | Freeze a canary/soak cadence contract, then derive a nonzero-until-proven verdict from elapsed time, every trigger gap, terminal/degraded evidence, schedule drift, torn lines, and projection backlog ([ADR-0006](docs/adr/0006-append-only-soak-gates.md)). | A Markdown timestamp or one manual success cannot enforce a rollout gate. Start/reset/checkpoint are append-only; status is always recomputed from raw evidence. |
@@ -113,9 +138,14 @@ than a deterministic runtime cutoff.
   local runtime and one model id advertised by that runtime. The two-level change is allowed only
   before confirmation and creates a hash-bound child plan after local availability validation; it
   never mutates a reviewed plan or silently falls back. The UI distinguishes an exact model id from
-  a rolling alias and from the unpinned runtime default.
+  a rolling alias and from the unpinned runtime default. Fast, Balanced, and Deep are review-time
+  presets over this same mechanism, not hidden routing: applying one creates another immutable child
+  version and manual per-Agent edits mark the version Custom.
 - **Teams are task-scoped.** A reusable team blueprint contains only role topology and runtime
   preference. It is manually saved, versioned locally, and never creates a global employee record.
+- **Memory is candidate-first.** History and artifacts remain evidence, not future instructions.
+  Agents may propose process or knowledge memory, but only a human-approved immutable snapshot can
+  enter planning; revoke, supersede, and rollback remain attributable ledger events.
 - **Observed activity is not a result.** A team member may be labeled observed, responded,
   unobserved, or unavailable. None of those labels proves business outcome success.
 - **Management is not iteration.** Direct reporting remains one acyclic tree. Review loops are
@@ -141,14 +171,23 @@ inline execution brief with a proposed Agent team, runtime and model recommendat
 checkpoints, artifacts, and risks. While planning, the page shows persisted external stages, elapsed
 time, and a conservative duration range; it never exposes or fabricates model chain-of-thought. The
 operator may revise each proposed runtime and its advertised model before confirmation, which creates a new immutable child
-plan and hash. Confirmation stays in Workspace. **Today** is an optional operating view that puts approvals,
+plan and hash. The review surface also offers Fast, Balanced, and Deep profiles and immediately shows
+the resulting model selection for each Agent. These profiles prioritize latency or quality; they do
+not promise a wall-clock duration because tools, operator input, collaboration, and provider queues
+remain observable parts of the run. Confirmation stays in Workspace. **Today** is an optional operating view that puts approvals,
 failed or blocked work, coverage or projection concerns, observed active teams, mail summary, and a
 new-work entry first; technical health is available in a disclosure rather than competing with the
 operator's next action. **Work** replaces only the former duplicated Tasks and Team navigation: selecting
 one work item keeps its overview, task-scoped organization, evidence-only activity, immutable run
-history, outputs, and settings in one place. The **Workspace** homepage contains common task presets, private task templates,
-and manually saved team blueprints as three task-starting options. They share a surface, not a data model: a work goal, its
+history, outputs, and settings in one place. The **Workspace** homepage contains planning conversation
+history alongside common task presets, private task templates, and manually saved team blueprints.
+They share a surface, not a data model: a planning chain, a work goal, its
 plan-version team, each execution run, and a reusable blueprint retain distinct identities.
+The selected Work's **Overview** also keeps a plain-language adjustment box beside the current
+summary and team. The operator may ask to change the goal, stages, Agent roles, reporting hierarchy,
+bounded loops, cadence, outputs, or checkpoints. A request from a ready or ended Work always creates
+a new immutable child plan and hash; it never edits the displayed version, confirms it, or dispatches
+it. Active Work remains locked until it reaches an ended state.
 The active-team summary in **Today** is a read-only projection of those same Work records, not a
 second team registry. It includes only `confirmed`, `dispatching`, `running`,
 `awaiting_approval`, and `awaiting_input` work and exposes bounded member-observation signals; organization, runtime,
@@ -213,12 +252,20 @@ switch stored only in that browser's local storage. This preference localizes pr
 fixed safety copy; it never changes authored task content, plan hashes, backend records, or ledger
 events.
 
-The empty Workspace also offers 27 searchable bilingual task presets across operations, research
+The empty Workspace also offers 31 searchable bilingual task presets across operations, research
 and decision support, growth, customer operations, and specialist workflows. They cover recurring
 work such as project-risk review, SOP and document digestion, data analysis, product feedback,
 sales preparation, client onboarding, hiring-process design, contract review, and incident response.
 Each preset is an authored planning brief with explicit data, approval, and side-effect boundaries.
-Search stays browser-local. Selecting a preset only fills the local composer: it does not submit a
+Ten of those presets are marked as **proven Work templates** and add a concrete recipe: Agent count,
+stage count, team handoff, cadence, expected outputs, and a human checkpoint. Four priority templates
+are shown directly on the empty Workspace: company commercial analysis, a CPA/EA month-end workpaper
+pack, a customs entry-support evidence pack, and a commercial P&C renewal-readiness pack. The three
+professional-service templates stop at a source-linked exception or readiness package for licensed
+review; they do not post accounts, file tax or customs records, recommend or bind insurance, or replace
+the CPA/EA, customs broker, or insurance producer. Their explicit **Generate team** action submits the authored objective to the
+planner in one click, but still stops at the ordinary review screen; it never confirms a plan or starts
+execution. Search stays browser-local. Selecting any card inside the full catalog only fills the local composer: it does not submit a
 planning request, create a task, start an Agent, or bypass the normal AI-plan, runtime review,
 exact-hash confirmation, and managed-execution sequence. Presets are not team blueprints and never
 create persistent employees.
@@ -226,7 +273,8 @@ Directly below that catalog, **My task templates** stores operator-authored name
 in the private console state directory. The user can create, search, reuse, and delete templates;
 deletion is an audited archive transition. Template files are mode `0600`, ledger events retain only
 content hashes, and selecting a template only fills the composer. Saving or selecting one never
-calls the planner, creates a task, or starts execution.
+calls the planner, creates a task, or starts execution. A template saved from Workspace conversation
+history additionally binds the exact source Plan id/hash, but remains objective-only.
 A blueprint carries only topology and runtime preference, is never an employee directory, and always
 goes through fresh AI planning, review, runtime selection, and hash confirmation before use.
 Each work item's **Activity** tab shows bounded evidence for the selected current execution. Its

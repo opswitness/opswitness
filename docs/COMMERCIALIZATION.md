@@ -48,10 +48,19 @@ that make OpsWitness credible:
 - chat-first plan-before-execution, hash confirmation, versioned plan revision, evidence-preserving
   task deletion, independent provenance-bound Work forks, graphical team/loop editing, immutable
   run history with guarded same-context Aion continuation, and basic daily digest;
+- one-click review-first preparation from completed Work, with the complete reviewed plan and Agent
+  architecture retained without an execution, Agent, or Work quota;
+- local auditable Workspace Memory: private Obsidian-compatible process/knowledge versions,
+  candidate review, approval, supersession, revocation, rollback, search, and approved-only planning
+  snapshots remain Community capabilities rather than a paid trust gate;
+- an in-Overview AI adjustment box for evolving goals, stages, Agent hierarchy, bounded loops,
+  cadence, outputs, and checkpoints through reviewable immutable versions, without a paid revision
+  limit or automatic dispatch;
 - one Work identity across the Today active summary and the full Work detail; no duplicate team
   registry or paid global-employee directory is required for the single-owner product;
 - user-owned connections to supported local runtimes and existing automation;
-- per-Agent runtime and advertised-model selection with immutable hash binding and no silent fallback;
+- per-Agent runtime and advertised-model selection, including free Fast/Balanced/Deep review-time
+  presets and Custom edits, with immutable hash binding and no silent fallback;
 - plan-bound live stage telemetry from structured runtime work items, with safe activity metadata
   and an explicit separation between Agent-reported execution and verified business outcomes;
 - fixed-loopback Ollama and LM Studio discovery/connection through the hidden local adapter, with
@@ -84,6 +93,23 @@ The paid offer packages outcomes that are difficult to commoditize as a copied t
 The existing M6 rule holds: no practitioner UI or private vertical repository starts before
 written paid commitment or a real deposit. The published USD 1,500, 30-day Pilot is a
 validation baseline, not a promise that every future vertical has that price.
+
+The Community catalog also exposes three **professional evidence-pack templates** as design-partner
+starting points. Their commercial validation order is CPA/EA month-end and pre-tax workpapers first,
+licensed-customs-broker entry-support evidence second, and commercial P&C renewal readiness third.
+They are not public promises of automated tax filing, customs filing, claims handling, insurance
+advice, or placement. In every case the buyer is the qualified professional, the product prepares a
+traceable exception/readiness pack, and the professional resolves exceptions, takes the regulated
+position, and signs or submits. The generic company commercial-analysis template is a Community
+workflow, not a regulated conclusion or investment recommendation.
+
+Do not build a private vertical application merely because the template exists. A professional
+vertical advances only after a written paid commitment or deposit and must measure human minutes per
+pack, exception rate, reviewer overturn/rework rate, renewal intent, and contribution margin. If the
+operator spends the recurring workday on data entry, document chasing, or rewriting model output, or
+the observed contribution margin cannot exceed 50%, classify it as services work rather than an AI
+product. The current Practitioner Pilot remains the only published paid offer until one of these
+design-partner paths earns its own validated scope and price.
 
 Static prompts, YAML templates, and checklists are distribution material, not the primary
 paid moat. The recurring value is dependable operation, curated and evolving domain content,

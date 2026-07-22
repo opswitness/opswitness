@@ -24,13 +24,14 @@ remain immutable. The former Python import package is intentionally not retained
 publicly released.
 
 The Community Alpha contract covers the local single-operator core. Private HTTPS, device pairing,
-and PWA are Beta; Gmail and Telegram are default-off Experimental integrations. OpenClaw,
-Work-as-worker/team-of-teams, auditable long-term memory, DeepSeek/Grok execution adapters, SaaS,
-and multi-user identity are excluded from this release.
+and PWA are Beta; Gmail and Telegram are default-off Experimental integrations. Repeatable Work
+and auditable Workspace Memory are implemented in source but require a fresh RC artifact and
+canary before they enter the published Alpha contract. OpenClaw, Work-as-worker/team-of-teams,
+DeepSeek/Grok execution adapters, SaaS, and multi-user identity remain excluded.
 
 ## Product position
 
-> **一人公司的可重复 AI 工作台：说出目标，确认团队和流程，一键运行、复用和追溯。**
+> **OpsWitness 帮助一人公司把一个想法自动变成可重复的 AI 团队流程，并通过一键运行、版本历史和可验证结果长期经营。**
 
 This is a product-door statement, not a claim that OpsWitness replaces every layer underneath it.
 Codex, Claude, AionUi, and other runtimes do the specialist work. OpsWitness owns the reusable Work
@@ -44,8 +45,12 @@ The optional Today action view is temporarily hidden from navigation; its summar
 available for later restoration, and any legacy Today target resolves to Workspace. Confirmation
 never redirects away from the chatbox. Work keeps the
 goal, task-scoped team, current activity, immutable run history, outputs, and settings together. System automation history
-that has no Work owner is folded into Settings diagnostics. Workspace itself holds the three
+that has no Work owner is folded into Settings diagnostics. Workspace also projects immutable Plan
+revision chains as selectable planning conversation history. It holds three
 reusable starting points: common presets, private task templates, and team blueprints. It
+distinguishes six proven Work templates inside the common catalog. Those templates carry static
+recipe metadata and may start planning from the empty Workspace in one click, while exact-hash review
+and confirmation remain mandatory before execution. It
 does not create a second team identity for Today: the active-team panel is a read-only projection of
 the same plan ids shown in Work, restricted to active states and bounded observation data. All
 organization and lifecycle mutations remain under the selected Work item. It
@@ -61,6 +66,35 @@ to use OpsWitness; advanced diagnostics may reveal those adapters when troublesh
 The default exposure remains loopback. An explicitly configured private HTTPS surface may be used
 from Safari or Chrome only after device pairing; this changes the product door, not the internal
 adapter boundary. AionUi and Paperclip remain unreachable through OpsWitness's network listener.
+
+Work-level evolution is chat-first without becoming in-place mutation. The Overview adjustment box
+accepts natural-language changes to the goal, stages, Agent roles, reporting hierarchy, bounded
+loops, cadence, outputs, and checkpoints. Only a ready or ended source may create a revision. The
+request binds the source plan id/hash and writes only the instruction hash to the ledger before the
+planner creates a new immutable child. The child returns to ordinary review and exact-hash
+confirmation; the adjustment path cannot confirm or dispatch it. Active plan versions remain locked.
+
+Completed Work is also the source of the ordinary **Repeatable Work** projection. OpsWitness folds
+each immutable Work chain and exposes only its latest ended, intact reviewed version. Selecting it
+uses the existing rerun-preparation path to create an unconfirmed child; it never dispatches and it
+does not create a second Work authority. Task templates remain objective-only and team blueprints
+remain topology-only, while Repeatable Work carries the complete reviewed process.
+
+Workspace planning conversation history is derived from the same immutable `PlanRecord` chains and
+does not introduce a transcript database. A row points to the latest intact revision in one root
+chain. Opening it restores that exact Plan for review with no planning, confirmation, or execution
+side effect. Saving a template from the row requires explicit confirmation and binds the source
+Plan id/hash in the template record and append-only event. The reusable payload remains objective
+wording only; organization, runtime, approvals, operator replies, artifacts, and run evidence are
+not copied.
+
+Workspace Memory is a separate future-context authority, governed by
+[ADR-0008](adr/0008-repeatable-work-and-auditable-workspace-memory.md). Obsidian-compatible Markdown
+holds immutable process/knowledge versions; ledger events hold candidate, approval,
+supersession, revocation, and rollback evidence. New planning receives only a bounded snapshot of
+active approved versions. The snapshot hash and version ids become part of new plan identity, and
+confirmation revalidates them. Direct vault edits, unapproved candidates, History records, and CAS
+artifacts cannot silently influence planning.
 
 The Work overview's live-progress surface is a bounded projection of public adapter telemetry, not a
 second workflow state machine. It refreshes the active execution every 2.5 seconds and may expose an
@@ -253,7 +287,12 @@ Evidence flows **upward**. Nothing above the bridge is a source of truth.
     change is a structured child-plan revision: every Agent's runtime and model id are validated
     against sanitized local capability state, receive a fresh plan hash, and cannot silently
     downgrade or fall back at execution time. Exact ids, rolling aliases, and the runtime default
-    remain visibly distinct. Runtime control follows the same evidence-first rule. For Aion team
+    remain visibly distinct. Execution profiles are only a deterministic review-time resolver over
+    that catalog: new plans use `balanced`, reruns default to `fast`, and `deep` is opt-in. Applying
+    a profile resolves every Agent to one advertised model id and creates a new immutable child plan;
+    direct per-Agent edits create `custom`. No profile is consulted during dispatch, so the runtime
+    cannot silently change a confirmed model. Profiles express latency/quality preference, not a
+    wall-clock SLA. Runtime control follows the same evidence-first rule. For Aion team
     executions, OpsWitness fsyncs pause/resume/cancel requests before calling the public adapter
     API. Pause is accepted only after all active slots report paused; resume binds a fixed marker
     to the same confirmed plan; cancel remains requested until the exact run is observed inactive
@@ -366,7 +405,9 @@ paid users ultimately see the vertical workbench, not the generic operations sur
 | MCP console surface | `src/opswitness/mcp_server.py` | ✅ 13-tool ops (including safe package metadata and bounded operator input) + isolated 2-tool mail profile |
 | allowlisted workflow launcher | `src/opswitness/workflows.py`, `workflow_worker.py` | ✅ code + tests + live AionUi one-click acceptance |
 | metadata-only mail monitor | `src/opswitness/mail.py`, `console/`, `console-ui/` | ✅ adapter + setup/revoke UI; live OAuth and AionUi schedule pending |
-| local operator console | `src/opswitness/console/`, `console-ui/` | ✅ sole operator surface + default Workspace chatbox with presets/templates/blueprints + optional Today + unified Work details + immutable runtime revisions + independent hash-bound Work forks + evidence-only member observation, bounded live activity, and plan-bound AionUi team-task stage telemetry + evidence-first Aion pause/continue/terminate controls + provider account/Console login, one-time OpenAI CLI stdin handoff, Anthropic Keychain + apiKeyHelper, DeepSeek/xAI Keychain connections, official Grok account flow, and fixed-loopback Ollama/LM Studio discovery plus hidden AionUi registration + planning/progress + graphical hierarchy/bounded loops + ledger-folded run history + approval facade + Gmail/Telegram + responsive UI; real run-control acceptance, DeepSeek/Grok execution adapters, local-model live acceptance, and production canary remain pending |
+| repeatable Work + Workspace Memory | `src/opswitness/console/service.py`, `store.py`, `console-ui/src/workspace-memory-dialog.tsx` | ✅ source + tests: ended-Work projection, review-first preparation, Obsidian-compatible immutable versions, approval/revoke/rollback, approved planning snapshot; fresh RC/canary pending |
+| Workspace conversation history | `src/opswitness/console/service.py`, `schemas.py`, `console-ui/src/App.tsx` | ✅ source + tests: immutable Plan-chain projection, exact latest-version restore, provenance-bound objective template, zero execution side effect; fresh RC/canary pending |
+| local operator console | `src/opswitness/console/`, `console-ui/` | ✅ sole operator surface + default Workspace chatbox with planning history/presets/templates/blueprints + optional Today + unified Work details + immutable runtime revisions + independent hash-bound Work forks + evidence-only member observation, bounded live activity, and plan-bound AionUi team-task stage telemetry + evidence-first Aion pause/continue/terminate controls + provider account/Console login, one-time OpenAI CLI stdin handoff, Anthropic Keychain + apiKeyHelper, DeepSeek/xAI Keychain connections, official Grok account flow, and fixed-loopback Ollama/LM Studio discovery plus hidden AionUi registration + planning/progress + graphical hierarchy/bounded loops + ledger-folded run history + approval facade + Gmail/Telegram + responsive UI; real run-control acceptance, DeepSeek/Grok execution adapters, local-model live acceptance, and production canary remain pending |
 | install doctor / secure services / disaster recovery | `src/opswitness/doctor.py`, `service.py`, `backup.py` | ✅ five secret-free templates + installed-command drift check; soak pending |
 | gate (PreToolUse `defer` → Paperclip approval → resume) | `gate.py`, `gated_claude.py` | ✅ M3 code + two live approval/resume drills |
 | artifacts (ledger events + content-addressed projection) | `artifacts.py`, `index.py` | ✅ M4 code + live projection |

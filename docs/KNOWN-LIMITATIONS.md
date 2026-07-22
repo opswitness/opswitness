@@ -22,12 +22,17 @@ These limitations are release promises, not a hidden backlog.
    are required. Physical Safari/Chrome acceptance must pass before the mobile entry is promoted.
 8. **Provider readiness is explicit.** DeepSeek and Grok credentials may be connected, but they are
    not selectable execution runtimes in this Alpha. OpenClaw is not integrated.
-9. **No team-of-teams or long-term learning.** A Work contains its own planned Agent team. One Work
-   cannot yet invoke another Work as a worker, and runtime material does not become memory without a
-   future auditable candidate/approval/version mechanism.
+9. **No team-of-teams or autonomous learning.** A Work contains its own planned Agent team and
+   cannot yet invoke another Work as a worker. Workspace Memory is candidate-first and human
+   approved; Agents cannot silently learn from runtime material or modify active memory.
 10. **Compatibility is intentionally bounded.** `qd`, `QD_*`, old data roots, old launchd labels, and
     known Keychain services are supported for existing installs. The old Python import package is not.
 11. **GitHub Release only.** PyPI is not configured for Alpha, and release assets are valid only when
     their checksums, build manifest, SPDX SBOM, and GitHub attestation agree.
 12. **No SLA or production guarantee.** Community Alpha is suitable for synthetic and non-critical
     pilots. Keep independent backups and recovery paths for important work.
+13. **Professional templates are preparation tools, not licensed services.** The CPA/EA, customs,
+    and commercial-insurance templates produce source-linked workpapers, discrepancy lists, and
+    readiness packs. They do not post books, choose tax positions, file returns or entries, determine
+    customs treatment, recommend coverage, negotiate quotes, bind insurance, or replace the licensed
+    professional's review and signature.

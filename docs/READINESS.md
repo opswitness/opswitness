@@ -1,5 +1,56 @@
 # OpsWitness Readiness
 
+## Planning history, Repeatable Work and Workspace Memory source update (2026-07-22)
+
+Workspace now folds immutable Plan revision chains into selectable planning conversation history.
+Opening a row restores the latest intact revision for review with no planner, confirmation, or
+execution side effect. Saving a row as a task template requires explicit confirmation and records
+the exact source Plan id/hash; the template remains objective-only. Backend tests cover grouping,
+latest-version selection, hash validation, CSRF, provenance, and zero dispatch. Frontend tests cover
+selection, restore, explicit template confirmation, and no execution call.
+
+Workspace now derives **My repeatable Work** from the latest ended, intact reviewed version in
+each immutable Work chain. Preparing one uses the existing rerun path, creates an unconfirmed child,
+and has no execution side effect. Task templates remain objective-only and team blueprints remain
+topology-only; no second mutable Work database was introduced.
+
+The source also implements candidate-first, auditable Workspace Memory under
+[ADR-0008](adr/0008-repeatable-work-and-auditable-workspace-memory.md). Process and knowledge
+versions are private Obsidian-compatible Markdown documents. Agents can propose candidates, while
+only explicit human approval makes a hash-verified version active. Supersession, revocation, and
+exact-version rollback are ledger lifecycle events. New planning receives only a bounded approved
+snapshot; confirmation fails closed if that snapshot is no longer active. Memory bodies never enter
+the ledger or bootstrap summary.
+
+This is product code after the Alpha release freeze. It invalidates `alpha-rc-2` as evidence for
+the current source build even if that historical contract reaches its own frozen duration. Before
+publication, OpsWitness requires a new clean build, isolated install and browser smoke, plus a new
+append-only canary id. `alpha-rc-1`, `alpha-rc-2`, and `m2-canary` remain immutable historical
+evidence and must not be reset or relabeled.
+
+Local acceptance on 2026-07-22 built and independently inspected a wheel from this working tree,
+preserved the previous uv-tool installation as a rollback copy, installed the wheel, restarted only
+the console service, and confirmed the packaged Workspace/Memory UI at `127.0.0.1:8765` with a fully
+green real-host `opswitness doctor --json`. This is local smoke evidence only. The source tree is not
+a clean release commit, so this installation does not satisfy the fresh RC or canary requirements
+above.
+
+## Execution-profile source update (2026-07-21)
+
+The review surface now offers Fast, Balanced, and Deep execution profiles. New Work resolves
+Balanced by default; Run again prepares a Fast child by default; manual per-Agent model selection
+produces Custom. Every preset is resolved against the sanitized local capability catalog before
+confirmation, writes each selected model id into a new immutable plan/hash, and has no dispatch
+side effect or silent runtime fallback. Historical plans with no profile retain their exact legacy
+hash payload.
+
+This is a source-code change after the installed Alpha release candidate. It does not alter the
+currently installed runtime, services, ledger, or the append-only `alpha-rc-2` contract. Even if
+that contract later passes its frozen checks, it proves only the previous installed RC, not this
+new source build. Publication of the profile-enabled build therefore requires a fresh clean RC
+artifact, install/smoke acceptance, and a new append-only canary under a new contract id. Existing
+failed and in-progress canary evidence remains untouched.
+
 ## Product-goal record (2026-07-21)
 
 The durable product target is now explicit in [PRODUCT-VISION.md](PRODUCT-VISION.md): OpsWitness is
@@ -37,15 +88,21 @@ The independent append-only `alpha-rc-1` canary failed after macOS sleep produce
 sleep followed by thermal-emergency sleep/dark-wake cycles; the explanation does not waive the
 hard contract. No checkpoint or reset exists. A distinct `alpha-rc-2` contract started at
 `2026-07-22T00:36:01.202548+00:00` with a dedicated `/usr/bin/caffeinate -is` launchd assertion.
-At `2026-07-22T01:40:35.982819+00:00`, it had five starts, five successes, zero failures, zero
-running tasks, zero projection backlog, and a 901.74-second maximum gap against the frozen
-1,200-second allowance; only the unelapsed 24-hour minimum is currently outstanding. The former
-`m2-canary` also remains a permanent failed record:
-its observed cadence gap reached 50,171 seconds against a frozen 25,920-second allowance. Neither
-failed contract may be deleted, rewritten, reset into a pass, or cited as successful Alpha
-evidence. Professional confusing-similarity review has not been recorded. Alpha publication
-therefore remains blocked on `alpha-rc-2`, that external gate, private merge/public-main checks,
-and final prerelease asset/attestation inspection. Mobile access is not advertised in Alpha;
+The authoritative status recomputed at `2026-07-22T13:29:01.947352+00:00` is also failed: 36
+starts, 36 successes, zero task failures, zero running tasks, zero projection backlog, and a
+14,820.799-second maximum gap against the frozen 1,200-second allowance. The unelapsed 24-hour
+minimum is an additional pending blocker, not a reason to overlook the hard cadence failure. The
+cause of this later gap has not yet been attributed and does not change the verdict. The former
+`m2-canary` also remains a permanent failed record: its observed cadence gap reached 50,171
+seconds against a frozen 25,920-second allowance. None of these failed contracts may be deleted,
+rewritten, reset into a pass, or cited as successful Alpha evidence.
+
+The current post-freeze product source also differs from the artifact that started
+`alpha-rc-2`. Publication therefore requires a clean source commit, a new private Release build,
+exact-artifact install and browser smoke, and a fresh `alpha-rc-3` contract. Professional
+confusing-similarity review has not been recorded. Alpha publication remains blocked on those
+gates, private merge/public-main checks, and final prerelease asset/attestation inspection. Mobile
+access is not advertised in Alpha;
 private HTTPS, pairing, and PWA remain Beta until physical iPhone Safari/Chrome acceptance passes.
 Stable remains blocked on the seven-day soak and recovery/adoption gates recorded below. Detailed evidence:
 [ALPHA-RC-VALIDATION.md](ALPHA-RC-VALIDATION.md).
@@ -189,9 +246,13 @@ blocked by the current open gates below.
   layouts have zero horizontal overflow; the New work composer stays above the five-item mobile
   navigation, quick prompts only populate local input, and New conversation resets it without a
   planning side effect. The built wheel contains the versioned static assets.
-  Workspace provides 27 bilingual, locally searchable and
+  Workspace preserves selectable immutable planning conversation history and provides 27 bilingual, locally searchable and
   category-filtered common-task presets. Each preset is a detailed planning brief with an explicit approval/data boundary;
   selecting one only fills the composer and cannot call planning, confirmation, or execution.
+  Six are visibly marked as proven Work templates with Agent/stage counts, handoff, cadence, outputs,
+  and a human checkpoint. Three are available directly on the empty Workspace through an explicit
+  one-click planning action. That action creates only an unconfirmed proposal and cannot confirm or
+  dispatch it.
   Search remains browser-local. The catalog includes the synthetic
   Bazi demo with fixed `DEMO-001`, deterministic `lunar-python`, three review roles, human sign-off,
   traceable JSON/citation/review/PDF outputs, no delivery, and no real-person data.
@@ -199,7 +260,8 @@ blocked by the current open gates below.
   longer require a separate top-level Library route. The template entry lets the operator save, search, reuse, and archive private
   task objectives. Files are mode `0600`, ledger events contain hashes rather than template text,
   writes require CSRF and explicit confirmation, and selection has no planning or dispatch side
-  effect. Task templates remain distinct from topology-only TeamBlueprints.
+  effect. A template created from planning history also binds its source Plan id/hash without
+  copying team or execution state. Task templates remain distinct from topology-only TeamBlueprints.
   Mail stays visibly `未启用` until the existing consent/OAuth gate closes, but its setup button now
   opens the exact readonly and model-metadata consent contract instead of a dead control. Design authority:
   [ADR-0007](adr/0007-local-operator-console.md).
@@ -269,13 +331,19 @@ blocked by the current open gates below.
   Today's currently labelled Task Teams panel is a read-only projection of the same plan ids, limited
   to confirmed, dispatching, running, approval-waiting, and input-waiting records. It stores no second team object
   and cannot edit hierarchy, runtime, model, evidence, or lifecycle state.
+- Work Overview now places the AI adjustment chat directly under the current summary. A ready,
+  failed, cancelled, or completed-unverified version can request changes to its objective, stages,
+  Agent roles, reporting hierarchy, bounded loops, cadence, outputs, or checkpoints. The request
+  creates a new planning child with source id/hash provenance and no execution side effect; the new
+  version must be reviewed and hash-confirmed before dispatch. Active versions remain read-only.
 - Any intact reviewed Work exposes an explicitly confirmed `Fork work` action. The new Work remains
   independently visible at version 1, binds source plan id/hash into its own confirmation hash, and
   records `task_plan_forked` metadata without dispatching an adapter. It copies no execution,
   approval, operator answer, artifact, or outcome state and returns to Workspace review before run.
 - Failed and `completed_unverified` Work items expose `Run again` in the detail header. It prepares
-  an idempotent ready child with the same reviewed plan, the default `automatic` approval mode, a
-  new version/hash, and `task_plan_rerun_prepared` evidence. Preparation performs no runtime
+  an idempotent ready child that preserves the reviewed structure while resolving the default Fast
+  profile into advertised per-Agent model ids, uses the default `automatic` approval mode, writes a
+  new version/hash, and records `task_plan_rerun_prepared` evidence. Preparation performs no runtime
   dispatch; manual approval remains selectable and the ordinary plan review checkbox/hash
   confirmation remain mandatory.
 - Aion team executions now expose source-complete Start/Continue, Pause, and End controls in a
@@ -422,11 +490,13 @@ blocked by the current open gates below.
    encrypted state backup and an exact archive of the legacy uv tool/symlink, install only the
    verified wheel, retain the legacy data roots and plist labels in place, restore single-instance
    services, and require real-user-domain doctor to pass. Any failure restores the old tool.
-3. **Independent Alpha canary** — keep only `com.opswitness.alpha-canary` exactly enrolled and let
-   append-only `alpha-rc-2` run for at least 24 hours with the Mac open, powered and ventilated.
-   Its dedicated wake assertion prevents idle/AC sleep but cannot override lid closure, manual
-   sleep, power loss, or thermal protection. Failed `alpha-rc-1` and `m2-canary` remain immutable
-   historical evidence and are not reset or reused.
+3. **Independent Alpha canary** — preserve failed `alpha-rc-1`, failed `alpha-rc-2`, and failed
+   `m2-canary` as immutable historical evidence. After the current source is committed, build and
+   install that exact clean artifact, keep only `com.opswitness.alpha-canary` exactly enrolled,
+   and start a fresh append-only `alpha-rc-3` contract. Run it for at least 24 hours with the Mac
+   open, powered, and ventilated. The wake assertion can prevent idle/AC sleep but cannot override
+   lid closure, manual sleep, power loss, or thermal protection. No prior contract is reset,
+   relabeled, or reused.
 4. **Professional brand review** — the exact organization, private repository, and domain are
    reserved, but a qualified confusing-similarity review for intended markets remains required.
 5. **Mobile Beta promotion (non-blocking for Alpha)** — Alpha does not advertise mobile access.
@@ -570,12 +640,13 @@ own independent acceptance gates.
 
 ## Next task
 
-Let the separate `alpha-rc-2` canary complete its frozen 24-hour contract, then complete
-professional brand review. Keep mobile access unadvertised until the separate physical iPhone
-Beta acceptance passes. Keep failed `alpha-rc-1`, failed
-`m2-canary`, and every legacy ledger/CAS object intact. Do not make the repository public, set
-`PUBLIC_RELEASE_APPROVED`, create a tag, adopt feed-monitor/sox-monitor, or build the practitioner
-UI before their independent gates pass.
+Freeze and commit the current post-release product source, validate a clean private Release
+artifact, install and smoke-test that exact artifact, then start a new append-only `alpha-rc-3`
+canary. Complete professional brand review in parallel. Keep mobile access unadvertised until the
+separate physical iPhone Beta acceptance passes. Keep failed `alpha-rc-1`, failed `alpha-rc-2`,
+failed `m2-canary`, and every legacy ledger/CAS object intact. Do not make the repository public,
+set `PUBLIC_RELEASE_APPROVED`, create a tag, adopt feed-monitor/sox-monitor, or build the
+practitioner UI before their independent gates pass.
 
 ---
 

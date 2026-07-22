@@ -9,6 +9,10 @@ not that Stable durability or an SLA is available.
 | Linux / Python 3.12 | CI-tested core | No launchd or full desktop experience commitment |
 | Local Workspace and Work UI | Supported | Loopback, single operator |
 | Plan review, immutable revisions, rerun and fork | Supported | Confirmation required before dispatch |
+| Workspace planning conversation history | Source-complete; fresh RC required | Immutable Plan-chain projection; restore and template save have no execution side effect |
+| Built-in Work template catalog | Source-complete; fresh RC required | 31 bilingual starting points and 10 concrete recipes; professional evidence packs stop at licensed review |
+| Repeatable Work | Source-complete; fresh RC required | Latest ended reviewed Work prepares an unconfirmed child; never one-click dispatch |
+| Auditable Workspace Memory | Source-complete; fresh RC required | Local Obsidian-compatible Markdown; candidates require human approval; planning reads approved hash-bound snapshots only |
 | AionUi team execution | Supported integration | Requires compatible local AionUi; stage completion is Agent-reported |
 | Paperclip governance projection | Supported integration | Paperclip is not the evidence authority |
 | JSONL ledger, CAS, History and evidence views | Supported | Append-only authority; SQLite views are rebuildable |
@@ -23,7 +27,8 @@ not that Stable durability or an SLA is available.
 | DeepSeek and Grok API connections | Connection only | No Alpha execution adapter promise |
 | OpenClaw runtime | Not included | Planned after Alpha |
 | Work calling another Work | Not included | Team-of-teams remains future work |
-| Auditable long-term memory | Not included | Candidate learning must not be implied |
+| Autonomous self-learning memory | Not included | Agents may propose candidates but cannot approve or silently change later planning |
+| Tax filing, customs filing, insurance advice or placement | Not included | Templates prepare traceable evidence for CPA/EA, licensed customs broker, or licensed producer sign-off only |
 | SaaS, multiple users, mobile app | Not included | Local single-operator product only |
 
 OpsWitness is Apache-2.0 and has no formal support SLA in Community Alpha.

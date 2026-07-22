@@ -1,6 +1,6 @@
 # OpsWitness Alpha RC Validation
 
-Snapshot: 2026-07-21 18:46 PDT
+Snapshot: 2026-07-22 06:29 PDT
 
 This record covers the private build validation, rollback-safe production migration, the failed
 independent `alpha-rc-1` canary, and its fail-closed replacement `alpha-rc-2` for
@@ -81,23 +81,26 @@ sparse wake windows. This is a host-availability failure and remains permanent r
 
 `alpha-rc-2` started independently at `2026-07-22T00:36:01.202548+00:00` with event
 `01KY3M0EHNH17A17KD7Y0MT78C` and the same exact 900-second schedule plus 300-second grace. A
-temporary `com.opswitness.alpha-canary-awake` launchd service runs `/usr/bin/caffeinate -is`;
-`pmset -g assertions` confirms both `PreventSystemSleep` and `PreventUserIdleSystemSleep`. At
-`2026-07-22T01:40:35.982819+00:00`, the contract had five starts, five successes, zero failures,
-zero running tasks, zero projection backlog, and a 901.74-second maximum gap against the frozen
-1,200-second allowance. The only current blocker is the unelapsed 24-hour minimum. Earliest
-duration-only eligibility is `2026-07-23T00:36:01.202548+00:00` (2026-07-22 17:36 PDT).
+temporary `com.opswitness.alpha-canary-awake` launchd service ran `/usr/bin/caffeinate -is`.
+The authoritative status recomputed at `2026-07-22T13:29:01.947352+00:00` reports 36 starts, 36
+successes, zero task failures, zero running tasks, zero projection backlog, and a
+14,820.799-second maximum gap against the frozen 1,200-second allowance. `cadence_gap` is a hard
+blocker. The 24-hour minimum was also still pending with 40,019.255 seconds remaining. The latest
+observed start was `2026-07-22T09:22:01.148417+00:00`.
 
-The wake assertion does not override lid closure, manual sleep, power loss, or macOS thermal
-protection. Any resulting gap still fails `alpha-rc-2`; no widened grace or evidence rewrite is
-permitted.
+The cause of this later gap has not yet been attributed. Host availability, launchd behavior, and
+the wake assertion may be inspected to explain it, but no explanation can waive the frozen
+contract. No checkpoint, widened grace, reset, relabel, or evidence rewrite is permitted.
+`alpha-rc-2` is permanent failed evidence and cannot validate either its former installed artifact
+or the newer post-freeze source.
 
 ## Gates still open
 
 The repository remains private, PR #1 remains draft, no public tag or GitHub Release exists, and
 `PUBLIC_RELEASE_APPROVED` remains unset. Public Alpha still requires:
 
-1. a passing 24-hour `alpha-rc-2` status and append-only checkpoint; `alpha-rc-1` remains failed;
+1. a clean private Release build of the current source, exact-artifact install/browser smoke, and
+   a passing 24-hour append-only `alpha-rc-3`; `alpha-rc-1` and `alpha-rc-2` remain failed;
 2. professional confusing-similarity review;
 3. private merge plus green `main`, public-repository security controls, public-main release
    validation, exact annotated tag approval, prerelease asset/attestation inspection, and a final
