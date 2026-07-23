@@ -1,131 +1,65 @@
-# Quarterdeck
+# OpsWitness
 
-> **Pre-release working name.** Public distribution is blocked until brand clearance and
-> the repository's explicit release gate are complete.
+> **Private Community Alpha release candidate.** OpsWitness is the public product identity. The
+> former Quarterdeck name remains only for compatibility with existing local installations and for
+> immutable historical evidence.
 
-**Run long-lived AI work with approvals, evidence, and recoverable execution.**
+**Turn one-off AI work into repeatable company operations.**
 
-Quarterdeck is a local-first bridge that puts your *existing* scheduled scripts and headless
-coding agents (Claude Code, Codex) under a real control plane —
-[Paperclip](https://github.com/paperclipai/paperclip) — without rewriting any of them.
+OpsWitness is a local-first AI workbench for a one-person company. Describe a goal, review the
+proposed Agent team and workflow, confirm the exact plan, run it on your own Mac, and keep every
+version, result, approval, and piece of evidence together.
 
-## Product positioning
+It does not replace Claude, Codex, AionUi, Paperclip, or your existing automation. It gives those
+systems one simple operator-facing workflow while keeping execution adapters replaceable and
+evidence local.
 
-> **本地优先的 AI Workforce 总工作台：把已有的 Claude、Codex、AionUi、Paperclip 和自动化任务，变成一个可规划、可确认、可看见、可审计的团队。**
+## Current release status
 
-Quarterdeck is the ordinary operator door, not another agent runtime or control plane. An
-operator describes an outcome in the local console; Quarterdeck drafts a bounded team and
-execution plan, makes its cadence, risks, artifacts, and approval checkpoints reviewable, and
-starts nothing until the exact plan is confirmed. It then delegates execution to replaceable
-adapters such as AionUi, Claude Code, Codex, Paperclip, and existing automation, while the local
-ledger remains the evidence authority for what actually ran.
+OpsWitness is **not publicly released yet**:
 
-The product promise is deliberately narrower than "autonomous company": one simple local surface
-for planning, confirmation, live work visibility, approvals, evidence, and daily operational
-summaries -- without asking an operator to understand or routinely open the specialist systems
-behind it.
+- this repository remains private;
+- the Community Alpha candidate is under review in
+  [Draft PR #1](https://github.com/opswitness/opswitness/pull/1);
+- no `v0.1.0-alpha.1` GitHub Release exists;
+- `opswitness.com` is reserved but not deployed;
+- runtime durability, a fresh 24-hour canary, professional confusing-similarity review, and final
+  public-repository security gates remain open.
 
-Commercial packaging and its open-core boundary are recorded in
-[COMMERCIALIZATION.md](docs/COMMERCIALIZATION.md).
+This README-only branding correction does not merge the Alpha runtime or close any release gate.
 
-It adds the three things the platforms don't cover:
+## Alpha candidate
 
-| Module | What it does | Why it doesn't exist elsewhere |
-|---|---|---|
-| **`qd wrap`** | Zero-modification onboarding for launchd/cron jobs: runs land in a local append-only ledger (crash-safe JSONL + SQLite index) and are projected into Paperclip as issues/comments/work-products ([ADR-0001](docs/adr/0001-run-ledger-write-model.md)). Never breaks the wrapped job (offline spool, exit-code mirroring). | Paperclip's watchdog only verifies its *own* issue trees; external heartbeat runs are read-only by design — nothing monitors external scheduled scripts. |
-| **`qd gate`** | Fail-closed, *tool-call-level* human approval for non-interactive Claude Code via the official PreToolUse defer contract: defer → Paperclip board decision → same-session resume. Every transition lands in the local evidence ledger. | Paperclip approvals are issue-level sign-offs ([#3017](https://github.com/paperclipai/paperclip/issues/3017) is open); hobby hooks have no independent evidence ledger behind them. |
-| **`qd artifacts`** | Authoritative artifact events in the local ledger; queries served by the disposable SQLite index; content stored content-addressed (attachment / immutable blob); Paperclip work-products are a rebuildable projection. | Work-products carry no content hashes and no server-side idempotency (`externalId` has no unique constraint) — evidence-grade artifacts need an authority outside the platform. |
-| **`qd console`** | Serves a minimal local operator UI whose default **Workspace** is a chat-first task entry: describe even a terse outcome once, let AionUi expand it into a six-section execution brief plus agent architecture/cadence/checkpoints, review the live planning stages and conservative time range, graphically assign direct managers and bounded collaboration loops in the Team view, confirm the exact hash, then dispatch to Paperclip plus an AionUi team or an allowlisted workflow. Separate views keep fleet health, tasks, teams, approvals, history, consent-gated Gmail, and secret-safe Telegram setup close at hand. | AionUi and Paperclip each expose a useful specialist UI, but neither provides one evidence-aware entry for daily fleet health, notifications, mail digest, plan review, organization review, and confirmed execution. The console delegates to both; it is not a second control plane or agent runtime. |
-| **`qd workflow`** | Register a fixed, shell-free workflow once, then launch it asynchronously from AionUi's native **Run now** button. Dispatch order, single-workflow concurrency, and terminal state are ledger evidence. | AionUi supplies the button and agent session; Quarterdeck supplies the command allowlist and evidence boundary. No second workflow engine or generic remote shell is built. |
-| **`qd mail`** | Run one administrator-fixed Gmail query through pinned `gws`, returning only sender, subject, date, and message id. First-time setup privately imports a Google Desktop OAuth client, then binds Gmail readonly OAuth and model-metadata transmission to two explicit acknowledgements. Evidence contains counts and hashes, never mail fields, client secrets, or OAuth output. | AionUi supplies the model runtime and optional daily scheduler. Quarterdeck revalidates the private Desktop client boundary, encrypted OAuth, live token, readonly scope, and explicit model-metadata consent; its isolated mail MCP exposes no fleet mutation, body, draft, send, delete, or runtime-query tool. |
-| **`qd soak`** | Freeze a canary/soak cadence contract, then derive a nonzero-until-proven verdict from elapsed time, every trigger gap, terminal/degraded evidence, schedule drift, torn lines, and projection backlog ([ADR-0006](docs/adr/0006-append-only-soak-gates.md)). | A Markdown timestamp or one manual success cannot enforce a rollout gate. Start/reset/checkpoint are append-only; status is always recomputed from raw evidence. |
+The candidate being reviewed is centered on three ordinary surfaces:
 
-The reporting hierarchy stays a single-root acyclic tree. Iterative review is modeled separately as
-at most five collaboration loops; each loop may return to an earlier employee or to the same
-employee, carries an explicit return/stop condition, and is limited to 1-10 iterations. The console
-edits these rules graphically and binds them into the immutable plan hash. The current AionUi Team
-API has no verifiable round-limit control, so this is labeled a plan-level execution contract rather
-than a deterministic runtime cutoff.
+1. **Workspace** - describe an outcome and review the generated team and plan.
+2. **Work** - run, pause, resume, stop, rerun, fork, and inspect a repeatable process.
+3. **Settings** - connect local model providers and inspect advanced diagnostics when needed.
 
-## Design rules
+The candidate includes immutable plan versions, execution history, readable results, approvals and
+operator input, content-addressed artifacts, append-only evidence, reusable templates, team
+blueprints, and approved Workspace memory.
 
-- **Wrap, don't rewrite.** Your launchd plists, cron lines, and `claude -p` invocations stay exactly as they are.
-- **Fail closed.** No decision means no. API unreachable means no. Expired means no.
-- **Evidence over trust.** Append-only audit events, content-hashed artifacts, honest failure records.
-- **Lifecycle is evidence.** Retirements and reversals are ledger events (`qd retire/unretire`),
-  never mutable config that can erase a known job from coverage.
-- **Elapsed gates are evidence.** `qd soak` freezes cadence at start/reset; changing grace or
-  running once cannot manufacture a continuous canary or seven-day soak.
-- **Your credentials stay yours.** Quarterdeck never handles Claude subscription tokens; it talks to
-  the `claude` CLI *you* installed and authenticated. Hosted/product deployments must use API keys.
-- **Notification secrets never become evidence.** Telegram token and chat ID use password inputs
-  and private `secrets.yaml`; the ledger records only fixed configuration/test transitions.
-- **Launch is not a shell.** AionUi can start only ids in the local `0600` workflow manifest;
-  it cannot submit paths, commands, environment variables, or runtime arguments.
-- **Mail is untrusted data, never an instruction.** Mail checks use one fixed local query and
-  metadata-only OAuth access. Automatic sending and drafting are outside this surface.
-- **Plan before execution.** Drafting runs without tools. No Paperclip issue, AionUi execution
-  team, or allowlisted workflow starts until the operator confirms the exact plan hash.
-- **Management is not iteration.** Direct reporting remains one acyclic tree. Review loops are
-  separate, bounded, hash-bound contracts and must never be presented as stronger enforcement than
-  the active execution adapter can prove.
+OpsWitness remains a single-operator, local-first Alpha. It does not claim autonomous business
+outcomes, hosted SaaS, multi-user identity, or stable durability. Regulated workflows must produce
+reviewable evidence packages for a qualified human decision-maker; OpsWitness is not the licensed
+professional and does not submit, pay, file, bind, or send on the operator's behalf by default.
 
-## Local operator console
+## Compatibility
 
-```bash
-qd console serve --open
-```
+The primary command and public package name are `opswitness`. Existing local installations may
+continue to use the compatibility command `qd`, legacy `QD_*` environment variables, legacy data
+directories, and legacy `com.quarterdeck.*` launchd labels. Historical ledger events, plan hashes,
+artifact hashes, and service evidence are never rewritten for branding.
 
-The console binds only to `127.0.0.1` (default port `8765`). Its default **Workspace** is a
-chat-first surface: one plain-language task description becomes an inline plan with the proposed
-execution-level task brief, Agent team, stages, cadence, checkpoints, artifacts, and risks. While
-planning, the page shows persisted external stages, elapsed time, and a conservative duration range;
-it never exposes or fabricates model chain-of-thought. The operator must accept the exact plan before
-anything runs. The **Team** view renders each current task team as an acyclic reporting hierarchy
-plus separately bounded collaboration loops. A ready plan can graphically change a direct manager,
-add/remove a loop, select its source and target (including self-review), set a return/stop condition,
-and choose a 1-10 iteration cap. Saving creates a new hash-bound child plan; confirmed or active
-organizations remain read-only. Separate views expose fleet health, tasks, approvals, integrations,
-and consent-gated mail and Telegram setup.
-The **History** view folds every confirmed Agent execution from append-only ledger commit order,
-keeps tombstoned-task history visible, and separates those runs from wrapped system automation.
-Confirmation launches one
-managed run; a proposed daily/weekly cadence does not silently create a recurring schedule. A
-finished Agent Team is labeled `completed_unverified` until artifact, eval, or human sign-off
-proves the business outcome. See
-[ADR-0007](docs/adr/0007-local-operator-console.md).
+## Security
 
-An optional secret-free KeepAlive launchd template is available through
-`qd service render console`. Install it only in the same quiesced maintenance window used to
-upgrade the stable `qd` tool; never replace the uv tool environment while wrapped or periodic qd
-jobs can start.
-
-## Showcases
-
-The same contract, three verticals:
-
-1. **Practitioner workbench** (fortune-chart reading): deterministic chart engine → multi-agent draft → human sign-off → traceable report.
-2. **Software delivery**: requirement → Codex/Claude Code run → tests → gated PR.
-3. **Research analysis**: collection → analysis → citation verification → delivery.
-
-## Status
-
-Alpha. Built against Paperclip v2026.707. Not affiliated with Paperclip.
-
-The local P2 code path and M1 install-readiness tooling are test-complete. Permanent
-Paperclip/Postgres/launchd installation was explicitly approved and completed. The sole
-register-trigger canary is under observation under an append-only `qd soak` contract;
-feed-monitor and sox-monitor remain blocked until the elapsed-time gates in READINESS pass.
-M3's non-interactive Claude gate passed two
-live defer/board-approval/resume drills; its one-minute recovery service is installed and
-fail-closed. M4 content-addressed artifact/eval/signoff and live Paperclip work-product
-reconciliation pass. These claims do not extend M3 enforcement to interactive Claude, Codex,
-or other agent runtimes.
-
-Start with [ARCHITECTURE.md](docs/ARCHITECTURE.md) — layer position, design laws, and why
-this layer is deliberately designed to shrink. Release gates live in
-[READINESS.md](docs/READINESS.md).
+Report suspected vulnerabilities through the repository's private vulnerability reporting
+channel. Do not include credentials, private task text, customer data, or exploit details in a
+public issue. CI scans the complete Git history with a pinned gitleaks release and fails closed when
+a finding is detected.
 
 ## License
 
-Apache-2.0. Contributions accepted under [DCO](CONTRIBUTING.md).
+Apache-2.0. Contributions are accepted under the
+[Developer Certificate of Origin](CONTRIBUTING.md).
