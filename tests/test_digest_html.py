@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from typer.testing import CliRunner
 
-from quarterdeck.digest import build_digest, render_page_html
+from opswitness.digest import build_digest, render_page_html
 
 
 def _run_events(job, status, ts, run_id):
@@ -45,11 +45,11 @@ def test_html_report_outcome_section_and_verdict():
 
 
 def test_digest_cli_writes_html_file(tmp_path, monkeypatch):
-    from quarterdeck.cli import app
-    from quarterdeck.ledger import Ledger
+    from opswitness.cli import app
+    from opswitness.ledger import Ledger
 
-    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "ledger"))
-    monkeypatch.setenv("QD_CONFIG_DIR", str(tmp_path / "conf"))
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(tmp_path / "ledger"))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(tmp_path / "conf"))
     led = Ledger(tmp_path / "ledger")
     led.append("run_started", "R9", {"job": "demo"})
     led.append("run_finished", "R9", {"job": "demo", "status": "succeeded", "exit_code": 0})

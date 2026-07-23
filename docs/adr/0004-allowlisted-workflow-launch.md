@@ -12,13 +12,13 @@ generic command tool would be worse: any model or prompt injection reaching the 
 would acquire a local shell.
 
 The missing component is narrower. A human needs to register a known workflow entrypoint once,
-then launch that exact entrypoint from AionUi while preserving Quarterdeck's evidence and
+then launch that exact entrypoint from AionUi while preserving OpsWitness's evidence and
 fail-closed rules. A workflow may internally be a LangGraph application, deterministic script,
-or another proven runtime; Quarterdeck must not become a second workflow engine.
+or another proven runtime; OpsWitness must not become a second workflow engine.
 
 ## Decision
 
-1. `~/.config/quarterdeck/workflows.yaml` is the only launch allowlist. It is strict-schema,
+1. `~/.config/opswitness/workflows.yaml` is the only launch allowlist. It is strict-schema,
    non-symlink, and mode `0600` inside the existing `0700` configuration directory.
 2. Each definition contains a stable id, display metadata, an absolute fixed argv, an absolute
    cwd, enabled state, and `concurrency: forbid`. Runtime argv, shell strings, environment
@@ -42,7 +42,7 @@ or another proven runtime; Quarterdeck must not become a second workflow engine.
    If requested or dispatched evidence cannot be committed, the barrier is never released and
    the command does not execute. Definition hash drift before execution also fails closed.
 6. The worker receives a minimal environment (`HOME`, `PATH`, locale, temp/timezone, and explicit
-   Quarterdeck config/ledger paths). Workflow secrets must be loaded by the registered program
+   OpsWitness config/ledger paths). Workflow secrets must be loaded by the registered program
    through its own permission-checked boundary, never embedded in argv or AionUi.
 7. Runs tied by run id to `workflow_launch_requested` are classified as auditable **on-demand**
    runs. They remain in execution health and problem reporting, but are not falsely reported as

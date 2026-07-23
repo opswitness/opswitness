@@ -8,9 +8,9 @@ import respx
 from httpx import Response
 from typer.testing import CliRunner
 
-from quarterdeck.cli import app
-from quarterdeck.config import Settings
-from quarterdeck.gate import (
+from opswitness.cli import app
+from opswitness.config import Settings
+from opswitness.gate import (
     fold_gate_states,
     handle_post_tool_use,
     handle_pre_tool_use,
@@ -18,7 +18,7 @@ from quarterdeck.gate import (
     record_linked,
     request_hash,
 )
-from quarterdeck.gated_claude import (
+from opswitness.gated_claude import (
     _approval_for_request,
     _claude_command,
     gate_settings_payload,
@@ -28,9 +28,9 @@ from quarterdeck.gated_claude import (
     validate_claude,
     validate_user_args,
 )
-from quarterdeck.ledger import Ledger
-from quarterdeck.paperclip import PaperclipClient
-from quarterdeck.paperclip import PaperclipError
+from opswitness.ledger import Ledger
+from opswitness.paperclip import PaperclipClient
+from opswitness.paperclip import PaperclipError
 
 
 def _hook(**overrides):
@@ -53,7 +53,7 @@ def _decision(response):
 def _settings(tmp_path: Path, monkeypatch) -> Settings:
     config = tmp_path / "config"
     config.mkdir(mode=0o700)
-    monkeypatch.setenv("QD_CONFIG_DIR", str(config))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(config))
     fake_qd = tmp_path / "qd"
     fake_qd.write_text("#!/bin/sh\n")
     fake_qd.chmod(0o700)
@@ -170,12 +170,14 @@ def test_gate_bounds_large_redacted_input(tmp_path):
 
 
 def test_gate_settings_have_no_allow_rule_for_governed_tools(tmp_path):
-    payload = gate_settings_payload(tmp_path / "qd")
+    helper = tmp_path / "anthropic-api-key-helper"
+    payload = gate_settings_payload(tmp_path / "qd", api_key_helper=helper)
     assert payload["permissions"]["defaultMode"] == "dontAsk"
     assert payload["disableBypassPermissionsMode"] == "disable"
     assert payload["permissions"]["allow"] == ["Read", "Glob", "Grep"]
     matcher = payload["hooks"]["PreToolUse"][0]["matcher"]
     assert "Bash" in matcher and "mcp__.*" in matcher
+    assert payload["apiKeyHelper"] == str(helper)
 
 
 def test_version_and_forbidden_argument_gates(tmp_path, monkeypatch):
@@ -280,7 +282,7 @@ def test_supervisor_defer_link_decide_resume_and_execute(tmp_path, monkeypatch):
             result = {"type": "result", "stop_reason": "end_turn", "result": "done"}
         return subprocess.CompletedProcess(command, 0, json.dumps(result), "")
 
-    import quarterdeck.gated_claude as supervisor
+    import opswitness.gated_claude as supervisor
 
     monkeypatch.setattr(supervisor, "validate_claude", lambda _settings: settings.gate.claude_bin)
     monkeypatch.setattr(supervisor, "_client", lambda _settings: _ApprovalClient())
@@ -317,7 +319,7 @@ def test_recovery_marks_resume_without_hook_consumption_failed(tmp_path, monkeyp
         result = {"type": "result", "is_error": True, "result": "MCP tool unavailable"}
         return subprocess.CompletedProcess(command, 0, json.dumps(result), "")
 
-    import quarterdeck.gated_claude as supervisor
+    import opswitness.gated_claude as supervisor
 
     monkeypatch.setattr(supervisor, "validate_claude", lambda _settings: settings.gate.claude_bin)
     monkeypatch.setattr(supervisor, "_client", lambda _settings: _ApprovalClient())
@@ -334,7 +336,7 @@ def test_recovery_expires_without_creating_or_resuming_approval(tmp_path, monkey
     old = datetime.now(UTC) - timedelta(minutes=2)
     handle_pre_tool_use(ledger, _hook(cwd=str(tmp_path)), ttl_seconds=1, now=old)
 
-    import quarterdeck.gated_claude as supervisor
+    import opswitness.gated_claude as supervisor
 
     monkeypatch.setattr(supervisor, "validate_claude", lambda _settings: settings.gate.claude_bin)
     monkeypatch.setattr(supervisor, "_client", lambda _settings: _ApprovalClient())
@@ -359,7 +361,7 @@ def test_recovery_never_replays_consumed_call_without_outcome(tmp_path, monkeypa
         )
     ) == "allow"
 
-    import quarterdeck.gated_claude as supervisor
+    import opswitness.gated_claude as supervisor
 
     monkeypatch.setattr(supervisor, "validate_claude", lambda _settings: settings.gate.claude_bin)
     monkeypatch.setattr(supervisor, "_client", lambda _settings: _ApprovalClient())
@@ -383,7 +385,7 @@ def test_parallel_defer_not_returned_is_closed_without_approval(tmp_path, monkey
         }
         return subprocess.CompletedProcess(command, 0, json.dumps(result), "")
 
-    import quarterdeck.gated_claude as supervisor
+    import opswitness.gated_claude as supervisor
 
     monkeypatch.setattr(supervisor, "validate_claude", lambda _settings: settings.gate.claude_bin)
     monkeypatch.setattr(supervisor, "_client", lambda _settings: _ApprovalClient())
@@ -410,7 +412,7 @@ def test_parallel_cleanup_never_closes_another_claude_session(tmp_path, monkeypa
         result = {"type": "result", "stop_reason": "end_turn", "session_id": "session-1"}
         return subprocess.CompletedProcess(command, 0, json.dumps(result), "")
 
-    import quarterdeck.gated_claude as supervisor
+    import opswitness.gated_claude as supervisor
 
     monkeypatch.setattr(supervisor, "validate_claude", lambda _settings: settings.gate.claude_bin)
     monkeypatch.setattr(supervisor, "_client", lambda _settings: _ApprovalClient())
@@ -423,7 +425,7 @@ def test_parallel_cleanup_never_closes_another_claude_session(tmp_path, monkeypa
 
 def test_gate_hook_cli_returns_structured_defer_and_malformed_deny(tmp_path, monkeypatch):
     _settings(tmp_path, monkeypatch)
-    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "cli-ledger"))
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(tmp_path / "cli-ledger"))
     result = CliRunner().invoke(app, ["gate", "hook"], input=json.dumps(_hook()))
     assert result.exit_code == 0
     assert _decision(json.loads(result.output)) == "defer"
@@ -454,3 +456,63 @@ def test_paperclip_approval_api_shapes():
         "type": "request_board_approval",
         "payload": {"qdRequestId": "req-1"},
     }
+
+
+@respx.mock
+def test_paperclip_local_trusted_approval_resolution_uses_implicit_board():
+    base = "http://127.0.0.1:3100"
+    approval_id = "22222222-2222-4222-8222-222222222222"
+    client = PaperclipClient(base, "service-agent-key", "company-1")
+    health = respx.get(f"{base}/api/health").mock(
+        return_value=Response(
+            200,
+            json={"status": "ok", "deploymentMode": "local_trusted"},
+        )
+    )
+    resolved = respx.post(f"{base}/api/approvals/{approval_id}/approve").mock(
+        return_value=Response(200, json={"id": approval_id, "status": "approved"})
+    )
+
+    result = client.resolve_approval(approval_id, "approve")
+
+    assert result["status"] == "approved"
+    assert "authorization" not in health.calls[0].request.headers
+    assert "authorization" not in resolved.calls[0].request.headers
+
+
+@respx.mock
+def test_paperclip_local_board_resolution_rejects_authenticated_deployment():
+    base = "http://127.0.0.1:3100"
+    approval_id = "22222222-2222-4222-8222-222222222222"
+    client = PaperclipClient(base, "service-agent-key", "company-1")
+    respx.get(f"{base}/api/health").mock(
+        return_value=Response(
+            200,
+            json={"status": "ok", "deploymentMode": "authenticated"},
+        )
+    )
+    resolved = respx.post(f"{base}/api/approvals/{approval_id}/approve").mock(
+        return_value=Response(200, json={"id": approval_id, "status": "approved"})
+    )
+
+    with pytest.raises(PaperclipError, match="local_trusted"):
+        client.resolve_approval(approval_id, "approve")
+
+    assert not resolved.called
+
+
+def test_paperclip_local_board_resolution_rejects_non_loopback_api_base():
+    client = PaperclipClient("https://paperclip.example", "service-agent-key", "company-1")
+
+    with pytest.raises(PaperclipError, match="loopback"):
+        client.resolve_approval("22222222-2222-4222-8222-222222222222", "approve")
+
+
+@respx.mock
+def test_paperclip_local_board_resolution_rejects_invalid_health_json():
+    base = "http://127.0.0.1:3100"
+    client = PaperclipClient(base, "service-agent-key", "company-1")
+    respx.get(f"{base}/api/health").mock(return_value=Response(200, text="not-json"))
+
+    with pytest.raises(PaperclipError, match="invalid JSON"):
+        client.resolve_approval("22222222-2222-4222-8222-222222222222", "approve")

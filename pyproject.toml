@@ -3,11 +3,11 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "quarterdeck"
-version = "0.0.1"
-description = "Run long-lived AI work with approvals, evidence, and recoverable execution — a local-first bridge for Paperclip fleets."
+name = "opswitness"
+version = "0.1.0a1"
+description = "A local-first AI workforce console with planning, approvals, evidence, and recoverable execution."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 license = "Apache-2.0"
 authors = [{ name = "Tianyu Zhou" }]
 keywords = ["agents", "approvals", "audit", "paperclip", "control-plane", "launchd", "cron"]
@@ -26,17 +26,26 @@ dependencies = [
   "uvicorn>=0.30",
   "pyyaml>=6.0",
   "psutil>=6.0",
+  "pypdf>=5.0",
 ]
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.0"]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5", "mypy>=1.10", "respx>=0.21"]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+  "ruff>=0.5",
+  "mypy>=1.10",
+  "respx>=0.21",
+  "packaging>=24",
+]
 
 [project.scripts]
-qd = "quarterdeck.cli:app"
+opswitness = "opswitness.cli:app"
+qd = "opswitness.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/quarterdeck"]
+packages = ["src/opswitness"]
 
 [tool.hatch.build.targets.sdist]
 ignore-vcs = true
@@ -52,6 +61,8 @@ only-include = [
   "NOTICE",
   "SECURITY.md",
   "CONTRIBUTING.md",
+  "CODE_OF_CONDUCT.md",
+  "CHANGELOG.md",
   "pyproject.toml",
 ]
 exclude = [
@@ -61,7 +72,9 @@ exclude = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/tianyuzhou/quarterdeck"
+Homepage = "https://github.com/opswitness/opswitness"
+Repository = "https://github.com/opswitness/opswitness"
+Issues = "https://github.com/opswitness/opswitness/issues"
 
 [tool.ruff]
 line-length = 100

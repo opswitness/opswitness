@@ -1,6 +1,6 @@
 import pytest
 
-from quarterdeck.redact import redact_argv, redact_text
+from opswitness.redact import redact_argv, redact_text
 
 SK = "sk-" + "a1B2" * 8  # 32 chars after prefix
 SHORT_SENTINEL = "short" + "-value"
@@ -22,7 +22,7 @@ def test_provider_shaped_secret_in_positional_masked():
 
 
 def test_paths_and_urls_survive():
-    long_path = "/Users/someone/trade/quarterdeck/src/quarterdeck/wrap/runner_module_file.py"
+    long_path = "/Users/someone/trade/opswitness/src/opswitness/wrap/runner_module_file.py"
     url = "https://api.example.com/v1/companies/abc/issues?limit=50&status=open"
     author_url = "https://example.test/books?author=alice&mode=open"
     assert redact_text(long_path) == long_path

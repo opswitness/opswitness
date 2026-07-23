@@ -1,6 +1,6 @@
-from quarterdeck.config import Settings
-from quarterdeck.ledger import Ledger
-from quarterdeck.wrap.runner import run_wrapped
+from opswitness.config import Settings
+from opswitness.ledger import Ledger
+from opswitness.wrap.runner import run_wrapped
 
 
 def _settings(tmp_path) -> Settings:

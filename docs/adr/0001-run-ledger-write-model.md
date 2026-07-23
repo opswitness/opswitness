@@ -1,4 +1,4 @@
-# ADR-0001: Quarterdeck owns the authoritative run ledger; Paperclip gets projections
+# ADR-0001: OpsWitness owns the authoritative run ledger; Paperclip gets projections
 
 Date: 2026-07-11 · Status: accepted · **v2** (amended same day after an OpenAPI idempotency
 audit; v1's blanket "idempotent replay via `externalId`" was wrong — verified against the live
@@ -29,7 +29,7 @@ dishonest even if an undocumented route existed.
 
 ### 1. Local authoritative ledger = append-only JSONL outbox
 
-Events under `~/.local/state/quarterdeck/ledger/YYYY-MM-DD.jsonl`:
+Events under `~/.local/state/opswitness/ledger/YYYY-MM-DD.jsonl`:
 `run_started`, `run_finished`, `artifact_registered`, `cost_recorded`, `alert_emitted`, and
 **`projection_ack`** (`{event_id, remote_kind, remote_id, ts}`). Every business event carries a
 ULID `event_id`. The SQLite index (WAL) is a disposable view rebuilt from the spool.
@@ -52,7 +52,7 @@ ULID `event_id`. The SQLite index (WAL) is a disposable view rebuilt from the sp
   undecodable lines to `<file>.torn` **exactly once** (dedup against existing quarantine), and
   continue — a torn tail is expected after power loss, never fatal.
 - On `ENOSPC`/`EACCES`/any ledger write failure: **the wrapped job still runs** (exit-code
-  mirroring preserved); Quarterdeck emits an "audit evidence lost" alert through the notify
+  mirroring preserved); OpsWitness emits an "audit evidence lost" alert through the notify
   channel and flags `degraded=true` on the next successful event.
 - **Ordering**: commit order = (file date asc, line position asc) — file append order under the
   exclusive lock. ULIDs are per-process monotonic identities; they never define cross-process
@@ -80,9 +80,9 @@ A single projector (exclusive `flock` lease file) drains unacked events in **com
   source: plain index, NO unique constraint; creation is an unconditional insert.**
   `externalId` is therefore a reconciliation marker, never a server-side idempotency
   key; the list-and-reconcile path is mandatory, same as comments. `createdByRunId`
-  only references Paperclip's own heartbeat runs — Quarterdeck ULIDs cannot join
+  only references Paperclip's own heartbeat runs — OpsWitness ULIDs cannot join
   native lineage; lineage lives in `metadata` and the local ledger.
-- **cost-event**: posted under a dedicated service agent (`quarterdeck`, created once per
+- **cost-event**: posted under a dedicated service agent (`opswitness`, created once per
   company — satisfies the mandatory `agentId`); `billingCode = qd:<event ULID>` is a
   **reconciliation marker, not a remote key** — the GET endpoint has zero filter params
   (verified), so reconciliation lists recent events and scans locally. Residual duplicate

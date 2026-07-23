@@ -1,85 +1,90 @@
-# Brand Clearance Gate
+# OpsWitness Brand Clearance Gate
 
-Snapshot: 2026-07-13 12:20 America/Los_Angeles
+Snapshot refreshed: 2026-07-22 America/Los_Angeles
 
-Status: `Quarterdeck` is rejected for public commercial release. `OpsWitness` is the
-recommended replacement candidate, pending operator approval and a qualified similarity
-search before publication.
+Status: **source migration and identifier reservation complete; professional confusing-similarity
+review remains a public-release blocker.** The `opswitness` GitHub organization,
+`opswitness/opswitness` private repository, and `opswitness.com` domain are now controlled by the
+operator. Domain registration is independently visible through Verisign RDAP with a 2026-07-19
+registration date. Reservation establishes control of identifiers only; it does not create a
+trademark right or prove freedom to operate.
 
-## Knock-out result
+The private repository's default `main` branch still displayed the former README after the source
+migration because the Alpha release branch had not been merged. The default page must say
+OpsWitness before public visibility. Correcting that README is a branding repair only: it does not
+close runtime, canary, legal-review, repository-publication, or Release approval gates.
 
-| Candidate | Exact web/product search | PyPI | GitHub namespace | `.com` RDAP | Verdict |
-| --- | --- | --- | --- | --- | --- |
-| `Quarterdeck` | active software usage and US registration 7860652, class 42 | occupied/history risk | occupied | not relied on | reject |
-| `AuditLoom` | active AI compliance/GRC platform and another audit business | not material | not material | occupied/used | reject |
-| `RunWitness` | used by the adjacent 4QX agent-verification project | 404 | 404 | unregistered response | reject |
-| `TaskNotary` | no exact product found | 404 | 404 | unregistered response | reject: implies legal notarization |
-| `OpsWitness` | no exact product or indexed exact mark found | 404 | 404 | unregistered response | recommend |
+## Why the former name was rejected
 
-Evidence was checked live on the snapshot date using exact-name web searches, PyPI and npm
-registry endpoints, the shared GitHub user/organization namespace, and Verisign `.com` RDAP.
-All four `OpsWitness` identifier checks returned `404`. A `404` proves only that the
-identifier was unregistered at that moment; it does not reserve it.
+The former working name, Quarterdeck, has active software usage and an active US class-42 software
+registration. It is retained only where compatibility with an existing local installation requires
+an old path, environment variable, launchd label, Keychain service, CLI alias, or historical record.
+It is not the public product identity.
 
-### Identifier refresh: 2026-07-13 21:05 America/Los_Angeles
+## OpsWitness knock-out search
 
-The public PyPI JSON endpoint, GitHub shared user/organization namespace endpoint, npm registry,
-and Verisign `.com` RDAP endpoint were queried again for the exact lowercase `opswitness`
-identifier. All four still returned HTTP 404. This refresh does not replace the qualified
-similarity search, does not repeat every official trademark query below, and does not reserve any
-identifier. No account, organization, package, or domain was created.
+On 2026-07-18, the exact lowercase identifier was checked through the public endpoints for PyPI,
+GitHub's shared user/organization namespace, npm, and Verisign `.com` RDAP. Each returned HTTP 404.
+Earlier exact and broader USPTO searches recorded no result for the joined or spaced name.
 
-## Official federal search checkpoint
+A 404 meant only that the endpoint did not expose a matching registration at that moment. The
+subsequent organization, repository, and domain reservations close availability risk for those
+specific identifiers, but do not establish trademark priority or freedom to operate. Package and
+trademark search results can still change before publication.
 
-The USPTO Trademark Search system returned **No results found** for each of these live
-queries on the snapshot date:
+## Product fit
 
-- `CM:"opswitness"`
-- `CM:"ops witness"`
-- `CM:(/.*ops.*/ AND /.*witness.*/)`
-- `FM:/op.*witness/`
-- `FM:/witness.*op/`
+- `Ops` keeps the product horizontal across scheduled jobs, AI workers, approvals, and artifacts.
+- `Witness` describes the trust boundary: the product preserves evidence without pretending to be
+  every scheduler, runtime, or control plane below it.
+- The name avoids claims of legal notarization or certification.
 
-These queries cover the exact joined and spaced forms, marks containing both component
-words, and broader full-mark orderings beginning with `op` or `witness`. They materially
-strengthen the knock-out result but do not search every phonetic equivalent, translation,
-common-law use, jurisdiction, or related mark in crowded `ops` and `witness` fields.
+## Hard release gate
 
-## Why OpsWitness fits
+Before any public tag or announcement, all of the following must be true. Items 3, 4, and 6 are now
+complete; all other items remain live gates until evidence says otherwise:
 
-- `Ops` keeps the platform horizontal: scheduled scripts, agent tools, approvals, artifacts,
-  and future vertical cases all fit.
-- `Witness` describes the product boundary accurately: it records independently verifiable
-  evidence and does not claim to be the scheduler, agent runtime, or control plane.
-- It avoids legal-certification language such as `notary`, and it does not inherit the
-  maritime-software collision that blocks Quarterdeck.
-- The public command can remain concise while the product name is legible in search and
-  enterprise conversations.
+1. repeat exact-name package, web, GitHub, domain, and relevant trademark searches;
+2. complete a qualified confusing-similarity review for the intended markets;
+3. reserve the exact `opswitness` GitHub organization and intended domain — **complete**;
+4. create `opswitness/opswitness` as a private repository first — **complete**;
+5. enable private vulnerability reporting, Dependabot, minimum Actions permissions, and required
+   checks on `main`;
+6. run the release workflow in validation mode against the private remote, where it builds and
+   verifies the distributions without publication credentials — **complete**; evidence:
+   latest executable-source run
+   [29968869522](https://github.com/opswitness/opswitness/actions/runs/29968869522), prior
+   exact-installed-artifact run
+   [29927606948](https://github.com/opswitness/opswitness/actions/runs/29927606948), and
+   [ALPHA-RC-VALIDATION.md](ALPHA-RC-VALIDATION.md);
+7. make the repository public, or separately verify GitHub Enterprise Cloud attestation support,
+   before creating the approved public tag;
+8. inspect every Release asset and attestation; and
+9. set `PUBLIC_RELEASE_APPROVED=true` only after the preceding evidence is recorded.
 
-## What this check does not prove
+GitHub documents [artifact attestations for private repositories](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)
+as an Enterprise Cloud feature.
+The ordinary private-repository validation run therefore stops after the verified build artifact;
+the `publish` job, OIDC token, attestation permissions, and GitHub Release exist only on the final
+approved tag.
 
-This is a preliminary knock-out search, not a legal opinion or final trademark clearance.
-Before public commercial use, search confusingly similar spellings, phonetic equivalents,
-common-law software usage, relevant international classes/markets, and obtain qualified
-review if the product will be sold under the mark.
+If the exact name fails any hard gate, stop. Do not publish under an improvised suffix.
 
-## Rename contract
+## Migration contract
 
-After operator approval, perform the rename as one migration, not scattered wording edits:
+The source migration uses these compatibility rules:
 
-1. reserve the domain and GitHub organization before announcing the name;
-2. rename distribution metadata, repository URLs, docs, NOTICE, SBOM/provenance identity,
-   synthetic showcase, and UI labels;
-3. add a new public CLI name while retaining `qd` as a documented compatibility alias for
-   one release;
-4. support existing `QD_*` configuration and `~/.local/state/quarterdeck` data without
-   copying or losing secrets, ledger events, CAS blobs, or pristine plist backups;
-5. migrate Python package imports and tests mechanically, then run the complete suite and
-   isolated backup/restore drill;
-6. change launchd labels only after the active M2 soak, with byte-identical rollback and a
-   single-instance check;
-7. create the remote and enable `PUBLIC_RELEASE_APPROVED=true` only after CI, private
-   vulnerability reporting, and the final name check pass.
+- public product, distribution, module, repository metadata, UI, SBOM, and provenance use
+  `OpsWitness` / `opswitness`;
+- `opswitness` is the primary CLI and `qd` remains a compatibility alias through at least `v0.2.0`;
+- `OPSWITNESS_*` is canonical while `QD_*` remains accepted; conflicting values fail closed;
+- a fresh install uses OpsWitness paths, while an existing Quarterdeck-only installation continues
+  in place without copying secrets, ledger events, plans, CAS blobs, or pristine backups;
+- simultaneous new and old state/config roots are ambiguous and fail closed unless explicitly
+  resolved;
+- new launchd services use `com.opswitness.*`; old `com.quarterdeck.*` services remain readable and
+  runnable, but matching old and new services must never run together;
+- historical ledger events, plan hashes, artifact hashes, protocol markers, and external references
+  are immutable and are never rewritten for branding.
 
-No production path, launchd label, package name, or public identifier changes merely because
-this document recommends a candidate.
+This is a preliminary product and engineering gate, not legal advice.

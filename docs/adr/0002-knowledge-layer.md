@@ -1,6 +1,11 @@
 # ADR-0002: Vertical knowledge layer — deterministic-first split, vault as source, cited retrieval
 
-Date: 2026-07-12 · Status: accepted (design; implementation lands with P5)
+Date: 2026-07-12 · Status: accepted (vertical knowledge-pack design)
+
+This ADR governs signed domain corpora for vertical products. The Community platform's separate
+candidate/approval/version policy for process and knowledge memory is implemented by
+[ADR-0008](0008-repeatable-work-and-auditable-workspace-memory.md). A Markdown file does not become
+planning memory merely because it exists in either vault.
 
 ## Context
 

@@ -6,13 +6,13 @@ Status: accepted
 
 Paperclip work-products are useful UI projections, but pinned v2026.707 stores
 `externalId` under a normal non-unique index and inserts unconditionally. A mutable local
-path is also not evidence: the bytes can change after a report is reviewed. Quarterdeck
+path is also not evidence: the bytes can change after a report is reviewed. OpsWitness
 therefore needs an authority that survives projection loss and proves the reviewed bytes.
 
 ## Decision
 
 - Blob authority is local content-addressed storage at
-  `~/.local/state/quarterdeck/artifacts/sha256/<prefix>/<sha256>`.
+  `~/.local/state/opswitness/artifacts/sha256/<prefix>/<sha256>`.
 - Lineage and decisions are versioned append-only events:
   `artifact_registered`, `artifact_eval`, and `artifact_signoff`.
 - Registration copies a regular file into a same-filesystem temporary inode, verifies the

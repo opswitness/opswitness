@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.opswitness.projector</string>
+  <key>ProgramArguments</key><array><string>__OPSWITNESS_BIN__</string><string>service</string><string>exec</string><string>projector</string></array>
+  <key>EnvironmentVariables</key><dict><key>OPSWITNESS_CONFIG_DIR</key><string>__OPSWITNESS_CONFIG_DIR__</string></dict>
+  <key>Umask</key><integer>63</integer>
+  <key>StartInterval</key><integer>30</integer>
+  <key>StandardOutPath</key><string>__OPSWITNESS_LOG_DIR__/projector.out.log</string>
+  <key>StandardErrorPath</key><string>__OPSWITNESS_LOG_DIR__/projector.err.log</string>
+</dict></plist>

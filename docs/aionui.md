@@ -1,17 +1,35 @@
-# Quarterdeck 总控制台与内部 AionUi 适配器
+# OpsWitness 总控制台与内部 AionUi 适配器
 
-界面策略：**不 fork AionUi/Paperclip，也不自建第二套控制面**。Quarterdeck 是用户唯一
+界面策略：**不 fork AionUi/Paperclip，也不自建第二套控制面**。OpsWitness 是用户唯一
 需要接触的本地入口，内部服务只通过窄适配器协作：
 
-1. **Quarterdeck 总控制台**（http://127.0.0.1:8765）— AI 连接、舰队健康、任务规划与运行、
+1. **OpsWitness 总控制台**（默认 http://127.0.0.1:8765）— AI 连接、舰队健康、任务规划与运行、
    审批、证据、邮箱摘要和日常设置。
 2. **AionUi** — 隐藏的规划/Agent session 适配器；正常界面不展示其 Team、Assistant ID 或 URL。
 3. **Paperclip** — 隐藏的治理记录与审批状态机；正常界面不展示其 issue URL 或 Web UI 入口。
 4. `qd` CLI — 管理员与故障恢复兜底，与总控制台共用同一套服务函数。
 
-用户在“连接”页直接连接 ChatGPT/OpenAI 或 Claude。Quarterdeck 只运行固定的官方 CLI
-登录流程并读取脱敏状态，不接收密码、OAuth token 或模型 API key。内部服务名称只在默认
-折叠的“系统诊断”中显示。
+用户在“连接”页直接连接 ChatGPT/OpenAI、Claude、DeepSeek、Grok/xAI、Ollama 或 LM Studio。Claude 同时提供“Claude 账户”与
+“Console 登录”与“API Key”：前两者分别调用固定的 `claude auth login --claudeai` 和
+`claude auth login --console`；API Key 需用户明确确认，先用 Anthropic Models API 验证，
+再经 stdin 写入 macOS Keychain，并由 Claude 官方 `apiKeyHelper` 读取。OpenAI API Key 仍只
+在当前 loopback 连接请求中经 stdin 交给固定的 Codex CLI。DeepSeek 和 xAI API Key 分别用
+官方 Models 端点验证，再写入各自的 macOS Keychain item；AionUi 的 provider API 会在响应中
+回传原始 key，因此 OpsWitness 明确禁止把这两项凭据复制进 AionUi 的 env/SQLite。Grok
+账户连接只调用官方 Grok Build CLI 的 `grok login`；未安装该 CLI 时按钮保持不可执行，但
+xAI API Key 仍可独立连接。Grok 订阅与 xAI API 用量分别计费。
+
+Ollama 与 LM Studio 不走账号或真实 API Key。OpsWitness 只探测固定回环端点
+`http://127.0.0.1:11434/api/tags` 与 `http://127.0.0.1:1234/v1/models`；用户在弹窗明确确认后，
+Ollama 通过本机 App 启动，LM Studio 通过固定 `lms server start` 启动。检测到的模型以
+OpenAI-compatible Custom provider 登记到 AionUi，地址固定为相应 `/v1`，`api_key` 仅使用
+`ollama`/`lm-studio` 非秘密占位符。页面没有自定义 URL 或本地 Key 输入。服务在线、至少一个模型、
+AionUi provider 已和解、`aion_cli` Assistant 可组队四项缺一时，`runtime_ready` 必须保持 false。
+
+任何真实 Key 都不进入 argv、页面响应、YAML、日志或账本。连接成功只证明凭据或本地模型目录可用，不证明存在
+可执行 Agent 适配器：当前 DeepSeek/Grok 显示“已连接、运行适配器尚未启用”，也不会进入
+规划器的 runtime capability 表；完成独立适配器审计和执行验收后才能放开。内部服务名称只在
+默认折叠的“系统诊断”中显示。
 
 ## 总控制台
 
@@ -19,10 +37,12 @@
 qd console serve --open
 ```
 
-只监听 `127.0.0.1`，默认端口 `8765`。创建新任务时，后端先创建临时 AionUi Team 并把
+默认只监听 `127.0.0.1`，端口 `8765`。需要 iPhone/其他电脑访问时，可显式开启私网
+HTTPS 与设备配对；AionUi 和 Paperclip 地址仍保持回环，不会随总控制台暴露。配置与撤销
+流程见 [Private console](private-console.md)。创建新任务时，后端先创建临时 AionUi Team 并把
 会话固定在 Plan Mode；模型只能返回严格 JSON 方案（目标摘要、Agent 数量/角色/runtime、
 执行阶段、节奏、审批点、artifact 与风险）。规划阶段不创建 Paperclip issue，也不启动
-工具。用户确认展示的 `plan_sha256` 后，Quarterdeck 先 fsync `task_plan_confirmed`，再：
+工具。用户确认展示的 `plan_sha256` 后，OpsWitness 先 fsync `task_plan_confirmed`，再：
 
 - 对已登记流程调用本地白名单 workflow；或
 - 在 Paperclip 创建治理 issue，并按已确认架构创建 AionUi execution Team。
@@ -32,10 +52,58 @@ Plan Mode 临时 Team 在成功或失败后删除；若删除无法确认，规�
 `completed_unverified`；业务完成必须继续看 artifact/eval/审签。详见
 [ADR-0007](adr/0007-local-operator-console.md)。
 
-待确认方案提供两个不同动作：“修改方案”让用户只写变更要求，Quarterdeck 将完整上一版
+执行 Team 会为已确认方案的每个阶段创建一个 AionUi 内置团队工作项，后续只用结构化
+`team_task_create/team_task_update` 记录更新 `pending/running/blocked/completed/failed` 状态。
+OpsWitness 按 task ID 折叠状态，并在 Work 的“执行阶段”中每 2.5 秒刷新；新任务使用精确
+`[QD-STAGE:<order>] <title>` 主题，旧任务只接受无歧义的标题匹配。步骤下面最多显示四条
+安全活动（Agent、严格工具名、状态、时间、折叠次数）。原始参数、输出、消息正文、工作项
+描述和隐藏思维不进入 API；“Agent 已上报完成”只证明该执行步骤被报告结束，不证明报告或
+业务结果正确。缺失或冲突的工作项映射显示为“未观测/状态不明确”，不得制造百分比。
+
+AionUi execution Team 遇到工具确认时，OpsWitness 会读取其公开 confirmation 接口，按
+`plan_id + conversation_id + call_id + request hash` 幂等创建一条 Paperclip approval。
+普通用户在对应 Work 的内联处理区看到“一次允许”或“拒绝”；`allow_always` 永不暴露或发送。
+审批卡只在 OpsWitness 来源标记和本地 `plan_id` 绑定都验证通过时出现在该任务中。全局审批页
+保留为跨任务队列和恢复入口，但继续单个任务不再要求跳转。
+决定先写入 Paperclip 和本地 append-only ledger，再回送给仍暂停的 AionUi 调用；回送失败时
+任务继续阻断，并在后续状态刷新中按同一请求标识和解重试。新方案和重新运行默认启用
+`automatic`：用户确认精确方案哈希后，AionUi 的每个工具确认都会自动获得一次性允许，
+同时仍创建 Paperclip approval，并写入本地策略与投递证据。普通用户因此不会被逐工具审批
+打断；确认页可打开 `manual_all`，让每个执行工具暂停等待人工决定。历史
+`automatic_safe` 方案继续沿用精确只读白名单，不扩大原有权限；缺少模式的旧记录仍
+fail-closed 为手动。OpsWitness 不把运行时的待确认计数冒充成一条已经存在的可操作审批。
+
+若已确认团队缺少继续执行所必需的任务信息，计划中的 Agent 可调用
+`qd_request_input` 创建一个有界问题并停止当前步骤。Work/Today 进入 `awaiting_input`；用户
+回答后，OpsWitness 用稳定 request marker 将答案幂等送回同一 Team。问题和回答正文只在
+私有任务通道中传递，账本仅保存哈希。依赖是否存在应优先调用只读
+`qd_python_package_status`，不得为了探测而启动 shell。
+若手动模式先拦住 `qd_request_input` 工具调用，批准和随后出现的建议回复/输入框都占用 Work
+中的同一个“需要你处理”位置，按顺序原地完成。
+
+AionUi Team 运行中，OpsWitness 总控制台在 Work 顶部固定显示“开始/继续 / 暂停 / 结束”
+三键；只有当前状态合法的动作可点击。运行时确认所有活动 slot 进入 paused 后才启用
+“继续”。首次开始仍必须先在 Workspace 确认 plan/hash，Work 的开始位置不会绕过确认。
+继续使用同一份已确认 plan/hash 和固定
+resume marker，不重新规划，也不静默切换模型。终止必须二次确认，且 cancel 请求成功不等于
+进程已经结束；界面保持 `cancel_requested`，直到公开 run-state 证明对应 run 已 inactive 或
+terminal。部分输出与账本证据保留，但不算业务完成。这里的暂停是 AionUi 协作式状态，不承诺
+OS 级冻结；白名单 workflow 暂不显示这些按钮。
+
+Today 中的“任务团队”是同一批 Work 记录的只读活跃摘要，只投影
+`confirmed` / `dispatching` / `running` / `awaiting_approval` / `awaiting_input` 状态和脱敏成员观测；
+它不创建第二套 Team 或员工身份。汇报层级、循环、运行时/模型、活动、交付物和删除仍只在
+`Work -> Team/Activity/Outputs/Settings` 中管理。当前方案最多五个 Agent，在单根、无环的
+条件下可形成最多五层汇报关系；新增或删除 Agent 必须走 AI 修改方案和新哈希确认。
+
+待确认方案提供两个不同动作：“修改方案”让用户只写变更要求，OpsWitness 将完整上一版
 和变更要求交给无工具 planner，生成带新 `plan_id`/新哈希的子版本，并显示 Agent、阶段、
 节奏、审批、artifact 与风险的结构变化；上一版不可改写，有有效子版本时也不可再确认。
 “重新开始”才清空当前界面并创建无父版本的新任务。任何修改版都必须重新勾选确认。
+
+Work 的 “Fork work” 是第三种语义：复制已审核方案、团队和设置，创建独立的顶级 Work，
+并把来源 `plan_id` 与哈希绑定进新哈希。它不设置 `parent_plan_id`，也不复制 AionUi Team、
+运行、审批、用户回复、artifact 或结果状态；新 Work 必须回到 Workspace 重新审阅确认。
 
 任务表和任务详情提供“删除任务”。该动作只对待确认、失败或已结束的任务开放，并在二次
 确认后写入 append-only `task_plan_deleted` 事件。任务随后从普通列表消失，但计划文件、
@@ -43,7 +111,8 @@ Plan Mode 临时 Team 在成功或失败后删除；若删除无法确认，规�
 子版本开始删除。
 
 源码验收可直接运行 `qd console serve --open`。长期登录自启使用
-`qd service render console` 生成的 loopback-only KeepAlive plist，但必须在停掉所有 qd
+`qd service render console` 生成的 KeepAlive plist；私网代理模式下该服务仍是 loopback-only。
+安装时必须在停掉所有 qd
 消费者的维护窗口内先升级稳定 uv tool；当前生产 canary 通过前不得为了安装总控制台而
 中断连续证据。
 
@@ -60,11 +129,11 @@ uv tool install --force --with mcp /path/to/distribution.whl
 ```json
 {
   "mcpServers": {
-    "quarterdeck": {
+    "opswitness": {
       "command": "/Users/<you>/.local/bin/qd",
       "args": ["mcp"]
     },
-    "quarterdeck-mail": {
+    "opswitness-mail": {
       "command": "/Users/<you>/.local/bin/qd",
       "args": ["mcp", "--profile", "mail"]
     }
@@ -72,7 +141,7 @@ uv tool install --force --with mcp /path/to/distribution.whl
 }
 ```
 
-Quarterdeck 从权限为 0700/0600 的本机配置目录读取凭据；不要把 key 复制进 AionUi
+OpsWitness 从权限为 0700/0600 的本机配置目录读取凭据；不要把 key 复制进 AionUi
 的 env/SQLite。若只需读工具，`qd_project_now` 和 `qd_workflow_start` 都不应由模型调用。
 
 ## AionUi 兼容入口（仅高级诊断/验收）
@@ -82,7 +151,7 @@ Quarterdeck 从权限为 0700/0600 的本机配置目录读取凭据；不要把
 - 名称：`每日工作台`
 - 图标：`📬`
 - 描述：`舰队健康、工作流与证据核验`
-- MCP：只启用 `quarterdeck`
+- MCP：只启用 `opswitness`
 - 推荐提示词：
   - `查看舰队健康与投影积压`
   - `启动已批准的完整工作流`
@@ -92,7 +161,7 @@ Quarterdeck 从权限为 0700/0600 的本机配置目录读取凭据；不要把
 Assistant 的固定规则：
 
 ```text
-Use only the Quarterdeck MCP for operational actions.
+Use only the OpsWitness MCP for operational actions.
 For workflow launch, list qd_workflows first and call qd_workflow_start only after the user
 explicitly names the workflow. Never call qd_project_now unless the user explicitly asks.
 State execution evidence and outcome evidence separately. Fail closed on any missing coverage,
@@ -152,7 +221,7 @@ CLI 或第三方异常原文不会进入 ledger/UI，避免异常回显夹带邮
 整次任务按失败处理，不能把“已生成”冒充成“已安全完成”。
 
 若使用 AionUi 原生定时任务，邮件必须使用另一个 Custom Assistant：名称 `邮件回复`，MCP **只启用**
-`quarterdeck-mail`。不要同时启用 `quarterdeck`；mail profile 结构上只有 status/check
+`opswitness-mail`。不要同时启用 `opswitness`；mail profile 结构上只有 status/check
 两个工具，恶意 sender/subject 因而拿不到 workflow、projector 或其他副作用工具。
 总控制台的按需摘要走独立的临时 tool-free Plan Mode Team，不复用运维 Assistant。
 
@@ -174,24 +243,24 @@ sender/subject/date/message-id 会发送给 AionUi 当前配置的模型服务�
 2026-07-13 的结构验收：AionUi 连接
 `mcp_019f5d9b-b884-7831-b991-eda395e98cb6` 只列出 `qd_mail_status` 和
 `qd_mail_check`，并保持 disabled。现有 `每日工作台` 已移除邮件提示和规则，固定为
-`Permission=default` 且只绑定 11 工具运维 profile。OAuth、consent、独立邮件 Assistant
+`Permission=default` 且只绑定 13 工具运维 profile。OAuth、consent、独立邮件 Assistant
 和 09:00 任务均未创建，因此没有邮箱请求或模型数据传输。
 
 ## 一键启动完整工作流
 
-Quarterdeck 不在 MCP 中开放 shell。先由本机管理员把完整流程的**唯一入口命令**登记
+OpsWitness 不在 MCP 中开放 shell。先由本机管理员把完整流程的**唯一入口命令**登记
 一次；AionUi 之后只传一个固定 workflow id：
 
 ```bash
-qd workflow register quarterdeck-showcase \
-  --title "Quarterdeck end-to-end showcase" \
+qd workflow register opswitness-showcase \
+  --title "OpsWitness end-to-end showcase" \
   --description "wrap -> outage replay -> gate -> artifact -> digest" \
-  --cwd /Users/<you>/trade/quarterdeck \
-  -- ~/.local/share/uv/tools/quarterdeck/bin/python \
-     /Users/<you>/trade/quarterdeck/examples/showcase/run.py
+  --cwd /Users/<you>/trade/opswitness \
+  -- ~/.local/share/uv/tools/opswitness/bin/python \
+     /Users/<you>/trade/opswitness/examples/showcase/run.py
 ```
 
-登记文件是 `~/.config/quarterdeck/workflows.yaml`（`0600`）。命令必须是绝对 argv，
+登记文件是 `~/.config/opswitness/workflows.yaml`（`0600`）。命令必须是绝对 argv，
 不能是 shell/env，不能带疑似 credential，AionUi 不能修改它，也不能附加运行时参数。
 
 ### AionUi 2.1.33 权限边界
@@ -202,21 +271,21 @@ AionUi 2.1.33 会把内置 Claude Code 的 Scheduled Task 自动模式规范化�
 
 本机验收使用一个专用 Custom Agent：复用 AionUi 已安装并通过连接测试的
 `claude-agent-acp`，但把 agent 的 `yolo_id` 固定为 `default`；其 Custom Assistant
-固定 `Permission = default`，且 MCP 只绑定 `quarterdeck`。AionUi 更新可能改变 Node
+固定 `Permission = default`，且 MCP 只绑定 `opswitness`。AionUi 更新可能改变 Node
 或 ACP adapter 的版本化路径，更新后必须重新执行 agent 连接测试和 MCP availability
 检查，失败时不得运行任务。
 
 然后在 AionUi：
 
 1. 建一个使用上述 guarded agent 的专用对话，确认 `Permission · Default`，并确认
-   只启用了 `quarterdeck` MCP。
+   只启用了 `opswitness` MCP。
 2. 在 **Scheduled Tasks** 新建任务，Frequency 选 **Manual**，Execution mode 选
    **Existing conversation**，目标选上面的专用对话。
 3. 固定 Prompt；`each invocation` 是必要语义，防止持续对话把后续点击误判为重复调用：
 
    ```text
    For this scheduled-task invocation, call qd_workflow_start exactly once with
-   workflow_id "quarterdeck-showcase", even if earlier turns launched the same workflow.
+   workflow_id "opswitness-showcase", even if earlier turns launched the same workflow.
    Each Run now invocation must create and return a new run_id. Do not call any other
    mutating tool. Then call qd_workflow_status for the new run_id and report its status.
    ```
@@ -244,8 +313,8 @@ AionUi 2.1.33 会把内置 Claude Code 的 Scheduled Task 自动模式规范化�
   0.327 秒、`degraded=false`，随后 `qd project` 返回 `pending=0`。因此按钮、MCP、后台
   supervisor、权威账本与 Paperclip 投影这五段均已在同一次点击中闭环。
 
-这是启动意图，不是 M3 审批。工具调用中的高风险副作用仍由 Quarterdeck gate 拦截，
-并在 Quarterdeck 总控制台的“审批”页决策；流程退出码也只证明 execution，业务完成必须看 artifact
+这是启动意图，不是 M3 审批。工具调用中的高风险副作用仍由 OpsWitness gate 拦截，
+并在 OpsWitness 总控制台的“审批”页决策；流程退出码也只证明 execution，业务完成必须看 artifact
 eval/signoff。完整契约见 [ADR-0004](adr/0004-allowlisted-workflow-launch.md)。
 
 ## 为什么不把 Paperclip 官方 MCP 直接挂入 AionUi
@@ -259,7 +328,7 @@ JSON 端点的 `paperclipApiRequest` escape hatch。写面包括 issue 修改、
 发布包 README 少列了源码中真实注册的 `paperclipRequestCheckboxConfirmation`；这里的
 数量以 `dist/tools.js` 的注册表为准。
 
-因此直接接入会让 AionUi 中的模型获得治理写权限，并绕过 Quarterdeck 的固定审批门。
+因此直接接入会让 AionUi 中的模型获得治理写权限，并绕过 OpsWitness 的固定审批门。
 除非上游提供服务端强制的只读 token/tool allowlist，或者
 另有经过审计的只读代理，否则该 MCP 保持未安装、未配置。不能靠提示词要求模型
 “只读”。
@@ -287,11 +356,12 @@ JSON 端点的 `paperclipApiRequest` escape hatch。写面包括 issue 修改、
 | `qd_mail_status` | 固定 gws 版本、加密 OAuth、有效 token、readonly scope 和 consent 状态 |
 | `qd_mail_check` | 执行固定 metadata-only 查询；邮件字段一律视为不可信数据 |
 
-验证：`npx @modelcontextprotocol/inspector ~/.local/bin/qd mcp` 应列出 11 个运维工具；
+验证：`npx @modelcontextprotocol/inspector ~/.local/bin/qd mcp` 应列出 13 个运维工具；
 `npx @modelcontextprotocol/inspector ~/.local/bin/qd mcp --profile mail` 应且只能列出 2 个
 邮件工具。
 2026-07-13 的 AionUi 内置 Check MCP Availability 和随后一次独立 stdio 握手均列出
-原 8 个只读/投影工具；安装包含 ADR-0004 的 wheel 后必须重新检查 11 工具并执行一次
-真实 Manual Task。11 工具的 AionUi one-click 验收已于 2026-07-13 通过；隔离邮件
+原 8 个只读/投影工具；安装包含 ADR-0004 的 wheel 后曾重新检查 11 工具并执行一次
+真实 Manual Task。该 11 工具 AionUi one-click 验收已于 2026-07-13 通过；当前源码新增
+安全包元数据和有界用户提问后为 13 工具，需在安装包更新后重跑可用性检查；隔离邮件
 profile 的 OAuth 和每日任务仍需单独验收，不能用 MCP 握手代替真实 Gmail readonly
 检查。

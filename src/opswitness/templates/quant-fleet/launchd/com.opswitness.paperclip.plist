@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.opswitness.paperclip</string>
+  <key>ProgramArguments</key><array><string>__OPSWITNESS_BIN__</string><string>service</string><string>exec</string><string>paperclip</string></array>
+  <key>EnvironmentVariables</key><dict><key>OPSWITNESS_CONFIG_DIR</key><string>__OPSWITNESS_CONFIG_DIR__</string></dict>
+  <key>Umask</key><integer>63</integer>
+  <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>__OPSWITNESS_LOG_DIR__/paperclip.out.log</string>
+  <key>StandardErrorPath</key><string>__OPSWITNESS_LOG_DIR__/paperclip.err.log</string>
+</dict></plist>

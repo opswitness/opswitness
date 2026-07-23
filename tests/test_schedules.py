@@ -1,4 +1,4 @@
-from quarterdeck.schedules import classify_schedule, schedules_by_state
+from opswitness.schedules import classify_schedule, schedules_by_state
 
 
 def test_shared_schedule_classifier():

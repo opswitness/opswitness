@@ -21,14 +21,17 @@ jobs:
           cache-dependency-path: console-ui/package-lock.json
       - run: npm ci
         working-directory: console-ui
+      - run: npm test
+        working-directory: console-ui
       - run: npm run typecheck
         working-directory: console-ui
       - run: npm run build
         working-directory: console-ui
-      - run: git diff --exit-code -- src/quarterdeck/console/static
+      - run: git diff --exit-code -- src/opswitness/console/static
       - run: python -m pip install -e ".[dev,mcp]" build
+      - run: python scripts/check_release_identity.py --tag v0.1.0-alpha.1
       - run: ruff check .
-      - run: mypy src/quarterdeck
+      - run: mypy src/opswitness
       - run: pytest -q
       - run: python -m build
       - run: python scripts/verify_distribution.py dist

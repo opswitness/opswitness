@@ -14,7 +14,10 @@ have the right to submit it under Apache-2.0. No CLA.
 ## Dev setup
 
 ```bash
-pip install -e ".[dev]"
-pytest
+uv sync --extra dev --extra mcp
+.venv/bin/python -m pytest
 ruff check .
+cd console-ui && npm ci && npm test && npm run typecheck && npm run build
 ```
+
+The supported development interpreter is Python 3.12. Use `git commit -s` for every commit.

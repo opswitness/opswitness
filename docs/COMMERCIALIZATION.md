@@ -1,13 +1,27 @@
 # Commercialization Strategy
 
+## Community Alpha packaging update
+
+The first public candidate is the Apache-2.0, single-operator OpsWitness Community Alpha distributed
+only as signed GitHub Release assets. It has no account requirement, artificial run quota, PyPI
+dependency, token resale, or hosted control plane. Private HTTPS/PWA and optional mail/Telegram
+connections remain clearly labeled Beta or Experimental; future commercial modules cannot weaken
+the free core's local evidence, export, backup, approval, or fail-closed behavior.
+
 Status: product decision, 2026-07-14. This document guides packaging and sequencing; it
 is not legal, tax, privacy, or licensing advice.
 
 ## Decision
 
-Quarterdeck commercializes as an **open local core plus paid vertical delivery, then paid
+OpsWitness commercializes as an **open local core plus paid vertical delivery, then paid
 team operations**. It does not begin as a generic freemium product with an artificial
 feature paywall or a token-execution tax.
+
+The Community product is first designed as the simple repeatable-work operating layer for a
+one-person company. It does not compete with Codex or Claude for deep execution. It makes their
+one-off work reusable through reviewed Work definitions, Agent architecture, immutable versions,
+Run again, Fork work, History, Results, and locally owned evidence. This positioning is governed by
+[PRODUCT-VISION.md](PRODUCT-VISION.md) and remains the product filter for both free and paid work.
 
 > Free software establishes trust. Paid vertical workbenches establish early revenue.
 > Shared governance and managed operations become the later recurring business.
@@ -22,14 +36,40 @@ be withdrawn into a paid edition.
 
 The local, single-operator Community edition remains open source and useful without an
 account, vendor proxy, artificial run quota, or paid server. It includes the capabilities
-that make Quarterdeck credible:
+that make OpsWitness credible:
 
 - local append-only ledger, evidence review, export, and backup/restore paths;
-- fail-closed approval boundary and honest health/coverage reporting;
+- plan-confirmed Auto execution, an audited in-Work Auto/manual switch for future calls, opt-in
+  per-tool manual approval, durable approval evidence, and honest health/coverage reporting;
+- one task-local attention surface for manual approval and Agent questions, with the global queue
+  retained for cross-task triage rather than sold as a usability upgrade;
+- fixed, state-honest Start/Continue, Pause, and End controls for supported local Aion work, with
+  second confirmation and evidence retention included in the free core;
 - chat-first plan-before-execution, hash confirmation, versioned plan revision, evidence-preserving
-  task deletion, graphical team/loop editing, run history, and basic daily digest;
+  task deletion, independent provenance-bound Work forks, graphical team/loop editing, immutable
+  run history with guarded same-context Aion continuation, and basic daily digest;
+- one-click review-first preparation from completed Work, with the complete reviewed plan and Agent
+  architecture retained without an execution, Agent, or Work quota;
+- local auditable Workspace Memory: private Obsidian-compatible process/knowledge versions,
+  candidate review, approval, supersession, revocation, rollback, search, and approved-only planning
+  snapshots remain Community capabilities rather than a paid trust gate;
+- an in-Overview AI adjustment box for evolving goals, stages, Agent hierarchy, bounded loops,
+  cadence, outputs, and checkpoints through reviewable immutable versions, without a paid revision
+  limit or automatic dispatch;
+- one Work identity across the Today active summary and the full Work detail; no duplicate team
+  registry or paid global-employee directory is required for the single-owner product;
 - user-owned connections to supported local runtimes and existing automation;
+- per-Agent runtime and advertised-model selection, including free Fast/Balanced/Deep review-time
+  presets and Custom edits, with immutable hash binding and no silent fallback;
+- plan-bound live stage telemetry from structured runtime work items, with safe activity metadata
+  and an explicit separation between Agent-reported execution and verified business outcomes;
+- fixed-loopback Ollama and LM Studio discovery/connection through the hidden local adapter, with
+  no vendor proxy, remote endpoint, or OpsWitness token markup;
 - core AionUi, Paperclip, Claude Code, and Codex adapter boundaries.
+
+Community must remain sufficient for a solo operator to build an unlimited library of repeatable
+company Work. Founder Pro may make that library easier to maintain, connect, back up, and recover,
+but it must not remove the first-use flow or repeatability primitives from the free edition.
 
 Safety, evidence, data export, and the ability to leave the product are not upsell levers.
 Charging for those would conflict with the trust/evidence position and make the free edition
@@ -38,7 +78,7 @@ an unsafe demonstration rather than a product people can adopt.
 ## First revenue: paid vertical Pilot and implementation
 
 The first commercial product is a paid, local-first vertical workbench, not a generic
-"Quarterdeck Pro" subscription. The initial case is the practitioner workbench described in
+"OpsWitness Pro" subscription. The initial case is the practitioner workbench described in
 [M6-PILOT-GATE.md](M6-PILOT-GATE.md) and the customer-facing
 [PRACTITIONER-PILOT-OFFER.zh-CN.md](PRACTITIONER-PILOT-OFFER.zh-CN.md).
 
@@ -54,11 +94,45 @@ The existing M6 rule holds: no practitioner UI or private vertical repository st
 written paid commitment or a real deposit. The published USD 1,500, 30-day Pilot is a
 validation baseline, not a promise that every future vertical has that price.
 
+The Community catalog also exposes three **professional evidence-pack templates** as design-partner
+starting points. Their commercial validation order is CPA/EA month-end and pre-tax workpapers first,
+licensed-customs-broker entry-support evidence second, and commercial P&C renewal readiness third.
+They are not public promises of automated tax filing, customs filing, claims handling, insurance
+advice, or placement. In every case the buyer is the qualified professional, the product prepares a
+traceable exception/readiness pack, and the professional resolves exceptions, takes the regulated
+position, and signs or submits. The generic company commercial-analysis template is a Community
+workflow, not a regulated conclusion or investment recommendation.
+
+Do not build a private vertical application merely because the template exists. A professional
+vertical advances only after a written paid commitment or deposit and must measure human minutes per
+pack, exception rate, reviewer overturn/rework rate, renewal intent, and contribution margin. If the
+operator spends the recurring workday on data entry, document chasing, or rewriting model output, or
+the observed contribution margin cannot exceed 50%, classify it as services work rather than an AI
+product. The current Practitioner Pilot remains the only published paid offer until one of these
+design-partner paths earns its own validated scope and price.
+
 Static prompts, YAML templates, and checklists are distribution material, not the primary
 paid moat. The recurring value is dependable operation, curated and evolving domain content,
 measured quality, accountable support, and a workbench shaped around a buyer's daily work.
 
 ## Later paid offers
+
+### Founder Pro
+
+Introduce Founder Pro only after Community operators repeatedly ask OpsWitness to operate the
+local installation for them. It is a convenience and continuity layer for a one-person company,
+not a license unlock for the trusted core. Candidate paid capabilities are:
+
+- tested automatic upgrades with rollback;
+- scheduled encrypted backups and isolated recovery verification;
+- guided private-network access and device onboarding;
+- maintained advanced connectors and compatibility updates; and
+- priority installation, migration, and incident support.
+
+Founder Pro must not impose Agent, Work, execution, token, ledger, Artifact, History, export,
+restore, or approval limits on Community. Do not publish an experimental Founder Pro price until
+repeated demand and delivery cost are observed; keep internal price tests out of the public
+repository.
 
 ### Team / Business
 
@@ -77,17 +151,21 @@ not price by raw agent count, model tokens, or every execution: customers alread
 providers directly, and a low-value high-frequency job should not be punished more than a
 high-value low-frequency workflow.
 
+Team price experiments also remain internal until the repeated buyer and support boundary are
+real. The public repository should explain value and packaging without anchoring an unvalidated
+price range.
+
 ### Managed operations
 
 Offer managed deployment, encrypted backups, optional multi-machine coordination, monitoring,
 and update operations only after the operational and security burden can be carried honestly.
 This is a service commitment, not an early feature checkbox. Preserve local control and clear
 data residency boundaries; do not require customers to send raw operational or vertical data to
-a Quarterdeck cloud merely to use the core.
+an OpsWitness cloud merely to use the core.
 
 ## Product and repository boundaries
 
-- `quarterdeck` remains the Apache-2.0 platform core.
+- `opswitness` remains the Apache-2.0 platform core.
 - Private vertical workbenches, proprietary domain corpora, eval/rule update services, and
   customer-specific configuration live in separate repositories and packages.
 - Credentials, customer data, strategies, and private knowledge never enter the public core.

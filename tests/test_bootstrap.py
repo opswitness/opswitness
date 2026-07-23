@@ -6,14 +6,14 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from quarterdeck.bootstrap import (
+from opswitness.bootstrap import (
     GENERATED_NAME,
     USER_NAME,
     init_workspace,
     load_effective_schedules,
 )
-from quarterdeck.cli import app
-from quarterdeck.schedules import classify_schedule
+from opswitness.cli import app
+from opswitness.schedules import classify_schedule
 
 
 def _plist(dir_path, label, interval=None, calendar=None, keepalive=False):
@@ -166,19 +166,19 @@ def test_retired_config_is_rejected_with_migration_path(tmp_path):
     cfg = tmp_path / "conf"
     cfg.mkdir()
     (cfg / USER_NAME).write_text("retired: [old-job]\n")
-    with pytest.raises(ValueError, match="qd retire"):
+    with pytest.raises(ValueError, match="opswitness retire"):
         load_effective_schedules(cfg)
 
 
 def test_chmod_failure_leaves_no_temp_debris(tmp_path, monkeypatch):
     import pytest as _pytest
 
-    from quarterdeck.fsutil import atomic_write
+    from opswitness.fsutil import atomic_write
 
     def boom(fd, mode):
         raise OSError("fchmod denied")
 
-    monkeypatch.setattr("quarterdeck.fsutil.os.fchmod", boom)
+    monkeypatch.setattr("opswitness.fsutil.os.fchmod", boom)
     with _pytest.raises(OSError):
         atomic_write(tmp_path / "target.yaml", b"data", mode=0o600)
     assert not list(tmp_path.glob("*.qd-tmp"))  # exception path cleaned the temp
@@ -232,7 +232,7 @@ def test_no_launchagents_dir_yields_empty_candidates(tmp_path):
 
 def test_init_cli_end_to_end(real_machine_fixture, monkeypatch):
     tmp_path, la = real_machine_fixture
-    monkeypatch.setenv("QD_CONFIG_DIR", str(tmp_path / "conf"))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(tmp_path / "conf"))
     r = CliRunner().invoke(app, ["init", "--launchagents", str(la)])
     assert r.exit_code == 0
     assert "none enrolled automatically" in r.output

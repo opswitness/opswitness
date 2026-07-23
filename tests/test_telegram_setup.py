@@ -4,8 +4,8 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from quarterdeck.cli import app
-from quarterdeck.config import clear_telegram_credentials, save_telegram_credentials
+from opswitness.cli import app
+from opswitness.config import clear_telegram_credentials, save_telegram_credentials
 
 
 def test_save_telegram_credentials_merges_atomically_with_private_modes(tmp_path):
@@ -80,7 +80,7 @@ def test_save_telegram_credentials_rejects_symlinks_and_invalid_values(tmp_path)
 
 def test_telegram_configure_hides_values_and_does_not_use_argv(tmp_path, monkeypatch):
     root = tmp_path / "config"
-    monkeypatch.setenv("QD_CONFIG_DIR", str(root))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(root))
 
     result = CliRunner().invoke(
         app,
@@ -96,19 +96,19 @@ def test_telegram_configure_hides_values_and_does_not_use_argv(tmp_path, monkeyp
 
 def test_telegram_test_reports_send_result(tmp_path, monkeypatch):
     root = tmp_path / "config"
-    monkeypatch.setenv("QD_CONFIG_DIR", str(root))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(root))
     save_telegram_credentials("1:fixture", "12345", root=root)
     calls = []
 
     monkeypatch.setattr(
-        "quarterdeck.notify.telegram.send_telegram",
+        "opswitness.notify.telegram.send_telegram",
         lambda text, settings: calls.append((text, settings.telegram.chat_id)) or True,
     )
     sent = CliRunner().invoke(app, ["telegram", "test"])
     assert sent.exit_code == 0
-    assert calls == [("Quarterdeck Telegram delivery test", "12345")]
+    assert calls == [("OpsWitness Telegram delivery test", "12345")]
 
-    monkeypatch.setattr("quarterdeck.notify.telegram.send_telegram", lambda *args: False)
+    monkeypatch.setattr("opswitness.notify.telegram.send_telegram", lambda *args: False)
     failed = CliRunner().invoke(app, ["telegram", "test"])
     assert failed.exit_code == 1
     assert "failed" in failed.output

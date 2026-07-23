@@ -6,10 +6,10 @@ import time
 
 import psutil
 
-from quarterdeck.config import Settings
-from quarterdeck.ledger import Ledger
-from quarterdeck.process_tree import ProcessIdentity, signal_process_tree
-from quarterdeck.wrap.runner import run_wrapped
+from opswitness.config import Settings
+from opswitness.ledger import Ledger
+from opswitness.process_tree import ProcessIdentity, signal_process_tree
+from opswitness.wrap.runner import run_wrapped
 
 SK = "sk-" + "a1B2" * 8
 
@@ -32,8 +32,8 @@ def test_started_fsync_happens_before_spawn(tmp_path, monkeypatch):
             calls.append("popen")
             super().__init__(*args, **kwargs)
 
-    monkeypatch.setattr("quarterdeck.ledger.os.fsync", spy_fsync)
-    monkeypatch.setattr("quarterdeck.wrap.runner.subprocess.Popen", SpyPopen)
+    monkeypatch.setattr("opswitness.ledger.os.fsync", spy_fsync)
+    monkeypatch.setattr("opswitness.wrap.runner.subprocess.Popen", SpyPopen)
     assert run_wrapped("demo", ["true"], _settings(tmp_path)) == 0
     assert "popen" in calls and "fsync" in calls
     assert calls.index("fsync") < calls.index("popen"), calls
@@ -69,12 +69,12 @@ def test_child_killed_by_signal_recorded_as_killed(tmp_path):
 
 def test_sigterm_kills_whole_process_tree(tmp_path):
     pid_file = tmp_path / "grandchild.pid"
-    env = dict(os.environ, QD_LEDGER_DIR=str(tmp_path / "ledger"))
+    env = dict(os.environ, OPSWITNESS_LEDGER_DIR=str(tmp_path / "ledger"))
     wrapper = subprocess.Popen(
         [
             sys.executable,
             "-m",
-            "quarterdeck.cli",
+            "opswitness.cli",
             "wrap",
             "--job",
             "tree-demo",

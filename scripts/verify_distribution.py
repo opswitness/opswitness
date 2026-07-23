@@ -9,7 +9,10 @@ import sys
 import tarfile
 import tomllib
 import zipfile
+from email.parser import Parser
 from pathlib import Path, PurePosixPath
+
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
 
 class DistributionError(ValueError):
@@ -18,6 +21,8 @@ class DistributionError(ValueError):
 
 SDIST_ROOTS = {
     ".gitignore",
+    "CHANGELOG.md",
+    "CODE_OF_CONDUCT.md",
     "CONTRIBUTING.md",
     "LICENSE",
     "NOTICE",
@@ -33,15 +38,21 @@ SDIST_ROOTS = {
     "tests",
 }
 SDIST_REQUIRED = {
+    "CHANGELOG.md",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
     "LICENSE",
     "NOTICE",
     "README.md",
     "SECURITY.md",
+    "docs/KNOWN-LIMITATIONS.md",
+    "docs/QUICKSTART.md",
+    "docs/SUPPORT-MATRIX.md",
     "pyproject.toml",
     "examples/showcase/run.py",
-    "src/quarterdeck/__init__.py",
-    "src/quarterdeck/console/static/index.html",
-    "src/quarterdeck/templates/quant-fleet/launchd/com.quarterdeck.console.plist",
+    "src/opswitness/__init__.py",
+    "src/opswitness/console/static/index.html",
+    "src/opswitness/templates/quant-fleet/launchd/com.opswitness.console.plist",
 }
 FORBIDDEN_PARTS = {
     ".claude",
@@ -131,8 +142,9 @@ def verify_wheel(path: Path, *, pyproject: Path = Path("pyproject.toml")) -> Non
     required = {
         f"{package}/__init__.py",
         f"{package}/console/static/index.html",
-        f"{package}/templates/quant-fleet/launchd/com.quarterdeck.console.plist",
+        f"{package}/templates/quant-fleet/launchd/com.opswitness.console.plist",
         f"{dist_info}/METADATA",
+        f"{dist_info}/entry_points.txt",
         f"{dist_info}/licenses/LICENSE",
         f"{dist_info}/licenses/NOTICE",
     }
@@ -141,6 +153,8 @@ def verify_wheel(path: Path, *, pyproject: Path = Path("pyproject.toml")) -> Non
         archive = zipfile.ZipFile(path)
     except (OSError, zipfile.BadZipFile) as exc:
         raise DistributionError(f"cannot read wheel {path}") from exc
+    metadata_text = ""
+    entry_points_text = ""
     with archive:
         for info in archive.infolist():
             parts = _safe_parts(info.filename)
@@ -152,9 +166,40 @@ def verify_wheel(path: Path, *, pyproject: Path = Path("pyproject.toml")) -> Non
                 raise DistributionError(f"unexpected wheel root: {parts[0]}")
             if not info.is_dir():
                 files.add("/".join(parts))
+        metadata_name = f"{dist_info}/METADATA"
+        entry_points_name = f"{dist_info}/entry_points.txt"
+        if metadata_name in files:
+            metadata_text = archive.read(metadata_name).decode("utf-8")
+        if entry_points_name in files:
+            entry_points_text = archive.read(entry_points_name).decode("utf-8")
     missing = sorted(required - files)
     if missing:
         raise DistributionError("wheel is missing required files: " + ", ".join(missing))
+    metadata = Parser().parsestr(metadata_text)
+    if metadata.get("Name") != "opswitness":
+        raise DistributionError(f"wheel metadata has unexpected Name: {metadata.get('Name')}")
+    if metadata.get("Version") != version:
+        raise DistributionError(f"wheel metadata has unexpected Version: {metadata.get('Version')}")
+    requires_python = metadata.get("Requires-Python")
+    try:
+        parsed_requires_python = SpecifierSet(requires_python or "")
+    except InvalidSpecifier as exc:
+        raise DistributionError(
+            f"wheel metadata has invalid Requires-Python: {requires_python}"
+        ) from exc
+    if parsed_requires_python != SpecifierSet(">=3.12,<3.13"):
+        raise DistributionError(
+            f"wheel metadata has unexpected Requires-Python: {requires_python}"
+        )
+    expected_entries = {
+        "opswitness = opswitness.cli:app",
+        "qd = opswitness.cli:app",
+    }
+    entry_lines = {line.strip() for line in entry_points_text.splitlines() if " = " in line}
+    if entry_lines != expected_entries:
+        raise DistributionError(
+            "wheel console scripts do not match the primary and compatibility CLIs"
+        )
 
 
 def verify_directory(dist: Path) -> tuple[Path, Path]:

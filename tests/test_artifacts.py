@@ -1,23 +1,25 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 import respx
 from httpx import Response
 from typer.testing import CliRunner
 
-from quarterdeck.artifacts import (
+from opswitness.artifacts import (
     artifact_root,
     evaluate_artifact,
     register_artifact,
+    register_console_artifact,
     signoff_artifact,
     verify_registration,
 )
-from quarterdeck.cli import app
-from quarterdeck.digest import build_digest, render_markdown
-from quarterdeck.index import query_artifacts, rebuild
-from quarterdeck.ledger import Ledger
-from quarterdeck.paperclip import PaperclipClient
-from quarterdeck.projector import Projector, pending_events
+from opswitness.cli import app
+from opswitness.digest import build_digest, render_markdown
+from opswitness.index import query_artifacts, rebuild
+from opswitness.ledger import Ledger
+from opswitness.paperclip import PaperclipClient
+from opswitness.projector import Projector, pending_events
 
 BASE = "http://paperclip.test"
 
@@ -54,9 +56,7 @@ def test_cas_survives_source_overwrite_and_preserves_multiple_lineages(tmp_path)
         logical_name="report.txt",
         labels=["requires-signoff", "report"],
     )
-    second = register_artifact(
-        ledger, source, run_id="run-1", logical_name="report-copy.txt"
-    )
+    second = register_artifact(ledger, source, run_id="run-1", logical_name="report-copy.txt")
     assert first["event_id"] != second["event_id"]
     assert first["payload"]["sha256"] == second["payload"]["sha256"]
     source.write_text("overwritten source v2")
@@ -67,21 +67,55 @@ def test_cas_survives_source_overwrite_and_preserves_multiple_lineages(tmp_path)
     ]
 
 
+def test_console_artifact_registration_is_plan_bound_and_idempotent(tmp_path):
+    ledger = Ledger(tmp_path / "state" / "ledger")
+    source = tmp_path / "report.pdf"
+    source.write_bytes(b"synthetic pdf")
+
+    first = register_console_artifact(
+        ledger,
+        source,
+        plan_id="01KXRXK1BHC8RDEJGXNZNVGM3G",
+        logical_name="report.pdf",
+        labels=["console-output"],
+        paperclip_issue_id="issue-1",
+    )
+    repeated = register_console_artifact(
+        ledger,
+        source,
+        plan_id="01KXRXK1BHC8RDEJGXNZNVGM3G",
+        logical_name="report.pdf",
+        labels=["console-output"],
+        paperclip_issue_id="issue-1",
+    )
+
+    assert repeated["event_id"] == first["event_id"]
+    assert first["run_id"] == "01KXRXK1BHC8RDEJGXNZNVGM3G"
+    assert first["payload"]["plan_id"] == first["run_id"]
+    assert first["payload"]["job"] == f"console:{first['run_id']}"
+    assert first["payload"]["paperclip_issue_id"] == "issue-1"
+    assert verify_registration(ledger, first)["ok"] is True
+    assert (
+        len([event for event in ledger.read_all() if event["kind"] == "artifact_registered"]) == 1
+    )
+
+
 def test_cas_corruption_is_visible_and_cli_returns_nonzero(tmp_path, monkeypatch):
     config = tmp_path / "config"
     config.mkdir(mode=0o700)
-    monkeypatch.setenv("QD_CONFIG_DIR", str(config))
-    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "state" / "ledger"))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(config))
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(tmp_path / "state" / "ledger"))
     ledger = Ledger(tmp_path / "state" / "ledger")
     _seed_run(ledger)
     source = tmp_path / "artifact.bin"
     source.write_bytes(b"good bytes")
-    event = register_artifact(
-        ledger, source, run_id="run-1", logical_name="artifact.bin"
+    event = register_artifact(ledger, source, run_id="run-1", logical_name="artifact.bin")
+    cas = (
+        artifact_root(ledger)
+        / "sha256"
+        / event["payload"]["sha256"][:2]
+        / event["payload"]["sha256"]
     )
-    cas = artifact_root(ledger) / "sha256" / event["payload"]["sha256"][:2] / event[
-        "payload"
-    ]["sha256"]
     cas.write_bytes(b"corrupt")
     assert verify_registration(ledger, event)["ok"] is False
     result = CliRunner().invoke(app, ["artifacts", "verify", event["event_id"]])
@@ -92,8 +126,8 @@ def test_cas_corruption_is_visible_and_cli_returns_nonzero(tmp_path, monkeypatch
 def test_artifact_cli_register_list_show_eval_signoff(tmp_path, monkeypatch):
     config = tmp_path / "config"
     config.mkdir(mode=0o700)
-    monkeypatch.setenv("QD_CONFIG_DIR", str(config))
-    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "state" / "ledger"))
+    monkeypatch.setenv("OPSWITNESS_CONFIG_DIR", str(config))
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(tmp_path / "state" / "ledger"))
     ledger = Ledger(tmp_path / "state" / "ledger")
     _seed_run(ledger)
     source = tmp_path / "report.md"
@@ -171,6 +205,59 @@ def test_artifact_index_is_rebuilt_from_ledger(tmp_path):
     assert rows[0]["sha256"] == event["payload"]["sha256"]
 
 
+def test_artifact_index_excludes_erased_run_content(tmp_path):
+    ledger = Ledger(tmp_path / "state" / "ledger")
+    _seed_run(ledger)
+    source = tmp_path / "private.json"
+    source.write_text('{"private":true}')
+    event = register_artifact(
+        ledger,
+        source,
+        run_id="run-1",
+        logical_name="private.json",
+    )
+    evaluate_artifact(
+        ledger,
+        event["event_id"],
+        verdict="pass",
+        evaluator="schema",
+        summary="valid",
+    )
+    ledger.append(
+        "task_run_erased",
+        "run-1",
+        {
+            "schema_version": 1,
+            "source": "local_console",
+            "plan_sha256": "0" * 64,
+        },
+        fsync=True,
+    )
+
+    db = tmp_path / "index.db"
+    info = rebuild(db, ledger)
+    assert info["artifacts"] == 0
+    assert query_artifacts(db, run_id="run-1") == []
+
+
+def test_artifact_index_concurrent_rebuilds_publish_complete_databases(tmp_path):
+    ledger = Ledger(tmp_path / "state" / "ledger")
+    _seed_run(ledger)
+    source = tmp_path / "x.json"
+    source.write_text("{}")
+    event = register_artifact(ledger, source, run_id="run-1", logical_name="x.json")
+    db = tmp_path / "index.db"
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(lambda _: rebuild(db, ledger), range(32)))
+
+    assert {result["runs"] for result in results} == {1}
+    assert {result["artifacts"] for result in results} == {1}
+    rows = query_artifacts(db, run_id="run-1")
+    assert [row["event_id"] for row in rows] == [event["event_id"]]
+    assert not list(tmp_path.glob(".index.db.*.qd-index-tmp*"))
+
+
 def test_digest_separates_execution_and_outcome_evidence(tmp_path):
     ledger = Ledger(tmp_path / "state" / "ledger")
     _seed_run(ledger)
@@ -241,9 +328,7 @@ def test_artifact_projects_to_work_product_and_lost_ack_reconciles(tmp_path):
     _ack(ledger, *run_events)
     source = tmp_path / "report.txt"
     source.write_text("report")
-    artifact = register_artifact(
-        ledger, source, run_id="run-1", logical_name="report.txt"
-    )
+    artifact = register_artifact(ledger, source, run_id="run-1", logical_name="report.txt")
     evaluate_artifact(
         ledger,
         artifact["event_id"],
@@ -267,9 +352,7 @@ def test_artifact_projects_to_work_product_and_lost_ack_reconciles(tmp_path):
     created = respx.post(f"{BASE}/api/issues/issue-1/work-products").mock(
         return_value=Response(200, json={"id": "wp-1"})
     )
-    respx.get(f"{BASE}/api/issues/issue-1/comments").mock(
-        return_value=Response(200, json=[])
-    )
+    respx.get(f"{BASE}/api/issues/issue-1/comments").mock(return_value=Response(200, json=[]))
     comments = respx.post(f"{BASE}/api/issues/issue-1/comments").mock(
         return_value=Response(200, json={"id": "comment-1"})
     )
@@ -303,9 +386,7 @@ def test_artifact_projection_failure_stays_pending(tmp_path):
     _ack(ledger, *run_events)
     source = tmp_path / "report.txt"
     source.write_text("report")
-    artifact = register_artifact(
-        ledger, source, run_id="run-1", logical_name="report.txt"
-    )
+    artifact = register_artifact(ledger, source, run_id="run-1", logical_name="report.txt")
     evaluate_artifact(
         ledger,
         artifact["event_id"],
@@ -316,9 +397,7 @@ def test_artifact_projection_failure_stays_pending(tmp_path):
     respx.get(f"{BASE}/api/companies/company-1/issues").mock(
         return_value=Response(200, json=[{"id": "issue-1", "title": "[qd] artifact-job"}])
     )
-    respx.get(f"{BASE}/api/issues/issue-1/work-products").mock(
-        return_value=Response(200, json=[])
-    )
+    respx.get(f"{BASE}/api/issues/issue-1/work-products").mock(return_value=Response(200, json=[]))
     respx.post(f"{BASE}/api/issues/issue-1/work-products").mock(
         return_value=Response(500, text="down")
     )

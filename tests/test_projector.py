@@ -4,9 +4,10 @@ import os
 import respx
 from httpx import Response
 
-from quarterdeck.ledger import Ledger
-from quarterdeck.paperclip import PaperclipClient
-from quarterdeck.projector import Projector, pending_events, qd_metadata
+from opswitness.artifacts import register_console_artifact
+from opswitness.ledger import Ledger
+from opswitness.paperclip import PaperclipClient
+from opswitness.projector import Projector, pending_events, qd_metadata
 
 BASE = "http://pp.test"
 
@@ -82,6 +83,37 @@ def test_lost_ack_is_reconciled_without_repost(tmp_path):
 
 
 @respx.mock
+def test_console_artifact_projects_to_bound_work_issue(tmp_path):
+    led = Ledger(tmp_path / "ledger")
+    source = tmp_path / "report.pdf"
+    source.write_bytes(b"report")
+    event = register_console_artifact(
+        led,
+        source,
+        plan_id="01PLAN",
+        logical_name="report.pdf",
+        paperclip_issue_id="work-issue-1",
+    )
+    listed_issues = respx.get(f"{BASE}/api/companies/c1/issues").mock(
+        return_value=Response(200, json={"issues": []})
+    )
+    respx.get(f"{BASE}/api/issues/work-issue-1/work-products").mock(
+        return_value=Response(200, json={"workProducts": []})
+    )
+    posted = respx.post(f"{BASE}/api/issues/work-issue-1/work-products").mock(
+        return_value=Response(200, json={"id": "product-1"})
+    )
+
+    stats = Projector(led, _client(), tmp_path / "lease").drain()
+
+    assert stats["projected"] == 1
+    assert stats["pending_after"] == 0
+    assert listed_issues.call_count == 0
+    assert posted.call_count == 1
+    assert event["event_id"] in posted.calls[0].request.content.decode()
+
+
+@respx.mock
 def test_paperclip_down_leaves_events_pending(tmp_path):
     led = Ledger(tmp_path / "ledger")
     _seed_run(led)
@@ -112,11 +144,11 @@ def test_lease_excludes_second_projector(tmp_path):
 def test_index_and_cli_status(tmp_path, monkeypatch):
     from typer.testing import CliRunner
 
-    from quarterdeck.cli import app
-    from quarterdeck.config import Settings
-    from quarterdeck.index import job_summary, query_runs, rebuild
+    from opswitness.cli import app
+    from opswitness.config import Settings
+    from opswitness.index import job_summary, query_runs, rebuild
 
-    monkeypatch.setenv("QD_LEDGER_DIR", str(tmp_path / "ledger"))
+    monkeypatch.setenv("OPSWITNESS_LEDGER_DIR", str(tmp_path / "ledger"))
     led = Ledger(Settings().ledger_dir)
     _seed_run(led, job="feed-monitor")
 
