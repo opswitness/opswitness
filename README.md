@@ -8,22 +8,20 @@ release gates pass, the website will become the public product, download, instal
 surface. The complete OpsWitness console will continue to run locally on the operator's own Mac; it
 will not be presented as a hosted SaaS.
 
-> **Private Community Alpha release candidate.** The public product identity is **OpsWitness**.
-> The former Quarterdeck name remains only for explicit compatibility and immutable historical
-> evidence. The latest private validation of executable source passed at commit `3859493`, but an
-> approved host restart did not clear the macOS launchd interval-trigger fault: projector,
-> watchdog, and gate-recovery remain pended. No fresh 24-hour canary has started. Public
-> distribution is still blocked by a healthy real-host doctor, a passing canary, professional
-> confusing-similarity review, and final public-main approval with
-> `PUBLIC_RELEASE_APPROVED=true`.
+> **Community Alpha release candidate.** This source repository is public for review and feedback,
+> but no packaged release has been approved yet. OpsWitness is the public product identity. The
+> former Quarterdeck name remains only for compatibility with existing local installations and for
+> immutable historical evidence.
 
 **Turn one-off AI work into repeatable company operations.**
 
-OpsWitness is a local-first bridge that puts your *existing* scheduled scripts and headless
-coding agents (Claude Code, Codex) under a real control plane —
-[Paperclip](https://github.com/paperclipai/paperclip) — without rewriting any of them.
+OpsWitness is a local-first AI workbench for a one-person company. Describe a goal, review the
+proposed Agent team and workflow, confirm the exact plan, run it on your own Mac, and keep every
+version, result, approval, and piece of evidence together.
 
-## Product positioning
+It does not replace Claude, Codex, AionUi, Paperclip, or your existing automation. It gives those
+systems one simple operator-facing workflow while keeping execution adapters replaceable and
+evidence local.
 
 > **OpsWitness 帮助一人公司把一个想法自动变成可重复的 AI 团队流程，并通过一键运行、版本历史和可验证结果长期经营。**
 
@@ -71,10 +69,17 @@ hash-bound ledger events, while the memory body stays in local `0600` Markdown f
 CAS artifacts do not become memory merely because they exist. See
 [ADR-0008](docs/adr/0008-repeatable-work-and-auditable-workspace-memory.md).
 
-The product promise is deliberately narrower than "autonomous company": one simple local surface
-for planning, confirmation, live work visibility, approvals, evidence, and daily operational
-summaries -- without asking an operator to understand or routinely open the specialist systems
-behind it.
+## Current release status
+
+OpsWitness source is public, but the product is **not released yet**:
+
+- this repository is public for source review, issue reports, and release preparation;
+- the Community Alpha candidate is under review in
+  [Draft PR #1](https://github.com/opswitness/opswitness/pull/1);
+- no `v0.1.0-alpha.1` GitHub Release exists;
+- `opswitness.com` is reserved but not deployed;
+- runtime durability, a fresh 24-hour canary, professional confusing-similarity review, and final
+  release-asset validation remain open.
 
 The durable product goal and the simplicity tests for future features are recorded in
 [PRODUCT-VISION.md](docs/PRODUCT-VISION.md).
@@ -120,14 +125,17 @@ It adds the three things the platforms don't cover:
 | **`opswitness mail`** | Run one administrator-fixed Gmail query through pinned `gws`, returning only sender, subject, date, and message id. First-time setup privately imports a Google Desktop OAuth client, then binds Gmail readonly OAuth and model-metadata transmission to two explicit acknowledgements. Evidence contains counts and hashes, never mail fields, client secrets, or OAuth output. | AionUi supplies the model runtime and optional daily scheduler. OpsWitness revalidates the private Desktop client boundary, encrypted OAuth, live token, readonly scope, and explicit model-metadata consent; its isolated mail MCP exposes no fleet mutation, body, draft, send, delete, or runtime-query tool. |
 | **`opswitness soak`** | Freeze a canary/soak cadence contract, then derive a nonzero-until-proven verdict from elapsed time, every trigger gap, terminal/degraded evidence, schedule drift, torn lines, and projection backlog ([ADR-0006](docs/adr/0006-append-only-soak-gates.md)). | A Markdown timestamp or one manual success cannot enforce a rollout gate. Start/reset/checkpoint are append-only; status is always recomputed from raw evidence. |
 
-The reporting hierarchy stays a single-root acyclic tree. Iterative review is modeled separately as
-at most five collaboration loops; each loop may return to an earlier employee or to the same
-employee, carries an explicit return/stop condition, and is limited to 1-10 iterations. The console
-edits these rules graphically and binds them into the immutable plan hash. The current AionUi Team
-API has no verifiable round-limit control, so this is labeled a plan-level execution contract rather
-than a deterministic runtime cutoff.
+## Alpha candidate
 
-## Design rules
+The candidate being reviewed is centered on three ordinary surfaces:
+
+1. **Workspace** - describe an outcome and review the generated team and plan.
+2. **Work** - run, pause, resume, stop, rerun, fork, and inspect a repeatable process.
+3. **Settings** - connect local model providers and inspect advanced diagnostics when needed.
+
+The candidate includes immutable plan versions, execution history, readable results, approvals and
+operator input, content-addressed artifacts, append-only evidence, reusable templates, team
+blueprints, and approved Workspace memory.
 
 - **Wrap, don't rewrite.** Your launchd plists, cron lines, and `claude -p` invocations stay exactly as they are.
 - **Fail closed.** No decision means no. API unreachable means no. Expired means no.
@@ -180,7 +188,12 @@ than a deterministic runtime cutoff.
   separate, bounded, hash-bound contracts and must never be presented as stronger enforcement than
   the active execution adapter can prove.
 
-## Local operator console
+OpsWitness remains a single-operator, local-first Alpha. It does not claim autonomous business
+outcomes, hosted SaaS, multi-user identity, or stable durability. Regulated workflows must produce
+reviewable evidence packages for a qualified human decision-maker; OpsWitness is not the licensed
+professional and does not submit, pay, file, bind, or send on the operator's behalf by default.
+
+## Compatibility
 
 ```bash
 opswitness console serve --open
@@ -373,6 +386,19 @@ Start with [ARCHITECTURE.md](docs/ARCHITECTURE.md) — layer position, design la
 this layer is deliberately designed to shrink. Release gates live in
 [READINESS.md](docs/READINESS.md).
 
+The primary command and public package name are `opswitness`. Existing local installations may
+continue to use the compatibility command `qd`, legacy `QD_*` environment variables, legacy data
+directories, and legacy `com.quarterdeck.*` launchd labels. Historical ledger events, plan hashes,
+artifact hashes, and service evidence are never rewritten for branding.
+
+## Security
+
+Report suspected vulnerabilities through the repository's private vulnerability reporting
+channel. Do not include credentials, private task text, customer data, or exploit details in a
+public issue. CI scans the complete Git history with a pinned gitleaks release and fails closed when
+a finding is detected.
+
 ## License
 
-Apache-2.0. Contributions accepted under [DCO](CONTRIBUTING.md).
+Apache-2.0. Contributions are accepted under the
+[Developer Certificate of Origin](CONTRIBUTING.md).
