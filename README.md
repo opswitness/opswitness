@@ -1,19 +1,21 @@
 # OpsWitness
 
-Website: [opswitness.com](https://opswitness.com) ·
-[Community Alpha download](https://github.com/opswitness/opswitness/releases/tag/v0.1.0-alpha.1) ·
+Website source: [`site/`](site/) · Community Alpha prerelease: **not published yet** ·
 [Quickstart](docs/QUICKSTART.md) · [Support matrix](docs/SUPPORT-MATRIX.md)
 
-The website is a public product, download, installation, and feedback surface. The complete
-OpsWitness console continues to run locally on the operator's own Mac; it is not presented as a
-hosted SaaS.
+The reserved `opswitness.com` domain is not deployed yet, and no GitHub Release exists. When the
+release gates pass, the website will become the public product, download, installation, and feedback
+surface. The complete OpsWitness console will continue to run locally on the operator's own Mac; it
+will not be presented as a hosted SaaS.
 
-> **Community Alpha release candidate.** The source is being prepared as
-> `v0.1.0-alpha.1`. The exact private Actions artifact for commit `3bd2b0d` passed isolated install
-> and browser smoke and is now installed locally with rollback evidence. `alpha-rc-4` permanently
-> failed when macOS launchd pended its interval trigger during a staged OS update. Public
-> distribution is still blocked by a fresh post-reboot canary, professional brand review, and final
-> public-main approval with `PUBLIC_RELEASE_APPROVED=true`.
+> **Private Community Alpha release candidate.** The public product identity is **OpsWitness**.
+> The former Quarterdeck name remains only for explicit compatibility and immutable historical
+> evidence. The latest private validation of executable source passed at commit `3859493`, but an
+> approved host restart did not clear the macOS launchd interval-trigger fault: projector,
+> watchdog, and gate-recovery remain pended. No fresh 24-hour canary has started. Public
+> distribution is still blocked by a healthy real-host doctor, a passing canary, professional
+> confusing-similarity review, and final public-main approval with
+> `PUBLIC_RELEASE_APPROVED=true`.
 
 **Turn one-off AI work into repeatable company operations.**
 
@@ -348,13 +350,15 @@ The same contract, three verticals:
 
 Alpha. Built against Paperclip v2026.707. Not affiliated with Paperclip.
 
-The local P2 code path and M1 install-readiness tooling are test-complete. The verified private
-Release wheel is installed as the production `OpsWitness 0.1.0a1` RC; Paperclip, Postgres, and all
-five legacy-label launchd services are installed. The exact Actions artifact from commit `3bd2b0d`
-is installed, but its independent `alpha-rc-4` contract permanently failed after launchd received
-and pended the interval trigger without executing it while macOS 26.5.2 was staged for restart.
-`alpha-rc-1` through `alpha-rc-4`, and the earlier `m2-canary`, remain preserved as
-immutable failed evidence and are not cited as Alpha success.
+The local P2 code path and M1 install-readiness tooling are test-complete. A verified private
+Release wheel remains installed as the production `OpsWitness 0.1.0a1` RC; Paperclip, Postgres,
+the console, and all five legacy-label launchd services are installed. Private Release validation
+run [29968869522](https://github.com/opswitness/opswitness/actions/runs/29968869522) passed for
+executable-source commit `3859493`. After an approved restart, the host still reports macOS
+`26.5 (25F71)`, and the real-host doctor remains red because projector, watchdog, and gate-recovery
+interval triggers are pended without execution. No `alpha-rc-5` contract has started.
+`alpha-rc-1` through `alpha-rc-4`, and the earlier `m2-canary`, remain preserved as immutable
+failed evidence and are not cited as Alpha success.
 Feed-monitor and sox-monitor remain blocked until the later Stable gates in READINESS pass.
 Evidence: [ALPHA-RC-VALIDATION.md](docs/ALPHA-RC-VALIDATION.md).
 Mobile access is not part of the Alpha promise. Private HTTPS, device pairing, and PWA support

@@ -9,6 +9,11 @@ operator. Domain registration is independently visible through Verisign RDAP wit
 registration date. Reservation establishes control of identifiers only; it does not create a
 trademark right or prove freedom to operate.
 
+The private repository's default `main` branch still displayed the former README after the source
+migration because the Alpha release branch had not been merged. The default page must say
+OpsWitness before public visibility. Correcting that README is a branding repair only: it does not
+close runtime, canary, legal-review, repository-publication, or Release approval gates.
+
 ## Why the former name was rejected
 
 The former working name, Quarterdeck, has active software usage and an active US class-42 software
@@ -47,8 +52,10 @@ complete; all other items remain live gates until evidence says otherwise:
    checks on `main`;
 6. run the release workflow in validation mode against the private remote, where it builds and
    verifies the distributions without publication credentials — **complete**; evidence:
-   exact-source run
-   [29927606948](https://github.com/opswitness/opswitness/actions/runs/29927606948) and
+   latest executable-source run
+   [29968869522](https://github.com/opswitness/opswitness/actions/runs/29968869522), prior
+   exact-installed-artifact run
+   [29927606948](https://github.com/opswitness/opswitness/actions/runs/29927606948), and
    [ALPHA-RC-VALIDATION.md](ALPHA-RC-VALIDATION.md);
 7. make the repository public, or separately verify GitHub Enterprise Cloud attestation support,
    before creating the approved public tag;

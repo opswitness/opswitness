@@ -1,5 +1,30 @@
 # OpsWitness Readiness
 
+## Post-restart host and product-identity audit (2026-07-22)
+
+The public product identity is **OpsWitness**. The former Quarterdeck name remains only in
+documented compatibility surfaces and immutable historical evidence. GitHub's default branch still
+showed the former README because private `main` preceded the Alpha migration; that default-branch
+branding must be corrected independently and must not be treated as permission to merge or publish
+the unreleased Alpha runtime.
+
+Private Release validation run
+[29968869522](https://github.com/opswitness/opswitness/actions/runs/29968869522) passed for
+executable-source commit `38594931ee1607cd621c9356816fa5189ca2c0a7`. The documentation correction
+that records this audit still requires its own PR checks and does not inherit that commit's release
+evidence.
+
+The operator approved a host restart. After restart, macOS reports `26.5 (25F71)`. The real-host
+doctor passes configuration, dependency, credential boundary, backups, templates, installed
+services, Paperclip, Postgres, console, ports, and single-instance checks. It remains unhealthy
+because projector, watchdog, and gate-recovery each report
+`launchd trigger is pending without execution: reason=interval runs=1`. The restart therefore did
+not close the scheduler blocker. No `alpha-rc-5` contract has started, and no new canary may be
+cited until repeated automatic interval probes and the real-host doctor are green.
+
+All earlier exact-build, migration, and failed-canary sections below remain historical evidence as
+written. They are not rewritten to make the current source or host appear validated.
+
 ## Static public website source update (2026-07-22)
 
 The repository now contains a static `opswitness.com` source with real synthetic-data product
@@ -12,9 +37,9 @@ This is release-surface work only and does not change the OpsWitness runtime. It
 of the exact commit that passes PR CI and public-main release validation. The site must not be
 opened for downloads until the inspected prerelease and final blank-install smoke exist. Current
 host `doctor` remains red because projector, watchdog, and gate-recovery interval triggers are
-pending without execution. `alpha-rc-3` and `alpha-rc-4` remain immutable failures. The next
-contract is `alpha-rc-5`, and it may start only after the staged macOS update/restart and repeated
-automatic interval probes pass.
+pending without execution. `alpha-rc-3` and `alpha-rc-4` remain immutable failures. The approved
+restart did not clear the fault; the next contract is `alpha-rc-5`, and it may start only after
+repeated automatic interval probes pass and the real-host doctor is green.
 
 ## Exact Actions RC and `alpha-rc-4` failure update (2026-07-22)
 
@@ -49,9 +74,10 @@ authoritative verdict was permanently failed: one start, one success, zero task 
 projection backlog, and a 1,647.999-second cadence gap against the frozen 1,200-second allowance.
 A harmless 10-second `/usr/bin/true` probe reproduced `runs=0` with
 `pended nondemand spawn = interval`, proving this was not the wrapped command or canary plist.
-macOS 26.5.2 is staged and requires restart; a fresh contract must not start until the update and
-reboot complete and repeated automatic interval probes pass. `alpha-rc-1` through `alpha-rc-4`
-and `m2-canary` remain permanent failed records.
+The later approved restart left the host on macOS `26.5 (25F71)` and did not clear the pended
+interval state; a fresh contract must not start until repeated automatic interval probes pass and
+the real-host doctor is green. `alpha-rc-1` through `alpha-rc-4` and `m2-canary` remain permanent
+failed records.
 
 This update changes the doctor runtime check but does not change any prior contract, ledger, or CAS
 object. Public Alpha remains blocked by a rebuilt exact artifact, a fresh post-reboot 24-hour
@@ -330,12 +356,12 @@ blocked by the current open gates below.
   authored task content, backend state, plan hashes, and ledger evidence remain untouched. Frontend
   unit coverage fixes English as the invalid-or-absent fallback and verifies both localized member
   observations and task-adjustment drafts.
-- Quarterdeck is now the sole ordinary operator surface. The Connections view probes the real
+- OpsWitness is now the sole ordinary operator surface. The Connections view probes the real
   local ChatGPT/OpenAI and Claude login state and launches fixed vendor-owned login flows. Claude
   exposes local subscription (`--claudeai`), Console API billing (`--console`), and explicit API Key
   paths; the subscription path is only for the operator's own local single-user session. Anthropic
   keys require an explicit persistence confirmation, are validated with `GET /v1/models`, enter
-  macOS Keychain through stdin, and are read by Claude through a Quarterdeck-owned `apiKeyHelper`.
+  macOS Keychain through stdin, and are read by Claude through an OpsWitness-owned `apiKeyHelper`.
   OpenAI retains a CSRF-protected, one-time stdin handoff to the fixed Codex CLI. Neither path
   returns, logs, or records a raw key in the ledger. Planning automatically selects a ready provider
   and starts the hidden AI adapter when needed. The new Approval view lists redacted pending calls
@@ -434,7 +460,7 @@ blocked by the current open gates below.
   changes to the more restrictive mode. Fake-service, request-snapshot, crash-recovery, CSRF, and
   API validation tests pass; source validation did not change the policy of a live task.
 - Manual approvals now render in the same Work attention slot as runtime operator questions.
-  Quarterdeck accepts the inline binding only for its exact Aion approval source and an existing
+  OpsWitness accepts the inline binding only for its exact Aion approval source and an existing
   local `plan_id`; unrelated or malformed global approvals cannot appear under another task.
   Approve/reject, optional note, and explicit review acknowledgement happen without navigation.
   After a manual `qd_request_input` allow-once decision, the resulting suggested-answer panel

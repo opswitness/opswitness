@@ -1,5 +1,16 @@
 # OpsWitness Completion Audit
 
+Post-restart and product-identity audit, 2026-07-22: **OpsWitness** is the only public product
+identity. Quarterdeck remains solely in documented compatibility surfaces and immutable historical
+records. Private Release validation run
+[29968869522](https://github.com/opswitness/opswitness/actions/runs/29968869522) passed for
+executable-source commit `38594931ee1607cd621c9356816fa5189ca2c0a7`; this documentation correction
+must still pass its own PR checks and does not inherit that commit's release evidence. After the
+operator-approved restart, macOS reports `26.5 (25F71)`. A real-host doctor check passes every
+current check except the projector, watchdog, and gate-recovery runtime checks, which remain pended
+without interval execution. No `alpha-rc-5` exists. Public Alpha remains blocked, and all prior
+failed canaries remain immutable evidence.
+
 Exact Actions RC update, 2026-07-22: private Release validation run
 [29927606948](https://github.com/opswitness/opswitness/actions/runs/29927606948) passed all
 preflight, Ubuntu/macOS quality, DCO, full-history gitleaks, and build jobs for clean commit
@@ -15,10 +26,11 @@ on that state.
 The artifact's append-only canary `alpha-rc-4`, event
 `01KY53ZFJZCQWHS6FC60XRB4Y5`, starting `2026-07-22T14:34:21.145132+00:00`, permanently failed its
 frozen cadence contract after one successful run. launchd received the next interval trigger but
-pended it without execution while macOS 26.5.2 was staged for restart. A separate 10-second
+pended it without execution while a macOS update was staged for restart. A separate 10-second
 `/usr/bin/true` probe reproduced the same condition. `alpha-rc-1` through `alpha-rc-4` and
-`m2-canary` are immutable failed evidence. Public Alpha is not yet approved: a rebuilt exact
-artifact and passing post-reboot canary, professional brand review, private merge/public-main
+`m2-canary` are immutable failed evidence. The later restart did not clear the interval-trigger
+fault. Public Alpha is not yet approved: a rebuilt exact artifact and passing canary, professional
+brand review, private merge/public-main
 security sequence, exact tag,
 asset/attestation inspection, and final blank-install smoke remain open.
 
@@ -94,7 +106,7 @@ snapshot.
 |---|---|---|
 | M0 trusted baseline | Process-tree supervisor, shared schedule classification, append-only lifecycle, full tests | Complete |
 | M1 install and recovery tooling | Doctor, secure service exec, encrypted backup/isolated restore, five secret-free launchd templates | Complete in source |
-| M2 permanent install and soak | Exact Actions wheel from `3bd2b0d` is installed; Postgres/Paperclip/services run OpsWitness `0.1.0a1`; failed `alpha-rc-1` through `alpha-rc-4` and `m2-canary` are retained | Blocked: install the staged macOS update, reboot, prove automatic intervals, rebuild the exact RC, then run a fresh 24-hour canary |
+| M2 permanent install and soak | Exact Actions wheel from `3bd2b0d` is installed; Postgres/Paperclip/services run OpsWitness `0.1.0a1`; failed `alpha-rc-1` through `alpha-rc-4` and `m2-canary` are retained | Blocked: the approved restart did not clear pended interval triggers; prove automatic intervals and a green real-host doctor, rebuild the exact RC, then run a fresh 24-hour canary |
 | M3 Claude gate | Two live defer/approval/resume/consume drills and 60-second recovery service | Complete for non-interactive `qd gated-claude` only |
 | M4 artifact/eval/signoff | Atomic CAS, ledger authority, live projection/reconciliation and restore evidence | Complete |
 | M5 Community Alpha | Private remote/PR CI, exact-source private Release validation, verified assets, blank install, production RC migration, and browser smoke pass; `alpha-rc-4` failed its cadence gate | Release candidate: blocked by a fresh post-reboot artifact/canary, professional review, and public-main release gates; mobile remains unpromoted Beta |
@@ -149,7 +161,7 @@ resulting `qd_request_input` question replaces the approval in the same slot wit
 answers. The global Approval view remains available as a cross-task queue and recovery surface.
 
 2026-07-15 run-control update: active Aion team work now exposes Pause and explicitly confirmed Stop;
-paused work exposes Continue. Quarterdeck records every request before the side effect, resumes only
+paused work exposes Continue. OpsWitness records every request before the side effect, resumes only
 the same immutable plan/hash with a fixed marker, and keeps pause/cancel in requested states until
 Aion confirms the outcome. A cancel RPC acknowledgement alone is not treated as process termination.
 Partial outputs and evidence survive cancellation but remain unverified. Workflow controls are hidden.
@@ -164,7 +176,7 @@ hash/provenance metadata, and returns to Workspace review. Manual approval remai
 cannot dispatch until the new hash is explicitly confirmed.
 
 2026-07-15 approval-identity repair: Paperclip v2026.707.0 rejects approve/reject calls made with a
-service-agent bearer because those routes require a board actor. Quarterdeck now keeps that bearer
+service-agent bearer because those routes require a board actor. OpsWitness now keeps that bearer
 for ordinary reads and projections, but uses Paperclip's implicit local board only after proving the
 exact API base is loopback and health reports `local_trusted`. Live acceptance reconciled the
 operator's existing allow-once intent exactly once; the next distinct tool request remains pending.

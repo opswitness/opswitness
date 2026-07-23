@@ -1,6 +1,23 @@
 # OpsWitness Alpha RC Validation
 
-Snapshot: 2026-07-22 08:02 PDT
+Snapshot refreshed: 2026-07-22 America/Los_Angeles
+
+## Post-restart observation
+
+Private Release validation run
+[29968869522](https://github.com/opswitness/opswitness/actions/runs/29968869522) passed for
+executable-source commit `38594931ee1607cd621c9356816fa5189ca2c0a7`. This is build validation only;
+it is not a public-release approval and does not replace the exact-artifact history below.
+
+The operator approved a host restart. After restart, macOS reports `26.5 (25F71)`. A real-host
+doctor check passes every current check except projector, watchdog, and gate-recovery, whose
+interval triggers remain pended without execution. The restart did not close the host scheduler
+fault. No `alpha-rc-5` contract has started. A new canary remains prohibited until repeated
+automatic interval probes pass and the real-host doctor is green.
+
+The failed `alpha-rc-1` through `alpha-rc-4` contracts and `m2-canary` remain immutable. The
+historical exact-source, asset hashes, rollback paths, and failure observations below are preserved
+without reinterpretation.
 
 This record covers the private build validations, rollback-safe production migrations, immutable
 failed canary chain, including the exact-artifact `alpha-rc-4` contract for
