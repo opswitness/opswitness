@@ -52,6 +52,13 @@ continue to use the compatibility command `qd`, legacy `QD_*` environment variab
 directories, and legacy `com.quarterdeck.*` launchd labels. Historical ledger events, plan hashes,
 artifact hashes, and service evidence are never rewritten for branding.
 
+## Security
+
+Report suspected vulnerabilities through the repository's private vulnerability reporting
+channel. Do not include credentials, private task text, customer data, or exploit details in a
+public issue. CI scans the complete Git history with a pinned gitleaks release and fails closed when
+a finding is detected.
+
 ## License
 
 Apache-2.0. Contributions are accepted under the
