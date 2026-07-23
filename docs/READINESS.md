@@ -1,5 +1,21 @@
 # OpsWitness Readiness
 
+## Static public website source update (2026-07-22)
+
+The repository now contains a static `opswitness.com` source with real synthetic-data product
+screens, Community Alpha boundaries, GitHub Release installation, public issue routes, and GitHub
+Private Vulnerability Reporting. The site explicitly states that the full console remains on the
+operator's Mac and is not a hosted SaaS. Its Pages workflow uses pinned GitHub-owned actions and is
+gated by `PUBLIC_SITE_APPROVED=true`, so it cannot deploy during the private RC stage.
+
+This is release-surface work only and does not change the OpsWitness runtime. It must still be part
+of the exact commit that passes PR CI and public-main release validation. The site must not be
+opened for downloads until the inspected prerelease and final blank-install smoke exist. Current
+host `doctor` remains red because projector, watchdog, and gate-recovery interval triggers are
+pending without execution. `alpha-rc-3` and `alpha-rc-4` remain immutable failures. The next
+contract is `alpha-rc-5`, and it may start only after the staged macOS update/restart and repeated
+automatic interval probes pass.
+
 ## Exact Actions RC and `alpha-rc-4` failure update (2026-07-22)
 
 Private Release validation run

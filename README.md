@@ -1,5 +1,13 @@
 # OpsWitness
 
+Website: [opswitness.com](https://opswitness.com) ·
+[Community Alpha download](https://github.com/opswitness/opswitness/releases/tag/v0.1.0-alpha.1) ·
+[Quickstart](docs/QUICKSTART.md) · [Support matrix](docs/SUPPORT-MATRIX.md)
+
+The website is a public product, download, installation, and feedback surface. The complete
+OpsWitness console continues to run locally on the operator's own Mac; it is not presented as a
+hosted SaaS.
+
 > **Community Alpha release candidate.** The source is being prepared as
 > `v0.1.0-alpha.1`. The exact private Actions artifact for commit `3bd2b0d` passed isolated install
 > and browser smoke and is now installed locally with rollback evidence. `alpha-rc-4` permanently
