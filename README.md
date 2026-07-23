@@ -1,6 +1,7 @@
 # OpsWitness
 
-> **Private Community Alpha release candidate.** OpsWitness is the public product identity. The
+> **Community Alpha release candidate.** This source repository is public for review and feedback,
+> but no packaged release has been approved yet. OpsWitness is the public product identity. The
 > former Quarterdeck name remains only for compatibility with existing local installations and for
 > immutable historical evidence.
 
@@ -16,17 +17,17 @@ evidence local.
 
 ## Current release status
 
-OpsWitness is **not publicly released yet**:
+OpsWitness source is public, but the product is **not released yet**:
 
-- this repository remains private;
+- this repository is public for source review, issue reports, and release preparation;
 - the Community Alpha candidate is under review in
   [Draft PR #1](https://github.com/opswitness/opswitness/pull/1);
 - no `v0.1.0-alpha.1` GitHub Release exists;
 - `opswitness.com` is reserved but not deployed;
 - runtime durability, a fresh 24-hour canary, professional confusing-similarity review, and final
-  public-repository security gates remain open.
+  release-asset validation remain open.
 
-This README-only branding correction does not merge the Alpha runtime or close any release gate.
+Making the source visible does not merge the Alpha runtime or close any release gate.
 
 ## Alpha candidate
 
