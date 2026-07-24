@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a reproducible OpsWitness Community Alpha problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not paste secrets, ledger contents, customer data, raw prompts, or real task output.
+  - type: input
+    id: version
+    attributes:
+      label: OpsWitness version
+      placeholder: 0.1.0a1
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS 14+
+        - Linux CI-tested core
+        - Other or unsupported
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Include the expected behavior and the smallest reproducible sequence.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Redacted evidence
+      description: Include safe status/error text only; remove paths, IDs, credentials, and task data.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed secrets, personal data, ledger content, and real customer/task output.
+          required: true
+        - label: This is not a security vulnerability; I will use private vulnerability reporting for those.
+          required: true
