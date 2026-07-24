@@ -20,10 +20,10 @@ evidence local.
 OpsWitness source is public, but the product is **not released yet**:
 
 - this repository is public for source review, issue reports, and release preparation;
+- the public product preview is available at [opswitness.com](https://opswitness.com);
 - the Community Alpha candidate is under review in
   [Draft PR #1](https://github.com/opswitness/opswitness/pull/1);
 - no `v0.1.0-alpha.1` GitHub Release exists;
-- `opswitness.com` is reserved but not deployed;
 - runtime durability, a fresh 24-hour canary, professional confusing-similarity review, and final
   release-asset validation remain open.
 

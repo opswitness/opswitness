@@ -1,0 +1,59 @@
+name: Alpha experience report
+description: Tell us whether OpsWitness made repeatable one-person-company work easier
+title: "[Alpha experience]: "
+labels: [feedback, alpha]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing the Community Alpha. Do not include credentials, customer data, private prompts, or private output content.
+  - type: dropdown
+    id: workflow
+    attributes:
+      label: Work you tested
+      options:
+        - Automation exception check
+        - Weekly business review
+        - Research and decision report
+        - Professional evidence-pack template
+        - Another repeatable Work
+    validations:
+      required: true
+  - type: input
+    id: first_value
+    attributes:
+      label: Time to first useful Work
+      description: Approximately how many minutes passed from install to a useful reviewed plan or run?
+      placeholder: "For example: 8 minutes"
+    validations:
+      required: true
+  - type: textarea
+    id: intuitive
+    attributes:
+      label: What felt intuitive?
+      description: Tell us what worked without explanation, especially planning, confirmation, Results, History, or Run again.
+    validations:
+      required: true
+  - type: textarea
+    id: blocked
+    attributes:
+      label: Where did you get stuck?
+      description: Include the visible status and safe reproduction steps, but no private task data.
+    validations:
+      required: true
+  - type: textarea
+    id: repeat
+    attributes:
+      label: Would you run this Work again?
+      description: Explain what would make this a recurring part of your business.
+    validations:
+      required: true
+  - type: checkboxes
+    id: trust
+    attributes:
+      label: Trust boundary
+      options:
+        - label: I did not include secrets, customer data, private prompts, or private output content.
+          required: true
+        - label: I understand that Alpha execution evidence does not prove the business outcome is correct.
+          required: true
