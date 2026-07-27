@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="OpsWitness turns recurring AI work into reviewed team workflows with history, evidence, and one-click reruns on your own Mac. Explore the public Community Alpha preview."
+      content="OpsWitness turns recurring AI work into a reviewed team workflow with history, evidence, and one-click reruns on your own Mac."
     />
     <meta name="theme-color" content="#14231e" />
     <meta property="og:title" content="OpsWitness - Repeatable AI work for a one-person company" />
     <meta
       property="og:description"
-      content="Plan the team, confirm the workflow, run it again with evidence. Explore the local-first Community Alpha preview for macOS."
+      content="Plan the team, confirm the workflow, run it again with evidence. Local-first Community Alpha for macOS."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://opswitness.com/" />
@@ -27,12 +27,12 @@
       <a class="brand" href="#top" aria-label="OpsWitness home">
         <img src="assets/opswitness-192.png" alt="" width="34" height="34" />
         <span>OpsWitness</span>
-        <span class="alpha-label">Alpha Preview</span>
+        <span class="alpha-label">Community Alpha</span>
       </a>
       <nav aria-label="Primary navigation">
         <a href="#workflow">How it works</a>
         <a href="#boundaries">Support</a>
-        <a href="#availability">Availability</a>
+        <a href="#install">Install</a>
         <a href="#feedback">Feedback</a>
       </nav>
       <a class="header-action" href="https://github.com/opswitness/opswitness">GitHub</a>
@@ -51,38 +51,22 @@
           <div class="hero-actions">
             <a
               class="button button-primary"
-              href="https://github.com/opswitness/opswitness"
+              href="https://github.com/opswitness/opswitness/releases/download/v0.1.0-alpha.1/OpsWitness-0.1.0-alpha.1-macos-arm64.dmg"
             >
-              View the public source
+              Download Alpha
             </a>
             <a class="button button-secondary" href="#workflow">See how it works</a>
           </div>
-          <p class="hero-note">macOS 14+ candidate / Python 3.12 / Apache-2.0 / package validation in progress</p>
+          <p class="hero-note">macOS 14+ / Apple Silicon / Ad-hoc signed / Not notarized</p>
         </div>
       </section>
 
       <section class="signal-band" aria-label="Product boundary">
         <p>
-          <strong>Your work stays local.</strong> OpsWitness is a local Mac application, not a
-          hosted SaaS. This public website contains product information, source, release status,
-          and feedback links only.
+          <strong>Your work stays local.</strong> OpsWitness is a downloadable Mac application,
+          not a hosted SaaS. The public website contains product information, downloads, and
+          feedback links only.
         </p>
-      </section>
-
-      <section class="release-status" aria-labelledby="release-status-title">
-        <div>
-          <p class="eyebrow">CURRENT AVAILABILITY</p>
-          <h2 id="release-status-title">The public preview is open. The install package is not posted yet.</h2>
-        </div>
-        <p>
-          The Community Alpha release candidate is still completing its reproducibility and
-          durability checks. You can inspect the source and product today. A verified wheel,
-          checksums, SBOM, and attestation will appear together on GitHub Releases when the gate
-          passes.
-        </p>
-        <a class="button button-secondary" href="https://github.com/opswitness/opswitness/releases">
-          Check release status
-        </a>
       </section>
 
       <section class="section" id="workflow" aria-labelledby="workflow-title">
@@ -179,8 +163,8 @@
             <p>Prepare a proven team and workflow in one click, then review before dispatch.</p>
           </article>
           <article>
-            <h3>Reviewed memory</h3>
-            <p>Agents propose lessons; only approved, versioned memory can affect new planning.</p>
+            <h3>Auditable memory</h3>
+            <p>Agents may propose lessons; only approved, versioned memory affects new planning.</p>
           </article>
         </div>
       </section>
@@ -192,13 +176,13 @@
         </div>
         <div class="boundary-columns">
           <div>
-            <h3>Included in the Alpha candidate</h3>
+            <h3>Included in Community Alpha</h3>
             <ul class="check-list">
               <li>Local single-operator Workspace and Work UI</li>
               <li>Plan review, immutable revisions, rerun, and fork</li>
               <li>Team execution with input and approval checkpoints</li>
               <li>Pause, continue, stop, History, Results, ledger, and CAS</li>
-              <li>Built-in repeatable-work templates and reviewed Workspace Memory</li>
+              <li>Built-in repeatable-work templates and approved Workspace Memory</li>
             </ul>
           </div>
           <div>
@@ -209,77 +193,75 @@
               <li>OpenClaw, Work-calling-Work, or silent autonomous learning</li>
               <li>Tax filing, customs filing, insurance advice, or other licensed decisions</li>
               <li>DeepSeek or Grok execution adapters</li>
-              <li>A downloadable package before the release evidence gate passes</li>
             </ul>
           </div>
         </div>
         <div class="boundary-links">
-          <a href="https://github.com/opswitness/opswitness/blob/codex/opswitness-public-site/docs/SUPPORT-MATRIX.md">Full support matrix</a>
-          <a href="https://github.com/opswitness/opswitness/blob/codex/opswitness-public-site/docs/KNOWN-LIMITATIONS.md">Known limitations</a>
+          <a href="https://github.com/opswitness/opswitness/blob/main/docs/SUPPORT-MATRIX.md">Full support matrix</a>
+          <a href="https://github.com/opswitness/opswitness/blob/main/docs/KNOWN-LIMITATIONS.md">Known limitations</a>
           <a href="https://github.com/opswitness/opswitness/blob/main/SECURITY.md">Security policy</a>
         </div>
       </section>
 
-      <section class="section install-section" id="availability" aria-labelledby="install-title">
+      <section class="section install-section" id="install" aria-labelledby="install-title">
         <div class="section-heading">
-          <p class="eyebrow">COMMUNITY ALPHA AVAILABILITY</p>
-          <h2 id="install-title">One verified package, when the evidence is ready.</h2>
+          <p class="eyebrow">INSTALL ON YOUR MAC</p>
+          <h2 id="install-title">Drag to Applications. Run your first Work.</h2>
           <p>
-            OpsWitness will be distributed through a GitHub prerelease, not PyPI. Until that
-            prerelease exists, this page will not offer an unverified download.
+            Community Alpha is distributed as an ad-hoc signed Apple Silicon Mac App through
+            GitHub Prerelease. It is not notarized, so macOS may require right-clicking the App
+            and choosing Open on first launch.
           </p>
         </div>
         <div class="install-layout">
           <div class="install-copy">
-            <h3>What the release will include</h3>
-            <ul class="release-list">
-              <li>Python wheel and source archive built from the tagged commit</li>
-              <li>SHA-256 checksums and a machine-readable build manifest</li>
-              <li>SPDX software bill of materials and GitHub attestation</li>
-              <li>A blank-install smoke test before the download link goes live</li>
-            </ul>
+            <ol>
+              <li>Download the DMG and verify its checksum.</li>
+              <li>Drag <strong>OpsWitness</strong> into Applications.</li>
+              <li>Open it and sign in to Codex with your own account.</li>
+              <li>Turn a fictional customer inquiry into a reviewed reply draft.</li>
+            </ol>
             <p>
-              The first package targets macOS 14+ with Python 3.12. Start with synthetic or
-              non-critical work; durability remains experimental in Alpha.
+              Python, Node, PostgreSQL, Paperclip, AionCore, Codex CLI, and managed runtime
+              components are included. Start with the built-in customer example, which has no
+              delivery step.
             </p>
           </div>
-          <div class="release-panel" aria-label="Community Alpha release status">
-            <span class="status-dot" aria-hidden="true"></span>
-            <div>
-              <strong>Release candidate validation in progress</strong>
-              <p>
-                The download button will appear only after the exact public build passes the
-                release checks. No email signup or hosted account is required.
-              </p>
-            </div>
+          <div class="install-command" aria-label="First use summary">
+            <strong>One download. No dependency setup.</strong>
+            <p>macOS 14 or newer · Apple Silicon · 5 GB free during setup</p>
+            <p>Your App data and evidence stay on your Mac.</p>
           </div>
         </div>
         <div class="install-actions">
-          <a class="button button-primary" href="https://github.com/opswitness/opswitness/releases">Check GitHub Releases</a>
-          <a class="button button-secondary" href="https://github.com/opswitness/opswitness">Inspect the source</a>
+          <a class="button button-primary" href="https://github.com/opswitness/opswitness/releases/download/v0.1.0-alpha.1/OpsWitness-0.1.0-alpha.1-macos-arm64.dmg">Download Alpha</a>
+          <a class="button button-secondary" href="https://github.com/opswitness/opswitness/blob/main/docs/QUICKSTART.md">Read the full guide</a>
+        </div>
+        <div class="boundary-links">
+          <a href="https://github.com/opswitness/opswitness/releases/download/v0.1.0-alpha.1/SHA256SUMS">Checksums</a>
+          <a href="https://github.com/opswitness/opswitness/releases/tag/v0.1.0-alpha.1">Release notes</a>
         </div>
       </section>
 
       <section class="section feedback-section" id="feedback" aria-labelledby="feedback-title">
         <div class="section-heading">
           <p class="eyebrow">HELP SHAPE THE ALPHA</p>
-          <h2 id="feedback-title">Tell us which repeatable process should be easiest first.</h2>
+          <h2 id="feedback-title">Try one repeatable process and tell us where it gets in the way.</h2>
           <p>
-            Before the package is posted, you can review the screens and source or request a
-            workflow. After release, the most useful reports describe the goal, point of friction,
-            and whether plan, history, and final result were easy to find.
+            The most useful feedback describes the goal, the point of friction, what you expected,
+            and whether you could find the plan, history, and final result without explanation.
           </p>
         </div>
         <div class="feedback-actions">
-          <a class="feedback-link" href="https://github.com/opswitness/opswitness/issues/new?title=%5BAlpha%20experience%5D%20">
+          <a class="feedback-link" href="https://github.com/opswitness/opswitness/issues/new?template=alpha_experience.yml">
             <strong>Share Alpha experience</strong>
             <span>Onboarding and workflow feedback</span>
           </a>
-          <a class="feedback-link" href="https://github.com/opswitness/opswitness/issues/new?title=%5BFeature%20request%5D%20">
+          <a class="feedback-link" href="https://github.com/opswitness/opswitness/issues/new?template=feature_request.yml">
             <strong>Request a feature</strong>
             <span>Repeatable work that is missing</span>
           </a>
-          <a class="feedback-link" href="https://github.com/opswitness/opswitness/issues/new?title=%5BBug%5D%20">
+          <a class="feedback-link" href="https://github.com/opswitness/opswitness/issues/new?template=bug_report.yml">
             <strong>Report a bug</strong>
             <span>Unexpected behavior with reproduction steps</span>
           </a>
@@ -299,14 +281,14 @@
       <div class="footer-links">
         <a href="https://github.com/opswitness/opswitness">GitHub</a>
         <a href="https://github.com/opswitness/opswitness/blob/main/LICENSE">Apache-2.0</a>
-        <a href="https://github.com/opswitness/opswitness/blob/codex/opswitness-public-site/docs/QUICKSTART.md">Quickstart</a>
+        <a href="https://github.com/opswitness/opswitness/blob/main/docs/QUICKSTART.md">Quickstart</a>
       </div>
-      <p class="footer-note">Community Alpha preview. Local-first. No SLA.</p>
+      <p class="footer-note">Community Alpha. Local-first. No SLA.</p>
     </footer>
 
     <dialog class="image-dialog" aria-label="Product screenshot">
       <button class="dialog-close" type="button" aria-label="Close screenshot">&times;</button>
-      <img src="assets/workspace.png" alt="Expanded OpsWitness product screenshot" />
+      <img src="" alt="Expanded OpsWitness product screenshot" />
     </dialog>
     <script src="app.js" defer></script>
   </body>
