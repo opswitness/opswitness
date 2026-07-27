@@ -73,8 +73,26 @@ def _backup_sources(settings: Settings) -> list[tuple[str, Path]]:
         ("paperclip", settings.services.paperclip_home.expanduser().resolve()),
         ("opswitness_state/ledger", settings.ledger_dir.expanduser().resolve()),
         ("opswitness_state/artifacts", (settings.ledger_dir.parent / "artifacts").resolve()),
+        (
+            "opswitness_state/console",
+            settings.console.state_dir.expanduser().resolve(),
+        ),
         ("config", config_dir().resolve()),
     ]
+
+
+def _backup_filter(member: tarfile.TarInfo) -> tarfile.TarInfo | None:
+    """Exclude resumable/derived Knowledge Hub state and transient model sessions."""
+    normalized = member.name.rstrip("/")
+    excluded = (
+        "opswitness_state/console/ephemeral",
+        "opswitness_state/console/library/staging",
+        "opswitness_state/console/library/indexes",
+        "opswitness_state/console/library/exports",
+    )
+    if any(normalized == prefix or normalized.startswith(prefix + "/") for prefix in excluded):
+        return None
+    return member
 
 
 def backup_plan(settings: Settings, output: Path | None = None) -> dict:
@@ -132,9 +150,13 @@ def create_backup(settings: Settings, output: Path | None = None, *, execute: bo
             manifest.write_text(
                 json.dumps(
                     {
-                        "schema_version": 1,
+                        "schema_version": 2,
                         "created_at": datetime.now(UTC).isoformat(),
                         "components": ["database.dump", *[name for name, _ in _backup_sources(settings)]],
+                        "rebuild_after_restore": [
+                            "library_full_text_index",
+                            "library_semantic_index",
+                        ],
                     },
                     indent=2,
                 )
@@ -146,7 +168,7 @@ def create_backup(settings: Settings, output: Path | None = None, *, execute: bo
                 archive.add(manifest, arcname="manifest.json", recursive=False)
                 for archive_name, source in _backup_sources(settings):
                     if source.exists():
-                        archive.add(source, arcname=archive_name)
+                        archive.add(source, arcname=archive_name, filter=_backup_filter)
             os.chmod(tar_path, 0o600)
             with os.fdopen(partial_fd, "wb") as encrypted:
                 partial_fd = -1

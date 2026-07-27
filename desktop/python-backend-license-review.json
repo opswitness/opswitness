@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "lock_sha256": "ec5a18b025774fd1c6f12f5f6e4bbe1b2a3a17199a77511951321af5cbdbdba9",
+  "review_status": "incomplete",
+  "packages": [],
+  "notice": "Public redistribution is blocked until every package in python-requirements.lock has an approved license and notice review."
+}

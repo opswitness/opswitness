@@ -378,13 +378,11 @@ def login_command(
         return [str(binary), "login"]
     if provider == "deepseek":
         raise ValueError("DeepSeek supports API key connection only")
-    if method == "api":
-        # Console login uses API usage billing and remains vendor-owned.
-        return [str(binary), "auth", "login", "--console"]
     if method == "api_key":
         raise ValueError("Anthropic API keys use the managed apiKeyHelper path")
-    # Local single-user mode may use the operator's own Claude subscription.
-    return [str(binary), "auth", "login", "--claudeai"]
+    raise ValueError(
+        "OpsWitness supports Anthropic API keys only; Claude subscription login is not routed"
+    )
 
 
 def login_provider(

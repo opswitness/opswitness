@@ -1,21 +1,50 @@
 # Community Alpha Quickstart
 
 OpsWitness `v0.1.0-alpha.1` is a local-first, single-operator release candidate. Use synthetic or
-non-critical work first. The seven-day durability soak required for Stable has not completed.
+non-critical work first. Stable durability and an SLA are not included.
 
-## Requirements
+## Install the Mac app
 
-- macOS 14 or newer;
-- Python 3.12 exactly;
-- `uv` installed;
-- a loopback browser for the default console;
-- AionUi and Paperclip only when you want the full team-execution and governance path.
+The supported first-user path is the signed and notarized Apple Silicon application:
 
-Linux runs the tested core in CI but is not a supported launchd or desktop-console target in Alpha.
+1. Download `OpsWitness-0.1.0-alpha.1-macos-arm64.dmg` from the inspected GitHub prerelease.
+2. Compare its SHA-256 with `SHA256SUMS`, then open the DMG.
+3. Drag **OpsWitness** into **Applications** and open it.
+4. Complete the local checks, then choose either Codex or Anthropic when prompted. Codex uses the
+   official ChatGPT sign-in flow; Anthropic requires your own API Key.
+5. Review and run **Reply to Your First Customer**.
 
-## Install from GitHub Release
+The App contains its compatible Python, Node, Paperclip/PostgreSQL, AionCore, Codex CLI, and Claude
+Agent runtime components. A first-time user does not install those dependencies separately. An
+Anthropic API Key is validated and stored in this Mac's Keychain; its API usage is billed separately
+from Claude Pro/Max, whose subscription login is not routed by OpsWitness. The App needs macOS 14 or
+newer, Apple Silicon, at least 5 GB of free space during setup, and internet access for provider
+authentication.
 
-PyPI is intentionally disabled for this release.
+The first Work uses a fixed, fictional website-maintenance inquiry and an App-managed empty
+workspace. A Business Assistant creates a careful local reply draft in `first-work.json`; a Review
+Assistant checks unsupported price and start-date commitments and records the draft digest in
+`verification.json`. The workflow has no delivery step. The App asks for one single-use approval
+for each local save (normally two approvals); reject any other request. It then verifies both
+artifacts from the content-addressed store. Passing this demonstration means only:
+
+> Synthetic customer-reply demonstration passed; no real customer or business outcome was
+> evaluated.
+
+## Existing OpsWitness or Quarterdeck data
+
+Do not copy or rename data manually. If the App detects an existing installation, choose either
+**Import a copy** or **Start fresh**. Import first writes a manifest and backup, leaves the old
+directory untouched, and never silently merges old and new services.
+
+The App stores new data under `~/Library/Application Support/OpsWitness/` and logs under
+`~/Library/Logs/OpsWitness/`. App-managed services do not install launchd jobs and must not share
+their instance IDs or ports with an older installation.
+
+## Command-line distribution
+
+Wheel and source archives remain available for developers and existing CLI users. They are not the
+new-user Mac installation path. PyPI is intentionally disabled for this Alpha.
 
 ```bash
 uv tool install --with mcp \
@@ -24,44 +53,12 @@ opswitness version
 qd version
 ```
 
-Both version commands must report `0.1.0a1`. `qd` is the compatibility CLI and invokes the same
-entry point.
-
-## First local evidence run
-
-```bash
-opswitness init
-opswitness wrap --job hello -- sh -c 'printf "hello from OpsWitness\\n"'
-opswitness runs
-opswitness status
-```
-
-This path needs no Paperclip service. The wrapped command's exit status is mirrored and its execution
-evidence is appended locally. Do not put secrets in command arguments.
-
-## Open the Workforce console
-
-```bash
-opswitness console serve --open
-```
-
-The default listener is `http://127.0.0.1:8765`. Describe a goal in Workspace, review the proposed
-team and immutable plan hash, then confirm. Full AionUi execution and Paperclip governance require
-their separately documented local setup; planning must fail closed rather than silently use another
-runtime.
-
-## Existing Quarterdeck installation
-
-Do not copy or rename data manually. If only the old configuration/state roots exist, OpsWitness
-continues using them in place. If both old and new roots exist, startup fails until the operator
-resolves the ambiguity. Canonical `OPSWITNESS_*` variables and compatibility `QD_*` variables may not
-carry conflicting values.
-
-New services use `com.opswitness.*`. Existing `com.quarterdeck.*` services remain supported, but the
-same old and new service must not run together. Run `opswitness doctor` before changing services.
+Both version commands must report `0.1.0a1`. CLI installations keep the documented Python 3.12 and
+external-runtime boundaries; they do not silently borrow sidecars from the Mac App.
 
 ## Before real work
 
-Read [Support matrix](SUPPORT-MATRIX.md), [Known limitations](KNOWN-LIMITATIONS.md), and
-[Readiness](READINESS.md). Keep Gmail and Telegram disabled until their explicit consent and secret
-setup are complete. Use the backup/restore drill before adopting important jobs.
+Read [Support matrix](SUPPORT-MATRIX.md), [Known limitations](KNOWN-LIMITATIONS.md),
+[Vendored runtimes](VENDORED-RUNTIMES.md), and [Readiness](READINESS.md). Keep integrations disabled
+until their explicit consent and secret setup are complete. Back up important work and retain an
+independent recovery path.

@@ -22,6 +22,7 @@ test('completed Work is exposed as a review-first repeatable workflow', () => {
 test('Workspace memory writes are explicit confirmed lifecycle actions', () => {
   assert.match(apiSource, /\/api\/v1\/workspace-memory\/candidates/);
   assert.match(apiSource, /workspace-memory\/\$\{encodeURIComponent\(versionId\)\}\/approve/);
+  assert.match(apiSource, /workspace-memory\/\$\{encodeURIComponent\(versionId\)\}\/dismiss/);
   assert.match(apiSource, /workspace-memory\/\$\{encodeURIComponent\(versionId\)\}\/revoke/);
   assert.match(apiSource, /workspace-memory\/\$\{encodeURIComponent\(versionId\)\}\/rollback/);
 
@@ -29,6 +30,7 @@ test('Workspace memory writes are explicit confirmed lifecycle actions', () => {
     'createWorkspaceMemoryCandidate',
     'proposeProcessMemory',
     'approveWorkspaceMemory',
+    'dismissWorkspaceMemory',
     'revokeWorkspaceMemory',
     'rollbackWorkspaceMemory',
   ]) {
@@ -48,4 +50,17 @@ test('memory UI keeps candidates separate from approved planning memory', () => 
   assert.match(dialogSource, /content_sha256/);
   assert.match(appSource, /memory_version_ids/);
   assert.match(appSource, /memory_snapshot_sha256/);
+});
+
+test('automatic experience stays a hash-bound candidate until explicit review', () => {
+  assert.match(typeSource, /automatic_experience/);
+  assert.match(typeSource, /fingerprint/);
+  assert.match(typeSource, /source_terminal_event_id/);
+  assert.match(dialogSource, /自动生成的经验候选 · 尚未进入任何新 Work/);
+  assert.match(dialogSource, /未读取交付物正文，也未调用模型/);
+  assert.match(dialogSource, /row\.content_sha256/);
+  assert.match(dialogSource, /row\.fingerprint \|\| null/);
+  assert.match(dialogSource, /忽略候选/);
+  assert.match(apiSource, /expected_content_sha256: expectedContentSha256/);
+  assert.match(apiSource, /expected_fingerprint: expectedFingerprint/);
 });

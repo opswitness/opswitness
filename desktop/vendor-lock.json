@@ -1,0 +1,78 @@
+{
+  "$schema": "./vendor-lock.schema.json",
+  "schema_version": 1,
+  "target": "aarch64-apple-darwin",
+  "components": [
+    {
+      "id": "opswitness-backend",
+      "version": "0.1.0-alpha.1",
+      "source_url": "https://github.com/opswitness/opswitness",
+      "upstream_sha256": null,
+      "license": "Apache-2.0",
+      "notice": "Built from the exact release commit; the build manifest supplies its digest.",
+      "redistribution_review": "blocked",
+      "entrypoints": ["backend/opswitness-backend"],
+      "required_prefixes": ["backend/_internal/"],
+      "provision": null,
+      "python_bundle": {
+        "runtime_version": "3.12.13",
+        "runtime_source_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260510/cpython-3.12.13%2B20260510-aarch64-apple-darwin-install_only.tar.gz",
+        "runtime_sha256": "5a30271f8d345a5b02b0c9e4e31e0f1e1455a8e4a04fba95cd9762472abc3b17",
+        "runtime_license": "Python-2.0 AND MPL-2.0",
+        "runtime_notice": "Immutable python-build-standalone 20260510 arm64 archive containing CPython 3.12.13. CPython notices, the MPL-2.0 wrapper/build distribution obligations, bundled component licenses, and any source-code offer must be approved before public distribution.",
+        "runtime_redistribution_review": "blocked",
+        "dependency_lock_path": "desktop/python-requirements.lock",
+        "dependency_lock_sha256": "ec5a18b025774fd1c6f12f5f6e4bbe1b2a3a17199a77511951321af5cbdbdba9",
+        "dependency_license_review_path": "desktop/python-backend-license-review.json",
+        "dependency_license_review_sha256": "52e4916bf5d0ce187e2d00c2758c48b9269ad6ecf3b481de9078a73c37b55706",
+        "dependency_license_review": "blocked"
+      }
+    },
+    {
+      "id": "aioncore",
+      "version": "0.1.45",
+      "source_url": "https://github.com/iOfficeAI/AionUi/releases/download/v2.1.33/aionui-web-2.1.33-darwin-arm64.tar.gz",
+      "upstream_sha256": "cc23819878630e9961153bdd6bdf091384685f2ae3acf1d85cbe066d9038c7b6",
+      "license": "Apache-2.0 AND LicenseRef-Anthropic-Commercial-Terms",
+      "notice": "Stage aioncore together with all managed resources from the verified archive. The managed resources include Claude Agent SDK 0.58.1 and its proprietary native arm64 executable; public redistribution remains blocked pending an exact Anthropic commercial-terms and notice review.",
+      "redistribution_review": "blocked",
+      "entrypoints": ["aioncore/aioncore"],
+      "required_prefixes": ["aioncore/managed-resources/"],
+      "provision": null
+    },
+    {
+      "id": "node",
+      "version": "24.11.0",
+      "source_url": "https://nodejs.org/dist/v24.11.0/",
+      "upstream_sha256": null,
+      "license": "MIT",
+      "notice": "Exact official darwin-arm64 archive and notices must be locked before release.",
+      "redistribution_review": "blocked",
+      "entrypoints": ["node/node"],
+      "provision": null
+    },
+    {
+      "id": "paperclip",
+      "version": "2026.707.0",
+      "source_url": "https://github.com/paperclipai/paperclip",
+      "upstream_sha256": null,
+      "license": "MIT",
+      "notice": "Includes the complete production dependency tree and embedded PostgreSQL darwin-arm64.",
+      "redistribution_review": "blocked",
+      "entrypoints": ["paperclip/dist/index.js"],
+      "required_prefixes": ["paperclip/node_modules/"],
+      "provision": null
+    },
+    {
+      "id": "codex",
+      "version": "0.145.0",
+      "source_url": "https://github.com/openai/codex/releases",
+      "upstream_sha256": null,
+      "license": "Apache-2.0",
+      "notice": "Exact official aarch64-apple-darwin asset and notices must be locked before release.",
+      "redistribution_review": "blocked",
+      "entrypoints": ["codex/codex"],
+      "provision": null
+    }
+  ]
+}

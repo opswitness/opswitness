@@ -67,6 +67,21 @@ The default exposure remains loopback. An explicitly configured private HTTPS su
 from Safari or Chrome only after device pairing; this changes the product door, not the internal
 adapter boundary. AionUi and Paperclip remain unreachable through OpsWitness's network listener.
 
+The desktop Alpha fixes three explicit replacement seams. `AgentRuntime` is the execution contract
+currently implemented by AionCore, `GovernanceProjection` is the governance view/command contract
+currently implemented by Paperclip, and the native `RuntimeSupervisor` trait owns packaged-process
+lifecycle. Replacing either vendor adapter must not change ledger events, CAS registrations, Work
+IDs, or `/api/v1` schemas. The Rust shell holds the supervisor behind the trait rather than exposing
+Tauri process commands to the WebView.
+
+After AionCore is healthy, the desktop supervisor protocol-tests the bundled OpsWitness MCP
+executable and requires the complete 13-tool contract before it creates or updates one
+`OpsWitness (App-managed)` stdio server in the App-private Aion data. It then enables that server
+and verifies the exact command and arguments by readback. The Paperclip token is never copied into
+AionCore configuration: the MCP subprocess reads the supervisor-owned `0600` credential file,
+installs the token only in its own environment, and removes the credential-file pointer. Any
+missing tool, duplicate managed server, failed handshake, or changed readback blocks the window.
+
 Work-level evolution is chat-first without becoming in-place mutation. The Overview adjustment box
 accepts natural-language changes to the goal, stages, Agent roles, reporting hierarchy, bounded
 loops, cadence, outputs, and checkpoints. Only a ready or ended source may create a revision. The
@@ -423,7 +438,8 @@ paid users ultimately see the vertical workbench, not the generic operations sur
 | repeatable Work + Workspace Memory | `src/opswitness/console/service.py`, `store.py`, `console-ui/src/workspace-memory-dialog.tsx` | ✅ source + tests: ended-Work projection, review-first preparation, Obsidian-compatible immutable versions, approval/revoke/rollback, approved planning snapshot; fresh RC/canary pending |
 | Workspace conversation history | `src/opswitness/console/service.py`, `schemas.py`, `console-ui/src/App.tsx` | ✅ source + tests: immutable Plan-chain projection, exact latest-version restore, provenance-bound objective template, zero execution side effect; fresh RC/canary pending |
 | Workspace planning materials | `src/opswitness/console/service.py`, `schemas.py`, `aionui.py`, `console-ui/src/App.tsx` | ✅ source + tests: bounded upload, immutable Plan-hash binding, private read-only storage, tamper rejection, bounded planner excerpts, and hash-verified Aion execution copies; fresh RC/canary pending |
-| local operator console | `src/opswitness/console/`, `console-ui/` | ✅ sole operator surface + default Workspace chatbox with planning history/presets/templates/blueprints + optional Today + unified Work details + immutable runtime revisions + independent hash-bound Work forks + evidence-only member observation, bounded live activity, and plan-bound AionUi team-task stage telemetry + evidence-first Aion pause/continue/terminate controls + provider account/Console login, one-time OpenAI CLI stdin handoff, Anthropic Keychain + apiKeyHelper, DeepSeek/xAI Keychain connections, official Grok account flow, and fixed-loopback Ollama/LM Studio discovery plus hidden AionUi registration + planning/progress + graphical hierarchy/bounded loops + ledger-folded run history + approval facade + Gmail/Telegram + responsive UI; real run-control acceptance, DeepSeek/Grok execution adapters, local-model live acceptance, and production canary remain pending |
+| Agent Contract v2 | `src/opswitness/agent_contracts.py`, `strict_runtime.py`, `console/schemas.py`, `console/service.py`, `console-ui/src/agent-graph-*` | ✅ source + tests: discriminated v1/v2 plans, stable ID references, complete structured editor, preview/revision/diff/version APIs, shared canonical execution envelope, per-Agent approval and Memory binding, artifact verification, and fail-closed strict-runtime seam; strict adapter and fresh RC/canary pending |
+| local operator console | `src/opswitness/console/`, `console-ui/` | ✅ sole operator surface + default Workspace chatbox with planning history/presets/templates/blueprints + optional Today + unified Work details + immutable runtime revisions + independent hash-bound Work forks + evidence-only member observation, bounded live activity, and plan-bound AionUi team-task stage telemetry + evidence-first Aion pause/continue/terminate controls + official Codex account login, one-time OpenAI CLI stdin handoff, Anthropic API Key in Keychain through `apiKeyHelper` (no Claude Pro/Max credential routing), DeepSeek/xAI Keychain connections, official Grok account flow, and fixed-loopback Ollama/LM Studio discovery plus hidden AionUi registration + planning/progress + graphical hierarchy/bounded loops + ledger-folded run history + approval facade + Gmail/Telegram + responsive UI; real run-control acceptance, DeepSeek/Grok execution adapters, local-model live acceptance, and production canary remain pending |
 | install doctor / secure services / disaster recovery | `src/opswitness/doctor.py`, `service.py`, `backup.py` | ✅ five secret-free templates + installed-command drift check; soak pending |
 | gate (PreToolUse `defer` → Paperclip approval → resume) | `gate.py`, `gated_claude.py` | ✅ M3 code + two live approval/resume drills |
 | artifacts (ledger events + content-addressed projection) | `artifacts.py`, `index.py` | ✅ M4 code + live projection |

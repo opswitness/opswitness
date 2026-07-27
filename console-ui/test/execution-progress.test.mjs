@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   executionControlPresentation,
   formatExecutionElapsed,
+  onboardingRunProgress,
   runtimeActivitySource,
   runtimeActivityTone,
   stageProgressPresentation,
@@ -28,6 +29,112 @@ test('runtime duration is readable without inventing a completion percentage', (
   assert.equal(formatExecutionElapsed(42), '42s');
   assert.equal(formatExecutionElapsed(3720), '1h 2m');
   assert.equal(formatExecutionElapsed(3720, 'zh'), '1 小时 2 分钟');
+});
+
+test('onboarding progress uses only observed runtime stages and a real elapsed clock', () => {
+  const model = onboardingRunProgress({
+    workStatus: 'running',
+    plannedStages: [
+      { order: 1, owner: 'Business Assistant' },
+      { order: 2, owner: 'Review Assistant' },
+    ],
+    progress: {
+      available: true,
+      active_members: [
+        { agent_name: 'Business Assistant', state: 'running', slow: false },
+      ],
+      stages: [
+        {
+          stage_order: 1,
+          agent_name: 'Business Assistant',
+          status: 'running',
+          source: 'aion_team_task',
+        },
+        {
+          stage_order: 2,
+          agent_name: 'Review Assistant',
+          status: 'pending',
+          source: 'unobserved',
+        },
+      ],
+    },
+    startedAt: '2026-07-24T12:00:00.000Z',
+    estimateMinutes: 3,
+    nowMs: Date.parse('2026-07-24T12:00:42.000Z'),
+  });
+
+  assert.deepEqual(
+    model.stages.map(({ order, status, observed }) => ({ order, status, observed })),
+    [
+      { order: 1, status: 'running', observed: true },
+      { order: 2, status: 'not_started', observed: false },
+    ],
+  );
+  assert.equal(model.currentOrder, 1);
+  assert.equal(model.completed, 0);
+  assert.equal(model.elapsedSeconds, 42);
+  assert.equal(model.estimateExceeded, false);
+  assert.doesNotMatch(JSON.stringify(model), /percent/);
+});
+
+test('onboarding keeps an earlier pending step current while a later step is blocked', () => {
+  const model = onboardingRunProgress({
+    workStatus: 'running',
+    plannedStages: [
+      { order: 1, owner: 'Business Assistant' },
+      { order: 2, owner: 'Review Assistant' },
+    ],
+    progress: {
+      available: true,
+      stages: [
+        {
+          stage_order: 1,
+          agent_name: 'Business Assistant',
+          status: 'pending',
+          source: 'aion_team_task',
+        },
+        {
+          stage_order: 2,
+          agent_name: 'Review Assistant',
+          status: 'blocked',
+          source: 'aion_team_task',
+        },
+      ],
+    },
+  });
+
+  assert.equal(model.currentOrder, 1);
+  assert.deepEqual(model.stages.map(({ order, status }) => ({ order, status })), [
+    { order: 1, status: 'pending' },
+    { order: 2, status: 'blocked' },
+  ]);
+});
+
+test('onboarding progress reports slow and unavailable states without inventing failure', () => {
+  const model = onboardingRunProgress({
+    workStatus: 'running',
+    plannedStages: [
+      { order: 1, owner: 'Writer' },
+      { order: 2, owner: 'Verifier' },
+    ],
+    progress: {
+      available: false,
+      active_members: [
+        { agent_name: 'Writer', state: 'running', slow: true },
+      ],
+      stages: [],
+    },
+    startedAt: '2026-07-24T12:00:00.000Z',
+    estimateMinutes: 1,
+    nowMs: Date.parse('2026-07-24T12:02:00.000Z'),
+  });
+
+  assert.equal(model.available, false);
+  assert.equal(model.observed, false);
+  assert.equal(model.slow, true);
+  assert.equal(model.estimateExceeded, true);
+  assert.equal(model.currentOrder, 1);
+  assert.equal(model.stages.every((stage) => stage.status === 'not_started'), true);
 });
 
 test('stage progress reports evidence without claiming business completion', () => {

@@ -9,6 +9,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -16,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from opswitness import mcp_server
 from opswitness.artifacts import artifact_root, register_console_artifact
-from opswitness.config import Settings
+from opswitness.config import ConsoleConfig, Settings
 from opswitness.console.aionui import (
     AionUiClient,
     AionUiError,
@@ -27,6 +28,9 @@ from opswitness.console.aionui import (
 )
 from opswitness.console.app import create_app
 from opswitness.console.schemas import (
+    AgentContractPreviewRequest,
+    AgentContractRevisionRequest,
+    AgentGraphRevisionRequest,
     ApprovalDecisionRequest,
     ApprovalMode,
     ConfirmRequest,
@@ -53,6 +57,7 @@ from opswitness.console.schemas import (
     RuntimeRevisionRequest,
     RuntimeInputAnswerRequest,
     TaskPlan,
+    TaskPlanV2,
     TaskTemplateArchiveRequest,
     TaskTemplateFromPlanRequest,
     TaskTemplateSaveRequest,
@@ -76,6 +81,7 @@ from opswitness.console.service import (
     MAIL_AUTHORIZATION_FAILURE,
     MAIL_OAUTH_CLIENT_REJECTED,
     MAIL_SUMMARY_FAILURE,
+    ONBOARDING_ARTIFACTS_INCOMPLETE_DETAIL,
     PLAN_GENERATION_FAILED,
     PLAN_GENERATION_FAILED_DETAIL,
     PLANNING_INTERRUPTED,
@@ -88,6 +94,7 @@ from opswitness.console.service import (
     ConsoleService,
     ConsoleUnavailable,
     RuntimeArtifactNotFound,
+    _execution_plan_sha,
     _fleet_health,
     _hashable_plan_payload,
     _mail_setup_detail,
@@ -455,11 +462,20 @@ class FakeAion:
     def list_confirmations(self, conversation_id):
         return [dict(row) for row in self.confirmations_by_conversation.get(conversation_id, [])]
 
-    def resolve_confirmation(self, conversation_id, call_id, decision):
+    def resolve_confirmation(
+        self,
+        conversation_id,
+        call_id,
+        decision,
+        *,
+        expected_confirmation=None,
+    ):
         rows = self.confirmations_by_conversation.get(conversation_id, [])
         matches = [row for row in rows if row["call_id"] == call_id]
         if len(matches) != 1:
             raise AionUiError("confirmation missing")
+        if expected_confirmation is not None and matches[0] != expected_confirmation:
+            raise AionUiError("confirmation changed")
         self.resolved_confirmations.append((conversation_id, call_id, decision))
         self.confirmations_by_conversation[conversation_id] = [
             row for row in rows if row["call_id"] != call_id
@@ -562,7 +578,7 @@ def console_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             "auth_mode": (
                 "chatgpt"
                 if provider == "openai"
-                else "account"
+                else "api_key"
                 if provider == "anthropic"
                 else "local"
                 if provider == "ollama"
@@ -595,6 +611,110 @@ def _running_aion_plan(service: ConsoleService) -> PlanRecord:
         ConfirmRequest(plan_sha256=str(ready.plan_sha256), confirmed=True),
     )
     return service.dispatch_plan(ready.plan_id)
+
+
+def _running_v2_plan_with_tool_policy(
+    service: ConsoleService,
+    *,
+    tool_name: str,
+    policy: str | None,
+    approval_mode: ApprovalMode = ApprovalMode.AUTOMATIC,
+    side_effect: tuple[str, str] | None = None,
+) -> PlanRecord:
+    requested = service.request_plan(PlanRequest(objective="执行完整 Agent 合同"))
+    parent = service.draft_plan(requested.plan_id)
+    preview = service.preview_agent_contract(
+        parent.plan_id,
+        AgentContractPreviewRequest(
+            expected_plan_sha256=str(parent.plan_sha256),
+            draft=None,
+        ),
+    )
+    draft = preview.normalized_plan.model_dump(mode="json")
+    lead = next(agent for agent in draft["agents"] if agent["role"] == "lead")
+    lead["contract"]["tool_rules"] = [
+        rule
+        for rule in lead["contract"]["tool_rules"]
+        if rule["tool_name"] != tool_name
+    ]
+    if policy is not None:
+        lead["contract"]["tool_rules"].append(
+            {"tool_name": tool_name, "policy": policy}
+        )
+    if side_effect is not None:
+        side_effect_name, side_effect_policy = side_effect
+        lead["contract"]["side_effects"][side_effect_name] = side_effect_policy
+    revised = service.revise_plan_agent_contract(
+        parent.plan_id,
+        AgentContractRevisionRequest(
+            expected_plan_sha256=str(parent.plan_sha256),
+            draft=draft,
+            confirmed=True,
+        ),
+    )
+    service.confirm_plan(
+        revised.plan_id,
+        ConfirmRequest(
+            plan_sha256=str(revised.plan_sha256),
+            approval_mode=approval_mode,
+            confirmed=True,
+        ),
+    )
+    return service.dispatch_plan(revised.plan_id)
+
+
+def test_desktop_drain_atomically_fences_confirmation_and_cancel_releases(console_env):
+    _, service, _, _ = console_env
+    service._desktop_instance_id = "desktop-test-0001"
+    requested = service.request_plan(PlanRequest(objective="验证桌面退出门闩"))
+    ready = service.draft_plan(requested.plan_id)
+    barrier = threading.Barrier(2)
+
+    def begin_drain():
+        barrier.wait()
+        return service.desktop_drain("desktop-test-0001", "begin")
+
+    def confirm():
+        barrier.wait()
+        return service.confirm_plan(
+            ready.plan_id,
+            ConfirmRequest(plan_sha256=str(ready.plan_sha256), confirmed=True),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        drain_future = pool.submit(begin_drain)
+        confirm_future = pool.submit(confirm)
+        drain = drain_future.result()
+        try:
+            confirmed = confirm_future.result()
+        except ConsoleConflict:
+            confirmed = None
+
+    assert drain["draining"] is True
+    if drain["active_work"]:
+        assert confirmed is not None
+        assert ready.plan_id in drain["active_work_ids"]
+        assert service.dispatch_plan(ready.plan_id).status == "confirmed"
+    else:
+        assert confirmed is None
+        assert drain["active_work_ids"] == []
+
+    cancelled = service.desktop_drain("desktop-test-0001", "cancel")
+    assert cancelled["draining"] is False
+    if confirmed is None:
+        confirmed = service.confirm_plan(
+            ready.plan_id,
+            ConfirmRequest(plan_sha256=str(ready.plan_sha256), confirmed=True),
+        )
+    assert confirmed.status == "confirmed"
+
+
+def test_desktop_drain_rejects_wrong_supervisor_identity(console_env):
+    _, service, _, _ = console_env
+    service._desktop_instance_id = "desktop-test-0001"
+
+    with pytest.raises(ConsoleUnavailable, match="identity"):
+        service.desktop_drain("desktop-test-wrong", "begin")
 
 
 def test_plan_schema_requires_one_lead_and_exact_stage_owners():
@@ -856,6 +976,61 @@ def test_ended_work_can_create_an_unconfirmed_ai_revision_without_dispatch(conso
     assert service.ledger.read_all()[-1]["kind"] == "task_plan_revision_requested"
 
 
+@pytest.mark.parametrize(
+    ("artifact_names", "expected_status"),
+    [
+        (["first-work.json"], "failed"),
+        (["first-work.json", "verification.json"], "completed_unverified"),
+    ],
+)
+def test_onboarding_run_cannot_complete_without_both_required_artifacts(
+    console_env,
+    artifact_names,
+    expected_status,
+):
+    _, service, _, _ = console_env
+    requested = service.request_plan(PlanRequest(objective="验证首次使用证据闭环"))
+    ready = service.draft_plan(requested.plan_id)
+
+    def apply_onboarding_contract(current):
+        assert current.plan is not None
+        current.plan.title = "Reply to Your First Customer"
+        current.plan.artifacts = ["first-work.json", "verification.json"]
+        current.plan_sha256 = _execution_plan_sha(current)
+        return current
+
+    ready = service.store.mutate(ready.plan_id, apply_onboarding_contract)
+    service.confirm_plan(
+        ready.plan_id,
+        ConfirmRequest(plan_sha256=str(ready.plan_sha256), confirmed=True),
+    )
+    running = service.dispatch_plan(ready.plan_id)
+    artifact_dir = service._aion_team_workspace(running) / "artifacts"
+    artifact_dir.mkdir(parents=True, mode=0o700)
+    for name in artifact_names:
+        (artifact_dir / name).write_text(
+            json.dumps({"artifact": name}, sort_keys=True),
+            encoding="utf-8",
+        )
+
+    finished = service.refresh_execution(running.plan_id)
+
+    assert finished.status == expected_status
+    if expected_status == "failed":
+        assert finished.error == ONBOARDING_ARTIFACTS_INCOMPLETE_DETAIL
+        assert finished.execution is not None
+        assert finished.execution.error == ONBOARDING_ARTIFACTS_INCOMPLETE_DETAIL
+        assert any(
+            event["kind"] == "task_artifact_contract_failed"
+            for event in service.ledger.read_all()
+        )
+    else:
+        assert {row["name"] for row in service.list_plan_artifacts(running.plan_id)} == {
+            "first-work.json",
+            "verification.json",
+        }
+
+
 def test_plan_revision_http_facade_requires_csrf(console_env, monkeypatch):
     settings, service, _, _ = console_env
     requested = service.request_plan(PlanRequest(objective="生成研究摘要"))
@@ -880,6 +1055,33 @@ def test_plan_revision_http_facade_requires_csrf(console_env, monkeypatch):
         payload = accepted.json()
         assert payload["parent_plan_id"] == parent.plan_id
         assert payload["revision_number"] == 2
+
+
+def test_agent_contract_http_preview_requires_csrf(console_env, monkeypatch):
+    settings, service, _, _ = console_env
+    requested = service.request_plan(PlanRequest(objective="预览完整 Agent 合同"))
+    parent = service.draft_plan(requested.plan_id)
+    monkeypatch.setattr(service, "acquire_instance_lease", lambda: True)
+    monkeypatch.setattr(service, "recover_startup", lambda: {})
+    monkeypatch.setattr(service, "release_instance_lease", lambda: None)
+    app = create_app(settings, service=service)
+    body = {
+        "expected_plan_sha256": parent.plan_sha256,
+        "draft": None,
+    }
+    with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+        denied = client.post(
+            f"/api/v1/plans/{parent.plan_id}/agent-contract/preview",
+            json=body,
+        )
+        assert denied.status_code == 403
+        accepted = client.post(
+            f"/api/v1/plans/{parent.plan_id}/agent-contract/preview",
+            json=body,
+            headers={"X-QD-CSRF": app.state.csrf_token},
+        )
+        assert accepted.status_code == 200
+        assert accepted.json()["normalized_plan"]["schema_version"] == 2
 
 
 def test_ended_work_prepares_an_idempotent_reviewed_rerun_without_dispatch(console_env):
@@ -1764,6 +1966,155 @@ def test_organization_revision_is_hash_bound_append_only_and_blocks_parent(
     assert "解读 Agent" not in json.dumps(organization_event, ensure_ascii=False)
 
 
+def test_agent_contract_preview_and_revision_share_the_exact_envelope(
+    console_env,
+):
+    _, service, _, _ = console_env
+    requested = service.request_plan(PlanRequest(objective="创建并核验客户回复"))
+    parent = service.draft_plan(requested.plan_id)
+
+    preview = service.preview_agent_contract(
+        parent.plan_id,
+        AgentContractPreviewRequest(
+            expected_plan_sha256=str(parent.plan_sha256),
+            draft=None,
+        ),
+    )
+    assert preview.normalized_plan.schema_version == 2
+    assert preview.strict_runtime_available is False
+    assert len(preview.envelopes) == len(preview.normalized_plan.agents)
+    assert service.list_agent_contract_versions(parent.plan_id) == []
+
+    revised = service.revise_plan_agent_contract(
+        parent.plan_id,
+        AgentContractRevisionRequest(
+            expected_plan_sha256=str(parent.plan_sha256),
+            draft=preview.normalized_plan.model_dump(mode="json"),
+            confirmed=True,
+        ),
+    )
+    assert isinstance(revised.plan, TaskPlanV2)
+    assert revised.status == "ready"
+    assert revised.plan_sha256 == preview.candidate_plan_sha256
+    assert [row.sha256 for row in service._agent_execution_envelopes(revised)] == [
+        row.sha256 for row in preview.envelopes
+    ]
+
+    versions = service.list_agent_contract_versions(revised.plan_id)
+    assert [row["plan_id"] for row in versions] == [revised.plan_id]
+    assert service.diff_agent_contract_versions(revised.plan_id, parent.plan_id) == []
+    event = service.ledger.read_all()[-1]
+    assert event["kind"] == "task_plan_agent_contract_revised"
+    encoded = json.dumps(event["payload"], ensure_ascii=False)
+    assert "Draft the bounded reply" not in encoded
+    assert "artifacts/" not in encoded
+    assert set(event["payload"]) >= {
+        "contract_sha256",
+        "changed_path_hashes",
+        "diff_count",
+        "agent_count",
+    }
+
+
+def test_strict_agent_contract_refuses_to_run_without_a_strict_adapter(console_env):
+    _, service, _, _ = console_env
+    requested = service.request_plan(PlanRequest(objective="严格隔离客户回复"))
+    parent = service.draft_plan(requested.plan_id)
+    preview = service.preview_agent_contract(
+        parent.plan_id,
+        AgentContractPreviewRequest(
+            expected_plan_sha256=str(parent.plan_sha256),
+            draft=None,
+        ),
+    )
+    draft = preview.normalized_plan.model_dump(mode="json")
+    draft["runtime_mode"] = "strict"
+    strict = service.revise_plan_agent_contract(
+        parent.plan_id,
+        AgentContractRevisionRequest(
+            expected_plan_sha256=str(parent.plan_sha256),
+            draft=draft,
+            confirmed=True,
+        ),
+    )
+
+    with pytest.raises(ConsoleConflict, match="strict Agent Runtime is unavailable"):
+        service.confirm_plan(
+            strict.plan_id,
+            ConfirmRequest(
+                plan_sha256=str(strict.plan_sha256),
+                confirmed=True,
+            ),
+        )
+    assert service.get_plan(strict.plan_id, refresh=False).status == "ready"
+
+
+def test_v2_memory_is_selected_per_agent_and_revocation_blocks_confirmation(
+    console_env,
+):
+    _, service, _, _ = console_env
+    content = "Use the reviewed customer tone and verify every external claim."
+    candidate = service.create_workspace_memory_candidate(
+        WorkspaceMemoryCandidateRequest(
+            kind="process",
+            title="Customer reply review",
+            content=content,
+            tags=["customer", "review"],
+            confirmed=True,
+        )
+    )
+    service.approve_workspace_memory(
+        candidate.version_id,
+        WorkspaceMemoryDecisionRequest(reason="Reviewed", confirmed=True),
+    )
+    requested = service.request_plan(PlanRequest(objective="按已批准经验创建客户回复"))
+    parent = service.draft_plan(requested.plan_id)
+    preview = service.preview_agent_contract(
+        parent.plan_id,
+        AgentContractPreviewRequest(
+            expected_plan_sha256=str(parent.plan_sha256),
+            draft=None,
+        ),
+    )
+    lead = next(
+        agent for agent in preview.normalized_plan.agents if agent.role == "lead"
+    )
+    non_lead = next(
+        agent for agent in preview.normalized_plan.agents if agent.role != "lead"
+    )
+    assert lead.contract.memory.version_ids == [candidate.version_id]
+    assert non_lead.contract.memory.version_ids == []
+    lead_envelope = next(
+        row for row in preview.envelopes if row.agent_id == lead.agent_id
+    )
+    non_lead_envelope = next(
+        row for row in preview.envelopes if row.agent_id == non_lead.agent_id
+    )
+    assert content in lead_envelope.canonical_json
+    assert content not in non_lead_envelope.canonical_json
+
+    revised = service.revise_plan_agent_contract(
+        parent.plan_id,
+        AgentContractRevisionRequest(
+            expected_plan_sha256=str(parent.plan_sha256),
+            draft=preview.normalized_plan.model_dump(mode="json"),
+            confirmed=True,
+        ),
+    )
+    service.revoke_workspace_memory(
+        candidate.version_id,
+        WorkspaceMemoryDecisionRequest(reason="Retired", confirmed=True),
+    )
+    with pytest.raises(ConsoleConflict, match="memory"):
+        service.confirm_plan(
+            revised.plan_id,
+            ConfirmRequest(
+                plan_sha256=str(revised.plan_sha256),
+                confirmed=True,
+            ),
+        )
+
+
 def test_organization_revision_rejects_unchanged_incomplete_and_cyclic_trees(
     console_env, monkeypatch
 ):
@@ -1883,6 +2234,160 @@ def test_organization_revision_http_facade_requires_csrf_and_confirmation(consol
         assert accepted.status_code == 201
         assert accepted.json()["parent_plan_id"] == parent.plan_id
         assert accepted.json()["plan"]["collaboration_loops"][0]["max_iterations"] == 3
+
+
+def _agent_graph_body(parent: PlanRecord) -> dict:
+    assert parent.plan is not None
+    assert parent.plan_sha256 is not None
+    agents = [agent.model_dump(mode="json") for agent in parent.plan.agents]
+    agents[0]["name"] = "客户回复负责人"
+    agents[0]["responsibility"] = "起草受边界约束、可由人工复核的客户回复"
+    for agent in agents[1:]:
+        if agent.get("reports_to") == parent.plan.agents[0].name:
+            agent["reports_to"] = "客户回复负责人"
+    loops = [
+        loop.model_dump(mode="json") for loop in parent.plan.collaboration_loops
+    ]
+    for loop in loops:
+        if loop["source_agent"] == parent.plan.agents[0].name:
+            loop["source_agent"] = "客户回复负责人"
+        if loop["target_agent"] == parent.plan.agents[0].name:
+            loop["target_agent"] = "客户回复负责人"
+    return {
+        "expected_plan_sha256": parent.plan_sha256,
+        "agents": agents,
+        "collaboration_loops": loops,
+        "stage_assignments": [
+            {
+                "stage_order": stage.order,
+                "owner": (
+                    "客户回复负责人"
+                    if stage.owner == parent.plan.agents[0].name
+                    else stage.owner
+                ),
+            }
+            for stage in parent.plan.stages
+        ],
+        "confirmed": True,
+    }
+
+
+def test_agent_graph_revision_is_atomic_hash_bound_and_content_free(
+    console_env, monkeypatch
+):
+    _, service, aion, _ = console_env
+    monkeypatch.setattr(aion, "generate_plan", lambda *args, **kwargs: _fortune_plan())
+    requested = service.request_plan(PlanRequest(objective="图形化管理 Agent"))
+    parent = service.draft_plan(requested.plan_id)
+    parent_path = service.store.plans_dir / f"{parent.plan_id}.json"
+    parent_bytes = parent_path.read_bytes()
+
+    revised = service.revise_plan_agent_graph(
+        parent.plan_id,
+        AgentGraphRevisionRequest.model_validate(_agent_graph_body(parent)),
+    )
+
+    assert revised.status == "ready"
+    assert revised.parent_plan_id == parent.plan_id
+    assert revised.revision_number == parent.revision_number + 1
+    assert revised.plan_sha256 != parent.plan_sha256
+    assert revised.plan is not None
+    assert revised.plan.agents[0].name == "客户回复负责人"
+    assert revised.plan.stages[0].owner == "客户回复负责人"
+    assert parent_path.read_bytes() == parent_bytes
+    assert service.store.get(parent.plan_id) == parent
+
+    event = service.ledger.read_all()[-1]
+    assert event["kind"] == "task_plan_agent_graph_revised"
+    payload = event["payload"]
+    assert payload["parent_plan_id"] == parent.plan_id
+    assert payload["agent_graph_sha256"]
+    assert payload["plan_sha256"] == revised.plan_sha256
+    serialized = json.dumps(payload, ensure_ascii=False)
+    assert "客户回复负责人" not in serialized
+    assert "起草受边界约束" not in serialized
+
+
+def test_agent_graph_revision_rejects_stale_unchanged_and_invalid_graphs(
+    console_env, monkeypatch
+):
+    _, service, aion, _ = console_env
+    monkeypatch.setattr(aion, "generate_plan", lambda *args, **kwargs: _fortune_plan())
+    requested = service.request_plan(PlanRequest(objective="Agent 图校验"))
+    parent = service.draft_plan(requested.plan_id)
+    body = _agent_graph_body(parent)
+
+    with pytest.raises(ConsoleConflict, match="source hash is stale"):
+        service.revise_plan_agent_graph(
+            parent.plan_id,
+            AgentGraphRevisionRequest.model_validate(
+                {**body, "expected_plan_sha256": "0" * 64}
+            ),
+        )
+
+    assert parent.plan is not None
+    unchanged = {
+        "expected_plan_sha256": parent.plan_sha256,
+        "agents": [agent.model_dump(mode="json") for agent in parent.plan.agents],
+        "collaboration_loops": [
+            loop.model_dump(mode="json") for loop in parent.plan.collaboration_loops
+        ],
+        "stage_assignments": [
+            {"stage_order": stage.order, "owner": stage.owner}
+            for stage in parent.plan.stages
+        ],
+        "confirmed": True,
+    }
+    with pytest.raises(ConsoleConflict, match="unchanged"):
+        service.revise_plan_agent_graph(
+            parent.plan_id,
+            AgentGraphRevisionRequest.model_validate(unchanged),
+        )
+
+    invalid = _agent_graph_body(parent)
+    invalid["agents"][1]["reports_to"] = invalid["agents"][2]["name"]
+    invalid["agents"][2]["reports_to"] = invalid["agents"][1]["name"]
+    with pytest.raises(ConsoleConflict, match="valid team"):
+        service.revise_plan_agent_graph(
+            parent.plan_id,
+            AgentGraphRevisionRequest.model_validate(invalid),
+        )
+
+
+def test_agent_graph_revision_http_requires_csrf_confirmation_and_fresh_hash(
+    console_env, monkeypatch
+):
+    settings, service, aion, _ = console_env
+    monkeypatch.setattr(aion, "generate_plan", lambda *args, **kwargs: _fortune_plan())
+    requested = service.request_plan(PlanRequest(objective="HTTP Agent 图调整"))
+    parent = service.draft_plan(requested.plan_id)
+    monkeypatch.setattr(service, "acquire_instance_lease", lambda: True)
+    monkeypatch.setattr(service, "recover_startup", lambda: {})
+    monkeypatch.setattr(service, "release_instance_lease", lambda: None)
+    app = create_app(settings, service=service)
+    csrf = app.state.csrf_token
+    path = f"/api/v1/plans/{parent.plan_id}/agent-graph/revisions"
+    body = _agent_graph_body(parent)
+
+    with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+        denied = client.post(path, json=body)
+        assert denied.status_code == 403
+        unconfirmed = client.post(
+            path,
+            json={**body, "confirmed": False},
+            headers={"X-QD-CSRF": csrf},
+        )
+        assert unconfirmed.status_code == 422
+        stale = client.post(
+            path,
+            json={**body, "expected_plan_sha256": "0" * 64},
+            headers={"X-QD-CSRF": csrf},
+        )
+        assert stale.status_code == 409
+        accepted = client.post(path, json=body, headers={"X-QD-CSRF": csrf})
+        assert accepted.status_code == 201
+        assert accepted.json()["parent_plan_id"] == parent.plan_id
+        assert accepted.json()["plan"]["agents"][0]["name"] == "客户回复负责人"
 
 
 def test_plan_delete_is_append_only_idempotent_and_hides_the_plan(console_env):
@@ -2487,6 +2992,7 @@ def test_startup_recovery_fails_closed_and_only_schedules_safe_transitions(
         "dispatching_failed": 1,
         "confirmed_scheduled": 1,
         "active_refresh_scheduled": 1,
+        "terminal_finish_flags_recovered": 0,
     }
     assert set(submitted) == {
         ("dispatch_plan", confirmed_ready.plan_id),
@@ -2690,9 +3196,20 @@ def test_execution_completion_is_explicitly_unverified(console_env):
     assert finished.execution is not None
     assert finished.execution.outcome_verified is False
     assert finished.execution.finish_event_recorded is True
-    final = service.ledger.read_all()[-1]
-    assert final["kind"] == "task_execution_finished"
-    assert final["payload"]["outcome_verified"] is False
+    events = service.ledger.read_all()
+    finish_index = next(
+        index
+        for index, event in enumerate(events)
+        if event["kind"] == "task_execution_finished"
+    )
+    candidate_index = next(
+        index
+        for index, event in enumerate(events)
+        if event["kind"] == "workspace_memory_candidate_created"
+    )
+    assert events[finish_index]["payload"]["outcome_verified"] is False
+    assert events[finish_index]["payload"]["plan_sha256"] == finished.plan_sha256
+    assert finish_index < candidate_index
 
 
 def test_aion_tool_confirmation_becomes_one_actionable_governance_approval(console_env):
@@ -2785,6 +3302,54 @@ def test_aion_tool_confirmation_becomes_one_actionable_governance_approval(conso
     ]
 
 
+def test_terminating_work_rejects_and_hides_its_pending_tool_approval(console_env):
+    _, service, aion, paperclip = console_env
+    aion.snapshot = {"status": "awaiting_approval", "pending_approvals": 1}
+    aion.confirmations_by_conversation["conversation-1"] = [
+        {
+            "message_id": "message-terminal",
+            "call_id": "tool-call-terminal",
+            "title": "Write a bounded output",
+            "description": "The runtime is paused.",
+            "command_type": "execute",
+            "allow_value": "allow",
+            "reject_value": "reject",
+        }
+    ]
+    ready = service.draft_plan(
+        service.request_plan(PlanRequest(objective="测试终止后审批清理")).plan_id
+    )
+    service.confirm_plan(
+        ready.plan_id,
+        ConfirmRequest(
+            plan_sha256=str(ready.plan_sha256),
+            approval_mode=ApprovalMode.MANUAL_ALL,
+            confirmed=True,
+        ),
+    )
+    service.dispatch_plan(ready.plan_id)
+    service.refresh_execution(ready.plan_id)
+
+    assert service.list_pending_approvals()[0]["plan_id"] == ready.plan_id
+
+    cancelled = service.control_execution(
+        ready.plan_id,
+        ExecutionControlRequest(action="terminate", confirmed=True),
+    )
+
+    assert cancelled.status == "cancelled"
+    assert paperclip.approvals[0]["status"] == "rejected"
+    assert aion.resolved_confirmations == [("conversation-1", "tool-call-terminal", "reject")]
+    assert service.list_pending_approvals() == []
+    assert service.dashboard()["pending_approvals"] == 0
+    decision = next(
+        event
+        for event in service.ledger.read_all()
+        if event["kind"] == "approval_decision_requested"
+    )
+    assert decision["payload"]["source"] == "terminal_plan_policy"
+
+
 def test_default_automatic_mode_approves_generic_execution_tools(console_env):
     _, service, aion, paperclip = console_env
     aion.snapshot = {"status": "awaiting_approval", "pending_approvals": 1}
@@ -2819,7 +3384,7 @@ def test_default_automatic_mode_approves_generic_execution_tools(console_env):
     assert automatic["payload"] == {
         "schema_version": 1,
         "approval_id": paperclip.approvals[0]["id"],
-        "policy_version": 2,
+        "policy_version": 4,
         "policy_reason": "confirmed-plan automatic mode",
         "approval_mode": "automatic",
     }
@@ -2828,7 +3393,125 @@ def test_default_automatic_mode_approves_generic_execution_tools(console_env):
     assert "Run the confirmed task step" not in json.dumps(events, ensure_ascii=False)
 
 
-def test_legacy_automatic_safe_mode_approves_exact_read_only_tools(console_env):
+@pytest.mark.parametrize(
+    ("policy", "expected_status", "expected_decision"),
+    [
+        ("deny", "rejected", "reject"),
+        ("always_ask", "pending", None),
+        ("inherit_run_mode", "approved", "approve"),
+    ],
+)
+def test_v2_agent_contract_policy_overrides_global_auto(
+    console_env,
+    policy,
+    expected_status,
+    expected_decision,
+):
+    _, service, aion, paperclip = console_env
+    tool_name = "mcp__opswitness__qd_artifacts"
+    running = _running_v2_plan_with_tool_policy(
+        service,
+        tool_name=tool_name,
+        policy=policy,
+    )
+    aion.snapshot = {"status": "awaiting_approval", "pending_approvals": 1}
+    aion.confirmations_by_conversation["conversation-1"] = [
+        {
+            "message_id": f"message-{policy}",
+            "call_id": f"tool-call-{policy}",
+            "title": "Use the exact managed tool",
+            "description": "The v2 contract decides this exact call.",
+            "command_type": tool_name,
+            "allow_value": "allow",
+            "reject_value": "reject",
+        }
+    ]
+
+    service.refresh_execution(running.plan_id)
+
+    approval = paperclip.approvals[0]
+    assert approval["status"] == expected_status
+    assert approval["payload"]["agentContractPolicy"] == policy
+    assert approval["payload"]["planSha256"] == running.plan_sha256
+    assert len(approval["payload"]["contractSha256"]) == 64
+    assert len(approval["payload"]["normalizedArgumentsSha256"]) == 64
+    assert len(approval["payload"]["singleUseNonce"]) == 64
+    if expected_decision is None:
+        assert aion.resolved_confirmations == []
+    else:
+        assert aion.resolved_confirmations == [
+            ("conversation-1", f"tool-call-{policy}", expected_decision)
+        ]
+
+
+def test_v2_unknown_tool_is_rejected_even_when_global_mode_is_auto(console_env):
+    _, service, aion, paperclip = console_env
+    running = _running_v2_plan_with_tool_policy(
+        service,
+        tool_name="known_tool",
+        policy="inherit_run_mode",
+    )
+    aion.snapshot = {"status": "awaiting_approval", "pending_approvals": 1}
+    aion.confirmations_by_conversation["conversation-1"] = [
+        {
+            "message_id": "message-unknown-v2",
+            "call_id": "tool-call-unknown-v2",
+            "title": "Unknown tool",
+            "description": "This tool was not reviewed.",
+            "command_type": "unknown_tool",
+            "allow_value": "allow",
+            "reject_value": "reject",
+        }
+    ]
+
+    service.refresh_execution(running.plan_id)
+
+    assert paperclip.approvals[0]["status"] == "rejected"
+    assert aion.resolved_confirmations == [
+        ("conversation-1", "tool-call-unknown-v2", "reject")
+    ]
+
+
+def test_v2_inherited_operator_input_respects_manual_work_mode(console_env):
+    _, service, aion, paperclip = console_env
+    tool_name = "mcp__opswitness__qd_request_input"
+    running = _running_v2_plan_with_tool_policy(
+        service,
+        tool_name=tool_name,
+        policy="inherit_run_mode",
+        approval_mode=ApprovalMode.MANUAL_ALL,
+        side_effect=("operator_input", "inherit_run_mode"),
+    )
+    aion.snapshot = {"status": "awaiting_approval", "pending_approvals": 1}
+    aion.confirmations_by_conversation["conversation-1"] = [
+        {
+            "message_id": "message-v2-input",
+            "call_id": "tool-call-v2-input",
+            "title": "Ask one bounded question",
+            "description": "The v2 Work is in manual mode.",
+            "command_type": tool_name,
+            "allow_value": "allow",
+            "reject_value": "reject",
+        }
+    ]
+
+    service.refresh_execution(running.plan_id)
+
+    assert paperclip.approvals[0]["status"] == "pending"
+    assert aion.resolved_confirmations == []
+
+
+@pytest.mark.parametrize(
+    "command_type",
+    [
+        "mcp__opswitness__qd_python_package_status",
+        "mcp__aionui-team__team_members",
+        "mcp__aionui-team__team_send_message",
+        "mcp__aionui-team__team_task_create",
+        "mcp__aionui-team__team_task_update",
+    ],
+)
+def test_legacy_automatic_safe_mode_approves_exact_bounded_tools(console_env, command_type):
     _, service, aion, paperclip = console_env
     aion.snapshot = {"status": "awaiting_approval", "pending_approvals": 1}
     aion.confirmations_by_conversation["conversation-1"] = [
@@ -2837,7 +3520,7 @@ def test_legacy_automatic_safe_mode_approves_exact_read_only_tools(console_env):
             "call_id": "tool-call-safe",
             "title": "Check package metadata",
             "description": "Read installed package metadata without importing it.",
-            "command_type": "mcp__opswitness__qd_python_package_status",
+            "command_type": command_type,
             "allow_value": "allow",
             "reject_value": "reject",
         }
@@ -2866,8 +3549,8 @@ def test_legacy_automatic_safe_mode_approves_exact_read_only_tools(console_env):
     assert automatic["payload"] == {
         "schema_version": 1,
         "approval_id": paperclip.approvals[0]["id"],
-        "policy_version": 2,
-        "policy_reason": "exact read-only tool allowlist",
+        "policy_version": 4,
+        "policy_reason": "exact bounded orchestration/read-only tool allowlist",
         "approval_mode": "automatic_safe",
     }
     requested = next(event for event in events if event["kind"] == "approval_decision_requested")
@@ -2875,16 +3558,36 @@ def test_legacy_automatic_safe_mode_approves_exact_read_only_tools(console_env):
     assert "Check package metadata" not in json.dumps(events, ensure_ascii=False)
 
 
-def test_legacy_automatic_safe_mode_keeps_generic_execute_waiting(console_env):
+@pytest.mark.parametrize(
+    ("command_type", "title", "description"),
+    [
+        (
+            "execute",
+            "Save a local artifact",
+            "File writes require a single-use human approval.",
+        ),
+        (
+            "mcp__aionui-team__team_unknown_operation",
+            "Unknown internal operation",
+            "Unknown tools are outside the exact safe allowlist.",
+        ),
+    ],
+)
+def test_legacy_automatic_safe_mode_keeps_writes_and_unknown_tools_waiting(
+    console_env,
+    command_type,
+    title,
+    description,
+):
     _, service, aion, paperclip = console_env
     aion.snapshot = {"status": "awaiting_approval", "pending_approvals": 1}
     aion.confirmations_by_conversation["conversation-1"] = [
         {
             "message_id": "message-legacy-safe",
             "call_id": "tool-call-legacy-safe",
-            "title": "Run a command",
-            "description": "Generic command execution is outside the legacy safe allowlist.",
-            "command_type": "execute",
+            "title": title,
+            "description": description,
+            "command_type": command_type,
             "allow_value": "allow",
             "reject_value": "reject",
         }
@@ -3814,10 +4517,9 @@ def test_aionui_mail_summary_fails_when_ephemeral_team_cleanup_is_unconfirmed(
 
 
 def test_aionui_dispatch_receives_the_hash_bound_reporting_hierarchy(
-    monkeypatch, console_env, tmp_path
+    monkeypatch, tmp_path
 ):
-    settings, _, _, _ = console_env
-    client = AionUiClient(settings.console)
+    client = AionUiClient(ConsoleConfig(state_dir=tmp_path / "console"))
     raw = _fortune_plan().model_dump(mode="json")
     raw["agents"][0]["model"] = "claude-fable-5[1m]"
     raw["agents"][1]["model"] = "sonnet"
@@ -3870,6 +4572,53 @@ def test_aionui_dispatch_receives_the_hash_bound_reporting_hierarchy(
         "引用核验 Agent": "解读 Agent",
         "报告编辑 Agent": "引用核验 Agent",
     }
+    assert prompt_payload["delegation_packets"] == [
+        {
+            "schema_version": 1,
+            "agent_name": "引用核验 Agent",
+            "reports_to": "解读 Agent",
+            "responsibility": "核验引用、矛盾和禁忌表述",
+            "owned_stage_contracts": [
+                {
+                    "order": 2,
+                    "title": "解释与核验",
+                    "owner": "引用核验 Agent",
+                    "outcome": "形成带引用和审核结果的草稿",
+                    "checkpoint": True,
+                }
+            ],
+            "objective": "生成命理演示报告",
+            "constraints": "仅使用合成数据",
+            "artifact_expectations": ["命盘 JSON", "引用清单", "审核结果", "PDF 报告"],
+            "risks": ["lunar-python 尚未验证可用", "知识来源可能不完整"],
+            "update_policy": "每个检查点更新一次，依赖或审签不可用时立即停止。",
+        },
+        {
+            "schema_version": 1,
+            "agent_name": "报告编辑 Agent",
+            "reports_to": "引用核验 Agent",
+            "responsibility": "整理经审核的内容与交付格式",
+            "owned_stage_contracts": [
+                {
+                    "order": 3,
+                    "title": "编辑与审签",
+                    "owner": "报告编辑 Agent",
+                    "outcome": "形成人工审签候选报告",
+                    "checkpoint": True,
+                }
+            ],
+            "objective": "生成命理演示报告",
+            "constraints": "仅使用合成数据",
+            "artifact_expectations": ["命盘 JSON", "引用清单", "审核结果", "PDF 报告"],
+            "risks": ["lunar-python 尚未验证可用", "知识来源可能不完整"],
+            "update_policy": "每个检查点更新一次，依赖或审签不可用时立即停止。",
+        },
+    ]
+    assert all(
+        packet["agent_name"] != "解读 Agent"
+        for packet in prompt_payload["delegation_packets"]
+    )
+    assert all("materials" not in packet for packet in prompt_payload["delegation_packets"])
     assert prompt_payload["plan"]["collaboration_loops"] == [
         {
             "source_agent": "引用核验 Agent",
@@ -3879,6 +4628,15 @@ def test_aionui_dispatch_receives_the_hash_bound_reporting_hierarchy(
         }
     ]
     prompt_text = str(captured["prompt"]).split("\n", 1)[0]
+    assert "Teammates do not inherit this root dispatch prompt" in prompt_text
+    assert "entire matching delegation packet verbatim, unchanged, and in full" in prompt_text
+    assert "never summarize it or merely refer" in prompt_text
+    assert "has not received its complete matching packet" in prompt_text
+    assert "required artifact was not produced" in prompt_text
+    assert "mark the stage blocked or failed, never completed" in prompt_text
+    assert "Do not send that packet or wake a teammate" in prompt_text
+    assert "ordinary text is not an approval request" in prompt_text
+    assert "Initiate exactly one matching tool call" in prompt_text
     assert "never exceed max_iterations" in prompt_text
     assert "does not expose a verifiable hard runtime cutoff" in prompt_text
     assert [row["role"] for row in captured["agents"]] == ["lead", "teammate", "teammate"]
@@ -4146,6 +4904,131 @@ def test_aionui_execution_progress_exposes_bounded_activity_without_private_cont
     ]
 
 
+def test_aionui_terminal_team_state_waits_for_exact_running_slot(monkeypatch, console_env):
+    settings, _, _, _ = console_env
+    client = AionUiClient(settings.console)
+    monkeypatch.setattr(
+        client,
+        "team",
+        lambda team_id: {
+            "id": team_id,
+            "assistants": [
+                {
+                    "name": "Business Assistant",
+                    "conversation_id": "c-running",
+                    "slot_id": "slot-running",
+                    "pending_confirmations": 0,
+                }
+            ],
+        },
+    )
+    slot_work = [
+        {
+            "slot_id": "slot-running",
+            "state": "running",
+            "active_turn_started_at_ms": 1_783_500_000_000,
+        }
+    ]
+    monkeypatch.setattr(
+        client,
+        "team_run_state",
+        lambda team_id: {
+            "active_run": {
+                "status": "completed",
+                "slot_work": slot_work,
+            }
+        },
+    )
+    monkeypatch.setattr(client, "messages", lambda conversation_id: [])
+    sessions = [{"agent_name": "Business Assistant", "conversation_id": "c-running"}]
+
+    active = client.execution_snapshot(
+        "team-terminal-race",
+        ["c-running"],
+        agent_sessions=sessions,
+    )
+    assert active["status"] == "running"
+    assert active["progress"]["active_members"][0]["agent_name"] == "Business Assistant"
+
+    monkeypatch.setattr(
+        client,
+        "team_run_state",
+        lambda team_id: {
+            "active_run": None,
+            "slot_work": slot_work,
+        },
+    )
+    lingering_slot = client.execution_snapshot(
+        "team-terminal-race",
+        ["c-running"],
+        agent_sessions=sessions,
+    )
+    assert lingering_slot["status"] == "running"
+
+    monkeypatch.setattr(
+        client,
+        "team_run_state",
+        lambda team_id: {
+            "active_run": {
+                "status": "completed",
+                "slot_work": slot_work,
+            }
+        },
+    )
+    slot_work.clear()
+    terminal = client.execution_snapshot(
+        "team-terminal-race",
+        ["c-running"],
+        agent_sessions=sessions,
+    )
+    assert terminal["status"] == "completed_unverified"
+
+
+def test_aionui_terminal_run_with_unbound_confirmed_stages_fails_closed(
+    monkeypatch,
+    console_env,
+):
+    settings, _, _, _ = console_env
+    client = AionUiClient(settings.console)
+    monkeypatch.setattr(
+        client,
+        "team",
+        lambda team_id: {
+            "id": team_id,
+            "assistants": [
+                {
+                    "name": "Business Assistant",
+                    "conversation_id": "c-unbound",
+                    "slot_id": "slot-unbound",
+                    "pending_confirmations": 0,
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        client,
+        "team_run_state",
+        lambda team_id: {"active_run": {"status": "completed", "slot_work": []}},
+    )
+    monkeypatch.setattr(client, "messages", lambda conversation_id: [])
+
+    terminal = client.execution_snapshot(
+        "team-unbound-stages",
+        ["c-unbound"],
+        agent_sessions=[
+            {"agent_name": "Business Assistant", "conversation_id": "c-unbound"}
+        ],
+        planned_stages=[
+            {"order": 1, "title": "Draft reply", "owner": "Business Assistant"},
+            {"order": 2, "title": "Review reply", "owner": "Business Assistant"},
+        ],
+    )
+
+    assert terminal["status"] == "failed"
+    assert terminal["terminal_reason"] == "unfinished_stages"
+    assert terminal["unfinished_stage_orders"] == [1, 2]
+
+
 def test_aionui_execution_progress_binds_safe_activity_to_plan_stages(monkeypatch, console_env):
     settings, _, _, _ = console_env
     client = AionUiClient(settings.console)
@@ -4378,6 +5261,162 @@ def test_aionui_execution_progress_binds_safe_activity_to_plan_stages(monkeypatc
     assert terminal["unfinished_stage_orders"] == [3]
 
 
+def test_aionui_live_dotted_task_events_drive_progress_and_block_unfinished_terminal(
+    monkeypatch, console_env
+):
+    settings, _, _, _ = console_env
+    client = AionUiClient(settings.console)
+    monkeypatch.setattr(
+        client,
+        "team",
+        lambda team_id: {
+            "id": team_id,
+            "assistants": [
+                {
+                    "name": "Business Assistant",
+                    "conversation_id": "c-live",
+                    "slot_id": "slot-live",
+                    "pending_confirmations": 0,
+                }
+            ],
+        },
+    )
+    run_status = {"value": "running"}
+    monkeypatch.setattr(
+        client,
+        "team_run_state",
+        lambda team_id: {
+            "active_run": {"status": run_status["value"], "slot_work": []}
+        },
+    )
+
+    def live_task_event(
+        message_id,
+        at,
+        tool,
+        arguments,
+        *,
+        task=None,
+        reported_tool=None,
+    ):
+        output_payload = {"status": "ok"}
+        if task is not None:
+            output_payload["task"] = task
+        return {
+            "id": message_id,
+            "type": "acp_tool_call",
+            "position": "left",
+            "created_at": at,
+            "content": {
+                "update": {
+                    "title": f"mcp.aionui-team.{tool}",
+                    "raw_input": {
+                        "server": "aionui-team",
+                        "tool": reported_tool or tool,
+                        "arguments": arguments,
+                    },
+                    "raw_output": {
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": json.dumps(output_payload),
+                                }
+                            ]
+                        },
+                        "status": "completed",
+                    },
+                }
+            },
+        }
+
+    stage_1_subject = "[QD-STAGE:1] Draft the local follow-up"
+    stage_2_subject = "[QD-STAGE:2] Verify the local follow-up"
+    messages = [
+        live_task_event(
+            "live-create-stage-1",
+            "2026-07-24T20:00:00+00:00",
+            "team_task_create",
+            {"subject": stage_1_subject, "description": "private"},
+            task={
+                "task_id": "live-task-1",
+                "subject": stage_1_subject,
+                "owner": "slot-live",
+                "status": "pending",
+                "blocked_by": [],
+            },
+        ),
+        live_task_event(
+            "live-complete-stage-1",
+            "2026-07-24T20:01:00+00:00",
+            "team_task_update",
+            {"task_id": "live-task-1", "status": "completed"},
+        ),
+        live_task_event(
+            "live-create-stage-2",
+            "2026-07-24T20:02:00+00:00",
+            "team_task_create",
+            {"subject": stage_2_subject, "description": "private"},
+            task={
+                "task_id": "live-task-2",
+                "subject": stage_2_subject,
+                "owner": "slot-live",
+                "status": "pending",
+                "blocked_by": ["live-task-1"],
+            },
+        ),
+        live_task_event(
+            "live-start-stage-2",
+            "2026-07-24T20:03:00+00:00",
+            "team_task_update",
+            {"task_id": "live-task-2", "status": "in_progress"},
+        ),
+        # Conflicting title/tool evidence must not be allowed to mark the stage complete.
+        live_task_event(
+            "live-ambiguous-complete-stage-2",
+            "2026-07-24T20:04:00+00:00",
+            "team_task_update",
+            {"task_id": "live-task-2", "status": "completed"},
+            reported_tool="team_task_create",
+        ),
+    ]
+    monkeypatch.setattr(client, "messages", lambda conversation_id: messages)
+    planned_stages = [
+        {"order": 1, "title": "Draft the local follow-up", "owner": "Business Assistant"},
+        {"order": 2, "title": "Verify the local follow-up", "owner": "Business Assistant"},
+    ]
+    sessions = [{"agent_name": "Business Assistant", "conversation_id": "c-live"}]
+
+    snapshot = client.execution_snapshot(
+        "team-live-stage-progress",
+        ["c-live"],
+        agent_sessions=sessions,
+        planned_stages=planned_stages,
+    )
+
+    assert [(row["stage_order"], row["status"]) for row in snapshot["progress"]["stages"]] == [
+        (1, "completed"),
+        (2, "running"),
+    ]
+    assert [row["task_id"] for row in snapshot["progress"]["stages"]] == [
+        "live-task-1",
+        "live-task-2",
+    ]
+
+    run_status["value"] = "completed"
+    terminal = client.execution_snapshot(
+        "team-live-stage-progress",
+        ["c-live"],
+        agent_sessions=sessions,
+        planned_stages=planned_stages,
+        existing_stage_progress=snapshot["progress"]["stages"],
+    )
+
+    assert terminal["status"] == "failed"
+    assert terminal["terminal_reason"] == "unfinished_stages"
+    assert terminal["unfinished_stage_orders"] == [2]
+
+
 def test_aionui_confirmation_adapter_allows_once_and_never_persists_permission(
     monkeypatch, console_env
 ):
@@ -4422,6 +5461,261 @@ def test_aionui_confirmation_adapter_allows_once_and_never_persists_permission(
             },
         },
     )
+
+
+@pytest.mark.parametrize("reject_value", ["decline", "reject_once"])
+def test_aionui_confirmation_adapter_accepts_codex_one_time_reject_option(
+    monkeypatch, tmp_path, reject_value
+):
+    client = AionUiClient(ConsoleConfig(state_dir=tmp_path / "console"))
+    calls = []
+
+    def request(method, path, **kwargs):
+        calls.append((method, path, kwargs))
+        if method == "GET":
+            return [
+                {
+                    "id": "message-1",
+                    "call_id": "toolu-1",
+                    "title": None,
+                    "description": None,
+                    "command_type": "execute",
+                    "options": [
+                        {"label": "Allow", "value": "allow_once"},
+                        {"label": "Allow for This Session", "value": "allow_session"},
+                        {"label": "Allow and Don't Ask Again", "value": "allow_always"},
+                        {"label": "Decline", "value": reject_value},
+                    ],
+                }
+            ]
+        return {"ok": True}
+
+    monkeypatch.setattr(client, "_request", request)
+
+    confirmation = client.list_confirmations("conversation-1")[0]
+
+    assert confirmation["allow_value"] == "allow_once"
+    assert confirmation["reject_value"] == reject_value
+    assert confirmation["title"] == "Runtime tool request"
+    assert confirmation["description"] == "This runtime operation needs human approval."
+    rejected = client.resolve_confirmation("conversation-1", "toolu-1", "reject")
+    assert rejected["value"] == reject_value
+    assert calls[-1] == (
+        "POST",
+        "/api/conversations/conversation-1/confirmations/toolu-1/confirm",
+        {
+            "timeout": 10.0,
+            "json": {
+                "msg_id": "message-1",
+                "data": reject_value,
+                "always_allow": False,
+            },
+        },
+    )
+
+
+@pytest.mark.parametrize("tool", ["team_members", "team_send_message"])
+def test_aionui_confirmation_adapter_binds_exact_mcp_tool_from_same_call(
+    monkeypatch,
+    tmp_path,
+    tool,
+):
+    client = AionUiClient(ConsoleConfig(state_dir=tmp_path / "console"))
+
+    def request(method, path, **kwargs):
+        del kwargs
+        assert method == "GET"
+        if path.endswith("/confirmations"):
+            return [
+                {
+                    "id": "call-safe-1",
+                    "call_id": "call-safe-1",
+                    "title": None,
+                    "description": "",
+                    "command_type": "execute",
+                    "options": [
+                        {"value": "allow_once"},
+                        {"value": "decline"},
+                    ],
+                }
+            ]
+        assert path.endswith("/messages")
+        return {
+            "items": [
+                {
+                    "id": "call-safe-1",
+                    "type": "acp_tool_call",
+                    "content": {
+                        "update": {
+                            "title": f"mcp.aionui-team.{tool}",
+                            "raw_input": {
+                                "server": "aionui-team",
+                                "tool": tool,
+                                "arguments": {},
+                            },
+                        }
+                    },
+                }
+            ]
+        }
+
+    monkeypatch.setattr(client, "_request", request)
+
+    confirmation = client.list_confirmations("conversation-1")[0]
+
+    assert confirmation["command_type"] == f"mcp__aionui-team__{tool}"
+
+
+def test_aionui_confirmation_adapter_keeps_ambiguous_call_manually_gated(monkeypatch, tmp_path):
+    client = AionUiClient(ConsoleConfig(state_dir=tmp_path / "console"))
+
+    def request(method, path, **kwargs):
+        del kwargs
+        assert method == "GET"
+        if path.endswith("/confirmations"):
+            return [
+                {
+                    "id": "call-ambiguous-1",
+                    "call_id": "call-ambiguous-1",
+                    "title": None,
+                    "description": "",
+                    "command_type": "execute",
+                    "options": [
+                        {"value": "allow_once"},
+                        {"value": "decline"},
+                    ],
+                }
+            ]
+        assert path.endswith("/messages")
+        return {
+            "items": [
+                {
+                    "id": "call-ambiguous-1",
+                    "type": "acp_tool_call",
+                    "content": {
+                        "update": {
+                            "title": "mcp.aionui-team.team_members",
+                            "raw_input": {
+                                "server": "aionui-team",
+                                "tool": "team_members",
+                                "arguments": {},
+                            },
+                        }
+                    },
+                },
+                {
+                    "id": "call-ambiguous-1",
+                    "type": "acp_tool_call",
+                    "content": {
+                        "update": {
+                            "title": "mcp.aionui-team.team_task_update",
+                            "raw_input": {
+                                "server": "aionui-team",
+                                "tool": "team_task_update",
+                                "arguments": {},
+                            },
+                        }
+                    },
+                },
+            ]
+        }
+
+    monkeypatch.setattr(client, "_request", request)
+
+    confirmation = client.list_confirmations("conversation-1")[0]
+
+    assert confirmation["command_type"] == "tool"
+
+
+@pytest.mark.parametrize("messages_result", [AionUiError("unavailable"), {"items": []}])
+def test_aionui_confirmation_adapter_never_trusts_reported_safe_type_without_evidence(
+    monkeypatch, tmp_path, messages_result
+):
+    client = AionUiClient(ConsoleConfig(state_dir=tmp_path / "console"))
+
+    def request(method, path, **kwargs):
+        del kwargs
+        assert method == "GET"
+        if path.endswith("/confirmations"):
+            return [
+                {
+                    "id": "call-unproven-1",
+                    "call_id": "call-unproven-1",
+                    "title": "Reported safe tool",
+                    "description": "This row is not policy evidence.",
+                    "command_type": "mcp__aionui-team__team_members",
+                    "options": [
+                        {"value": "allow_once"},
+                        {"value": "decline"},
+                    ],
+                }
+            ]
+        assert path.endswith("/messages")
+        if isinstance(messages_result, Exception):
+            raise messages_result
+        return messages_result
+
+    monkeypatch.setattr(client, "_request", request)
+
+    confirmation = client.list_confirmations("conversation-1")[0]
+
+    assert confirmation["command_type"] == "tool"
+
+
+def test_aionui_confirmation_adapter_rechecks_exact_request_before_delivery(monkeypatch, tmp_path):
+    client = AionUiClient(ConsoleConfig(state_dir=tmp_path / "console"))
+    confirmation_row = {
+        "id": "call-stable-1",
+        "call_id": "call-stable-1",
+        "title": "Internal team lookup",
+        "description": "Initial request",
+        "command_type": "execute",
+        "options": [
+            {"value": "allow_once"},
+            {"value": "decline"},
+        ],
+    }
+    posts: list[dict[str, Any]] = []
+
+    def request(method, path, **kwargs):
+        if method == "POST":
+            posts.append(kwargs)
+            return {"ok": True}
+        if path.endswith("/confirmations"):
+            return [dict(confirmation_row)]
+        assert path.endswith("/messages")
+        return {
+            "items": [
+                {
+                    "id": "call-stable-1",
+                    "type": "acp_tool_call",
+                    "content": {
+                        "update": {
+                            "title": "mcp.aionui-team.team_members",
+                            "raw_input": {
+                                "server": "aionui-team",
+                                "tool": "team_members",
+                                "arguments": {},
+                            },
+                        }
+                    },
+                }
+            ]
+        }
+
+    monkeypatch.setattr(client, "_request", request)
+    expected = client.list_confirmations("conversation-1")[0]
+    confirmation_row["description"] = "Changed request"
+
+    with pytest.raises(AionUiError, match="changed before delivery"):
+        client.resolve_confirmation(
+            "conversation-1",
+            "call-stable-1",
+            "approve",
+            expected_confirmation=expected,
+        )
+
+    assert posts == []
 
 
 def test_aionui_confirmation_adapter_rejects_unknown_or_ambiguous_options(monkeypatch, console_env):
@@ -4614,6 +5908,143 @@ def test_aionui_ephemeral_workspaces_are_unique_private_and_removed(monkeypatch,
     assert all(not workspace.exists() for workspace in workspaces)
     assert deleted == ["team-1", "team-2"]
     assert (settings.console.state_dir / "ephemeral").stat().st_mode & 0o777 == 0o700
+
+
+def test_aionui_onboarding_session_reaches_team_creation_and_is_removed(
+    monkeypatch, console_env
+):
+    settings, _, _, _ = console_env
+    client = AionUiClient(settings.console)
+    assistant_id = settings.console.planner_assistant_id
+    team = {
+        "id": "team-onboarding",
+        "assistants": [{"role": "lead", "conversation_id": "conversation-onboarding"}],
+    }
+    remote = {}
+    created = []
+    deleted = []
+    modes = []
+    messages = [
+        {"id": "before", "type": "text"},
+    ]
+    monkeypatch.setattr(
+        client,
+        "list_assistants",
+        lambda: [
+            {
+                "id": assistant_id,
+                "enabled": True,
+                "team_selectable": True,
+            }
+        ],
+    )
+
+    def create_team(**kwargs):
+        workspace = Path(kwargs["workspace"])
+        created.append(kwargs)
+        remote[team["id"]] = {
+            "id": team["id"],
+            "name": kwargs["name"],
+            "workspace": str(workspace),
+        }
+        return team
+
+    def run_and_wait(*args, **kwargs):
+        del args, kwargs
+        messages.append(
+            {
+                "id": "thinking",
+                "type": "thinking",
+                "position": "left",
+                "status": "finish",
+                "content": "private reasoning",
+            }
+        )
+        messages.append({"id": "after", "type": "text"})
+        return '{"reply":"Thanks for writing in."}'
+
+    def delete_team(team_id):
+        deleted.append(team_id)
+        remote.pop(team_id)
+
+    monkeypatch.setattr(client, "create_team", create_team)
+    monkeypatch.setattr(client, "list_teams", lambda: list(remote.values()))
+    monkeypatch.setattr(client, "ensure_team", lambda team_id: None)
+    monkeypatch.setattr(
+        client,
+        "set_team_mode",
+        lambda team_id, mode: modes.append((team_id, mode)),
+    )
+    monkeypatch.setattr(client, "list_confirmations", lambda conversation_id: [])
+    monkeypatch.setattr(client, "messages", lambda conversation_id: list(messages))
+    monkeypatch.setattr(client, "_run_and_wait", run_and_wait)
+    monkeypatch.setattr(client, "delete_team", delete_team)
+
+    payload = client.run_onboarding_json(
+        "WORK1",
+        agent_name="Business Assistant",
+        assistant_id=assistant_id,
+        model="default",
+        prompt="Return one fixed JSON object.",
+    )
+
+    assert payload == {"reply": "Thanks for writing in."}
+    assert created[0]["name"] == "QD Onboarding WORK1"
+    workspace = Path(created[0]["workspace"])
+    assert workspace.name.startswith("onboarding-WORK1-")
+    assert not workspace.exists()
+    assert modes == [("team-onboarding", "read-only")]
+    assert deleted == ["team-onboarding"]
+
+
+def test_aionui_run_and_wait_ignores_finished_thinking_message(monkeypatch, console_env):
+    settings, _, _, _ = console_env
+    client = AionUiClient(settings.console)
+    team = {
+        "id": "team-thinking",
+        "assistants": [{"role": "lead", "conversation_id": "conversation-thinking"}],
+    }
+    reads = 0
+
+    def messages(conversation_id):
+        nonlocal reads
+        assert conversation_id == "conversation-thinking"
+        reads += 1
+        if reads == 1:
+            return []
+        thinking = {
+            "id": "thinking",
+            "type": "thinking",
+            "position": "left",
+            "status": "finish",
+            "content": "private reasoning",
+        }
+        if reads == 2:
+            return [thinking]
+        return [
+            thinking,
+            {
+                "id": "answer",
+                "type": "text",
+                "position": "left",
+                "status": "finish",
+                "content": '{"reply":"Thanks."}',
+            },
+        ]
+
+    monkeypatch.setattr(client, "messages", messages)
+    monkeypatch.setattr(client, "send_team_message", lambda team_id, prompt: {})
+    monkeypatch.setattr(
+        client,
+        "team_run_state",
+        lambda team_id: {"active_run": {"status": "running"}},
+    )
+    monkeypatch.setattr("opswitness.console.aionui.time.sleep", lambda seconds: None)
+
+    assert (
+        client._run_and_wait(team, "Return JSON.", timeout_seconds=1)
+        == '{"reply":"Thanks."}'
+    )
 
 
 def test_aionui_team_creation_failure_removes_its_private_workspace(monkeypatch, console_env):
@@ -4979,7 +6410,7 @@ def test_console_exposes_user_facing_provider_readiness_without_internal_ids(con
     assert "AionUi" not in encoded
 
 
-def test_console_does_not_mislabel_claude_account_auth_as_console_billing(console_env):
+def test_console_refuses_to_route_claude_subscription_auth(console_env):
     _, service, _, _ = console_env
 
     def account_probe(provider):
@@ -4995,9 +6426,12 @@ def test_console_does_not_mislabel_claude_account_auth_as_console_billing(consol
 
     service._provider_probe = account_probe
     providers = service.provider_statuses()
-    assert providers["anthropic"]["runtime_ready"] is True
-    assert providers["anthropic"]["detail"] == "Claude 账号已登录，可用于本机任务"
-    assert "Console" not in str(providers["anthropic"]["detail"])
+    assert providers["anthropic"]["runtime_ready"] is False
+    assert providers["anthropic"]["status"] == "attention"
+    assert providers["anthropic"]["detail"] == (
+        "请连接 Anthropic API Key；Claude Pro/Max 登录不能用于 OpsWitness"
+    )
+    assert "API Key" in str(providers["anthropic"]["privacy"])
 
 
 def test_console_labels_managed_anthropic_api_key_and_keychain_boundary(console_env):
@@ -5084,6 +6518,12 @@ def test_provider_api_key_connection_rejects_missing_or_unsupported_key(console_
             "anthropic",
             ProviderConnectionRequest(method="api", api_key="sk-local-sentinel-value"),
         )
+    for method in ("account", "api"):
+        with pytest.raises(ConsoleConflict, match="does not support"):
+            service.request_provider_connection(
+                "anthropic",
+                ProviderConnectionRequest(method=method),
+            )
     with pytest.raises(ValueError, match="explicit confirmation"):
         ProviderConnectionRequest(
             method="api_key",
@@ -6895,3 +8335,970 @@ def test_runtime_capabilities_publish_only_validated_model_metadata(console_env,
     serialized = json.dumps(capabilities, ensure_ascii=False)
     assert "api_key" not in serialized
     assert "env_override" not in serialized
+
+
+def test_terminal_work_generates_one_local_experience_candidate_and_requires_hash_bound_approval(
+    console_env,
+):
+    _, service, aion, _ = console_env
+    running = _running_aion_plan(service)
+    workspace = service._execution_workspace(running)
+    artifact_dir = workspace / "artifacts"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    secret = "ARTIFACT-BODY-MUST-NOT-BECOME-EXPERIENCE"
+    (artifact_dir / "private-result.txt").write_text(secret)
+    generated_before = aion.generated
+
+    finished = service.refresh_execution(running.plan_id)
+
+    assert finished.status == "completed_unverified"
+    assert aion.generated == generated_before
+    candidates = [
+        row
+        for row in service.list_workspace_memories()
+        if row.origin == "automatic_experience"
+    ]
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.state == "candidate"
+    assert candidate.active is False
+    assert candidate.source_plan_id == finished.plan_id
+    assert candidate.source_plan_sha256 == finished.plan_sha256
+    assert candidate.generation_key is not None
+    assert candidate.fingerprint is not None
+    assert candidate.source_terminal_event_id is not None
+    assert candidate.source_terminal_event_sha256 is not None
+    assert secret not in candidate.content
+    assert secret not in json.dumps(service.ledger.read_all(), ensure_ascii=False)
+    assert not any(
+        event["kind"] == "workspace_memory_approved"
+        for event in service.ledger.read_all()
+    )
+
+    without_approval = service.request_plan(
+        PlanRequest(objective="候选经验不能自动进入新任务")
+    )
+    assert without_approval.memory_version_ids == []
+
+    with pytest.raises(ConsoleConflict, match="exact content hash and fingerprint"):
+        service.approve_workspace_memory(
+            candidate.version_id,
+            WorkspaceMemoryDecisionRequest(confirmed=True),
+        )
+    with pytest.raises(ConsoleConflict, match="fingerprint changed"):
+        service.approve_workspace_memory(
+            candidate.version_id,
+            WorkspaceMemoryDecisionRequest(
+                expected_content_sha256=candidate.content_sha256,
+                expected_fingerprint="0" * 64,
+                confirmed=True,
+            ),
+        )
+
+    approved = service.approve_workspace_memory(
+        candidate.version_id,
+        WorkspaceMemoryDecisionRequest(
+            reason="Operator reviewed the exact deterministic candidate",
+            expected_content_sha256=candidate.content_sha256,
+            expected_fingerprint=candidate.fingerprint,
+            confirmed=True,
+        ),
+    )
+    assert approved.state == "approved"
+    assert approved.active is True
+    with_approval = service.request_plan(
+        PlanRequest(objective="人工批准后才可使用经验")
+    )
+    assert with_approval.memory_version_ids == [candidate.version_id]
+
+
+def test_experience_candidate_is_idempotent_dismissible_and_never_self_approves(
+    console_env,
+):
+    _, service, _, _ = console_env
+    finished = service.refresh_execution(_running_aion_plan(service).plan_id)
+    candidate = next(
+        row
+        for row in service.list_workspace_memories()
+        if row.origin == "automatic_experience"
+    )
+
+    same = service.generate_experience_candidate(finished.plan_id)
+    assert same is not None
+    assert same.version_id == candidate.version_id
+    assert (
+        len(
+            [
+                event
+                for event in service.ledger.read_all()
+                if event["kind"] == "workspace_memory_candidate_created"
+                and event["payload"]["generation_key"] == candidate.generation_key
+            ]
+        )
+        == 1
+    )
+
+    dismissed = service.dismiss_workspace_memory(
+        candidate.version_id,
+        WorkspaceMemoryDecisionRequest(
+            reason="Not useful for future work",
+            expected_content_sha256=candidate.content_sha256,
+            expected_fingerprint=candidate.fingerprint,
+            confirmed=True,
+        ),
+    )
+    assert dismissed.state == "dismissed"
+    assert dismissed.active is False
+    assert service.list_workspace_memories(include_history=False) == []
+    again = service.generate_experience_candidate(finished.plan_id)
+    assert again is not None
+    assert again.version_id == candidate.version_id
+    assert again.state == "dismissed"
+    planned = service.request_plan(
+        PlanRequest(objective="已忽略经验不得进入规划快照")
+    )
+    assert planned.memory_version_ids == []
+    assert not any(
+        event["kind"] == "workspace_memory_approved"
+        for event in service.ledger.read_all()
+    )
+
+
+@pytest.mark.parametrize("approve_before_erasure", [False, True])
+def test_source_run_erasure_removes_automatic_experience_and_planner_access(
+    console_env,
+    approve_before_erasure,
+):
+    _, service, _, _ = console_env
+    finished = service.refresh_execution(_running_aion_plan(service).plan_id)
+    candidate = next(
+        row
+        for row in service.list_workspace_memories()
+        if row.origin == "automatic_experience"
+    )
+    document_path = service.workspace_memory.root / candidate.relative_path
+    metadata_path = (
+        service.workspace_memory.metadata_dir / f"{candidate.version_id}.json"
+    )
+    assert document_path.is_file()
+    assert metadata_path.is_file()
+
+    if approve_before_erasure:
+        service.approve_workspace_memory(
+            candidate.version_id,
+            WorkspaceMemoryDecisionRequest(
+                expected_content_sha256=candidate.content_sha256,
+                expected_fingerprint=candidate.fingerprint,
+                confirmed=True,
+            ),
+        )
+        planned = service.request_plan(
+            PlanRequest(objective="擦除前，已批准经验可以进入规划")
+        )
+        assert planned.memory_version_ids == [candidate.version_id]
+
+    assert finished.plan_sha256 is not None
+    service.erase_run_data(
+        finished.plan_id,
+        EraseRunRequest(
+            expected_plan_sha256=finished.plan_sha256,
+            confirmed=True,
+        ),
+    )
+
+    assert not document_path.exists()
+    assert not metadata_path.exists()
+    assert all(
+        row.source_plan_id != finished.plan_id
+        for row in service.list_workspace_memories()
+    )
+    planned_after_erasure = service.request_plan(
+        PlanRequest(objective="擦除后不得再使用源 Work 的自动经验")
+    )
+    assert planned_after_erasure.memory_version_ids == []
+    kinds = [event["kind"] for event in service.ledger.read_all()]
+    assert kinds.index("task_run_erasure_started") < kinds.index("task_run_erased")
+    assert kinds.index("task_run_erased") < kinds.index(
+        "workspace_memory_source_invalidated"
+    )
+
+
+def test_source_plan_delete_purges_approved_automatic_experience(console_env):
+    _, service, _, _ = console_env
+    finished = service.refresh_execution(_running_aion_plan(service).plan_id)
+    candidate = next(
+        row
+        for row in service.list_workspace_memories()
+        if row.origin == "automatic_experience"
+    )
+    service.approve_workspace_memory(
+        candidate.version_id,
+        WorkspaceMemoryDecisionRequest(
+            expected_content_sha256=candidate.content_sha256,
+            expected_fingerprint=candidate.fingerprint,
+            confirmed=True,
+        ),
+    )
+    document_path = service.workspace_memory.root / candidate.relative_path
+    metadata_path = (
+        service.workspace_memory.metadata_dir / f"{candidate.version_id}.json"
+    )
+
+    service.delete_plan(finished.plan_id, DeletePlanRequest(confirmed=True))
+
+    assert not document_path.exists()
+    assert not metadata_path.exists()
+    assert service.list_workspace_memories() == []
+    planned = service.request_plan(
+        PlanRequest(objective="软删除后自动经验不得进入规划")
+    )
+    assert planned.memory_version_ids == []
+    events = service.ledger.read_all()
+    kinds = [event["kind"] for event in events]
+    assert kinds.index("task_plan_deleted") < kinds.index(
+        "workspace_memory_source_invalidated"
+    )
+    tombstone = next(
+        event
+        for event in events
+        if event["kind"] == "workspace_memory_source_invalidated"
+    )
+    descriptor = tombstone["payload"]["versions"][0]
+    assert set(descriptor) == {
+        "version_id",
+        "memory_id",
+        "version_number",
+        "kind",
+        "source_plan_id",
+        "source_plan_sha256",
+        "metadata_sha256",
+        "document_sha256",
+        "relative_path",
+    }
+    assert "content" not in json.dumps(tombstone, ensure_ascii=False)
+    assert candidate.content not in json.dumps(tombstone, ensure_ascii=False)
+
+
+def test_source_invalidation_crash_hides_memory_and_startup_erases_residue(
+    console_env,
+    monkeypatch,
+):
+    settings, service, aion, paperclip = console_env
+    finished = service.refresh_execution(_running_aion_plan(service).plan_id)
+    candidate = next(
+        row
+        for row in service.list_workspace_memories()
+        if row.origin == "automatic_experience"
+    )
+    service.approve_workspace_memory(
+        candidate.version_id,
+        WorkspaceMemoryDecisionRequest(
+            expected_content_sha256=candidate.content_sha256,
+            expected_fingerprint=candidate.fingerprint,
+            confirmed=True,
+        ),
+    )
+    document_path = service.workspace_memory.root / candidate.relative_path
+    metadata_path = (
+        service.workspace_memory.metadata_dir / f"{candidate.version_id}.json"
+    )
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            service.workspace_memory,
+            "erase_committed",
+            lambda descriptor: (_ for _ in ()).throw(OSError("simulated cleanup crash")),
+        )
+        with pytest.raises(ConsoleUnavailable, match="cleanup is incomplete"):
+            service.delete_plan(finished.plan_id, DeletePlanRequest(confirmed=True))
+
+    assert document_path.is_file()
+    assert metadata_path.is_file()
+    assert service.list_workspace_memories() == []
+    assert service.request_plan(
+        PlanRequest(objective="清理恢复前也不能使用失效经验")
+    ).memory_version_ids == []
+    assert (
+        len(
+            [
+                event
+                for event in service.ledger.read_all()
+                if event["kind"] == "workspace_memory_source_invalidated"
+            ]
+        )
+        == 1
+    )
+
+    restarted = ConsoleService(
+        settings,
+        aion=aion,  # type: ignore[arg-type]
+        paperclip_factory=lambda: paperclip,  # type: ignore[arg-type,return-value]
+        background=False,
+    )
+    assert restarted.acquire_instance_lease() is True
+    try:
+        recovered = restarted.recover_startup()
+    finally:
+        restarted.release_instance_lease()
+        restarted.close()
+
+    assert recovered["workspace_memory_source_files_erased"] == 1
+    assert not document_path.exists()
+    assert not metadata_path.exists()
+    assert service.list_workspace_memories() == []
+
+
+@pytest.mark.parametrize("approve_before_crash", [False, True])
+def test_startup_recovers_scrub_before_erasure_receipt_and_purges_experience(
+    console_env,
+    monkeypatch,
+    approve_before_crash,
+):
+    settings, service, aion, paperclip = console_env
+    finished = service.refresh_execution(_running_aion_plan(service).plan_id)
+    candidate = next(
+        row
+        for row in service.list_workspace_memories()
+        if row.origin == "automatic_experience"
+    )
+    if approve_before_crash:
+        service.approve_workspace_memory(
+            candidate.version_id,
+            WorkspaceMemoryDecisionRequest(
+                expected_content_sha256=candidate.content_sha256,
+                expected_fingerprint=candidate.fingerprint,
+                confirmed=True,
+            ),
+        )
+    document_path = service.workspace_memory.root / candidate.relative_path
+    metadata_path = (
+        service.workspace_memory.metadata_dir / f"{candidate.version_id}.json"
+    )
+    original_append = service._append
+
+    def crash_before_erasure_receipt(kind, run_id, payload):
+        if kind == "task_run_erased":
+            raise OSError("simulated crash before erasure receipt")
+        return original_append(kind, run_id, payload)
+
+    assert finished.plan_sha256 is not None
+    with monkeypatch.context() as patch:
+        patch.setattr(service, "_append", crash_before_erasure_receipt)
+        with pytest.raises(OSError, match="before erasure receipt"):
+            service.erase_run_data(
+                finished.plan_id,
+                EraseRunRequest(
+                    expected_plan_sha256=finished.plan_sha256,
+                    confirmed=True,
+                ),
+            )
+
+    shell = service.store.get(finished.plan_id)
+    assert shell.erased_at is not None
+    assert shell.erasure_event_id is None
+    assert shell.plan is None
+    assert document_path.is_file()
+    assert metadata_path.is_file()
+    assert not any(
+        event["kind"]
+        in {"task_run_erased", "workspace_memory_source_invalidated"}
+        for event in service.ledger.read_all()
+    )
+    intents = [
+        event
+        for event in service.ledger.read_all()
+        if event["kind"] == "task_run_erasure_started"
+    ]
+    assert len(intents) == 1
+    assert intents[0]["payload"] == {
+        "schema_version": 1,
+        "source": "local_console",
+        "status": finished.status,
+        "plan_sha256": finished.plan_sha256,
+        "parent_plan_id": finished.parent_plan_id,
+        "revision_number": finished.revision_number,
+    }
+    assert candidate.content not in json.dumps(intents[0], ensure_ascii=False)
+
+    restarted = ConsoleService(
+        settings,
+        aion=aion,  # type: ignore[arg-type]
+        paperclip_factory=lambda: paperclip,  # type: ignore[arg-type,return-value]
+        background=False,
+    )
+    assert restarted.acquire_instance_lease() is True
+    try:
+        recovered = restarted.recover_startup()
+    finally:
+        restarted.release_instance_lease()
+        restarted.close()
+
+    assert recovered["erased_run_receipts_recovered"] == 1
+    assert recovered["workspace_memory_source_files_erased"] == 1
+    assert not document_path.exists()
+    assert not metadata_path.exists()
+    assert service.list_workspace_memories() == []
+    assert service.request_plan(
+        PlanRequest(objective="擦除恢复后不得使用源 Work 的自动经验")
+    ).memory_version_ids == []
+    restored_shell = service.store.get(finished.plan_id)
+    assert restored_shell.erasure_event_id is not None
+    events = service.ledger.read_all()
+    kinds = [event["kind"] for event in events]
+    assert kinds.index("task_run_erasure_started") < kinds.index("task_run_erased")
+    assert kinds.index("task_run_erased") < kinds.index(
+        "workspace_memory_source_invalidated"
+    )
+    intent = next(
+        event for event in events if event["kind"] == "task_run_erasure_started"
+    )
+    receipt = next(event for event in events if event["kind"] == "task_run_erased")
+    assert receipt["payload"]["intent_event_id"] == intent["event_id"]
+    assert sum(event["kind"] == "task_run_erasure_started" for event in events) == 1
+    assert sum(event["kind"] == "task_run_erased" for event in events) == 1
+    assert (
+        sum(
+            event["kind"] == "workspace_memory_source_invalidated"
+            for event in events
+        )
+        == 1
+    )
+    encoded_ledger = json.dumps(events, ensure_ascii=False)
+    assert candidate.content not in encoded_ledger
+    assert "Run content erased" not in encoded_ledger
+
+
+def _forge_scrubbed_erasure_shell(current: PlanRecord) -> PlanRecord:
+    current.objective = "Run content erased"
+    current.constraints = ""
+    current.workspace = ""
+    current.preferred_cadence = "once"
+    current.attachments = []
+    current.source_blueprint_id = None
+    current.source_blueprint_sha256 = None
+    current.memory_snapshot_sha256 = None
+    current.memory_version_ids = []
+    current.approval_mode = None
+    current.planning_progress = None
+    current.plan = None
+    current.revision_instruction = ""
+    current.error = None
+    current.execution = None
+    current.erased_at = "2026-07-25T12:00:00+00:00"
+    current.erasure_event_id = None
+    return current
+
+
+def test_startup_rejects_forged_erased_shell_without_durable_intent(console_env):
+    _, service, _, _ = console_env
+    finished = service.refresh_execution(_running_aion_plan(service).plan_id)
+    candidate = next(
+        row
+        for row in service.list_workspace_memories()
+        if row.origin == "automatic_experience"
+    )
+    service.approve_workspace_memory(
+        candidate.version_id,
+        WorkspaceMemoryDecisionRequest(
+            expected_content_sha256=candidate.content_sha256,
+            expected_fingerprint=candidate.fingerprint,
+            confirmed=True,
+        ),
+    )
+    document_path = service.workspace_memory.root / candidate.relative_path
+    metadata_path = (
+        service.workspace_memory.metadata_dir / f"{candidate.version_id}.json"
+    )
+    service.store.mutate(finished.plan_id, _forge_scrubbed_erasure_shell)
+
+    assert service.acquire_instance_lease() is True
+    try:
+        with pytest.raises(ConsoleUnavailable, match="no durable erasure intent"):
+            service.recover_startup()
+    finally:
+        service.release_instance_lease()
+
+    assert document_path.is_file()
+    assert metadata_path.is_file()
+    assert service.get_workspace_memory(candidate.version_id).state == "approved"
+    assert not any(
+        event["kind"]
+        in {
+            "task_run_erasure_started",
+            "task_run_erased",
+            "workspace_memory_source_invalidated",
+        }
+        for event in service.ledger.read_all()
+    )
+
+
+@pytest.mark.parametrize("conflicting", [False, True])
+def test_startup_rejects_duplicate_or_conflicting_erasure_intents(
+    console_env,
+    conflicting,
+):
+    _, service, aion, _ = console_env
+    finished = service.refresh_execution(_running_aion_plan(service).plan_id)
+    payload = service._run_erasure_intent_payload(finished)
+    service._append("task_run_erasure_started", finished.plan_id, payload)
+    duplicate = dict(payload)
+    if conflicting:
+        duplicate["revision_number"] = finished.revision_number + 1
+    service._append("task_run_erasure_started", finished.plan_id, duplicate)
+
+    assert service.acquire_instance_lease() is True
+    try:
+        with pytest.raises(ConsoleConflict, match="intent evidence is not unique"):
+            service.recover_startup()
+    finally:
+        service.release_instance_lease()
+
+    assert service.store.get(finished.plan_id).erased_at is None
+    assert aion.deleted_teams == []
+    assert not any(
+        event["kind"] == "task_run_erased"
+        for event in service.ledger.read_all()
+    )
+
+
+def test_startup_rejects_erasure_receipt_bound_to_another_intent(console_env):
+    _, service, _, _ = console_env
+    finished = service.refresh_execution(_running_aion_plan(service).plan_id)
+    candidate = next(
+        row
+        for row in service.list_workspace_memories()
+        if row.origin == "automatic_experience"
+    )
+    intent = service._append(
+        "task_run_erasure_started",
+        finished.plan_id,
+        service._run_erasure_intent_payload(finished),
+    )
+    service.store.mutate(finished.plan_id, _forge_scrubbed_erasure_shell)
+    service._append(
+        "task_run_erased",
+        finished.plan_id,
+        {
+            "schema_version": 1,
+            "source": "local_console",
+            "status": finished.status,
+            "plan_sha256": finished.plan_sha256,
+            "parent_plan_id": finished.parent_plan_id,
+            "revision_number": finished.revision_number,
+            "intent_event_id": new_ulid(),
+            "local_workspace_removed": False,
+            "exclusive_aion_team_removed": False,
+            "cas_blobs_removed": 0,
+            "shared_blobs_retained": 0,
+            "material_sets_removed": 0,
+            "shared_material_sets_retained": 0,
+            "project_library_metadata_removed": 0,
+            "external_workspace_retained": False,
+            "external_governance_retained": False,
+        },
+    )
+
+    assert service.acquire_instance_lease() is True
+    try:
+        with pytest.raises(ConsoleUnavailable, match="does not match its intent"):
+            service.recover_startup()
+    finally:
+        service.release_instance_lease()
+
+    assert intent["event_id"] != service.ledger.read_all()[-1]["payload"]["intent_event_id"]
+    assert (service.workspace_memory.root / candidate.relative_path).is_file()
+    assert not any(
+        event["kind"] == "workspace_memory_source_invalidated"
+        for event in service.ledger.read_all()
+    )
+    assert candidate.content not in json.dumps(service.ledger.read_all(), ensure_ascii=False)
+
+
+def test_deleted_failed_plan_without_plan_hash_does_not_block_startup(console_env):
+    _, service, _, _ = console_env
+    requested = service.request_plan(PlanRequest(objective="规划前失败且没有计划哈希"))
+
+    def fail_before_plan(current):
+        current.status = "failed"
+        current.error = "simulated planning failure"
+        return current
+
+    failed = service.store.mutate(requested.plan_id, fail_before_plan)
+    assert failed.plan_sha256 is None
+    service.delete_plan(failed.plan_id, DeletePlanRequest(confirmed=True))
+
+    assert service.acquire_instance_lease() is True
+    try:
+        recovered = service.recover_startup()
+    finally:
+        service.release_instance_lease()
+    assert recovered["workspace_memory_source_files_erased"] == 0
+
+
+def test_workspace_memory_invalidation_rejects_malformed_descriptor(console_env):
+    _, service, _, _ = console_env
+    finished = service.refresh_execution(_running_aion_plan(service).plan_id)
+    candidate = next(
+        row
+        for row in service.list_workspace_memories()
+        if row.origin == "automatic_experience"
+    )
+    descriptor = service.workspace_memory.committed_erasure_descriptor(
+        candidate.version_id
+    )
+    descriptor["relative_path"] = "../outside.md"
+    service._append(
+        "workspace_memory_source_invalidated",
+        finished.plan_id,
+        {
+            "schema_version": 1,
+            "source": "local_console",
+            "reason": "source_plan_deleted",
+            "source_plan_id": finished.plan_id,
+            "source_plan_sha256": finished.plan_sha256,
+            "versions": [descriptor],
+        },
+    )
+    with pytest.raises(ConsoleConflict, match="invalidation evidence is invalid"):
+        service.list_workspace_memories()
+
+
+def test_workspace_memory_prepared_transaction_recovers_file_before_ledger_crash(
+    console_env,
+    monkeypatch,
+):
+    _, service, _, _ = console_env
+    original_append = service._append
+
+    def fail_candidate_evidence(kind, run_id, payload):
+        if kind == "workspace_memory_candidate_created":
+            raise ConsoleUnavailable("simulated ledger outage")
+        return original_append(kind, run_id, payload)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(service, "_append", fail_candidate_evidence)
+        with pytest.raises(ConsoleUnavailable, match="simulated ledger outage"):
+            service.create_workspace_memory_candidate(
+                WorkspaceMemoryCandidateRequest(
+                    kind="process",
+                    title="Crash recovery candidate",
+                    content="Retain this candidate only after durable audit recovery.",
+                    confirmed=True,
+                )
+            )
+
+    pending = service.workspace_memory.list_pending()
+    assert len(pending) == 1
+    version, content = pending[0]
+    assert service.workspace_memory.get(version.version_id) == (version, content)
+    assert not any(
+        event["kind"] == "workspace_memory_candidate_created"
+        for event in service.ledger.read_all()
+    )
+
+    assert service.acquire_instance_lease() is True
+    try:
+        recovered = service.recover_startup()
+    finally:
+        service.release_instance_lease()
+    assert recovered["workspace_memory_transactions_recovered"] == 1
+    assert service.workspace_memory.list_pending() == []
+    candidate = service.get_workspace_memory(version.version_id)
+    assert candidate.state == "candidate"
+    assert (
+        len(
+            [
+                event
+                for event in service.ledger.read_all()
+                if event["kind"] == "workspace_memory_candidate_created"
+                and event["run_id"] == version.version_id
+            ]
+        )
+        == 1
+    )
+
+
+def test_startup_backfills_eligible_experience_but_excludes_onboarding_demo(
+    console_env,
+    monkeypatch,
+):
+    _, service, _, _ = console_env
+    running = _running_aion_plan(service)
+    with monkeypatch.context() as patch:
+        patch.setattr(service, "generate_experience_candidate", lambda plan_id: None)
+        finished = service.refresh_execution(running.plan_id)
+    assert finished.status == "completed_unverified"
+    assert service.list_workspace_memories() == []
+
+    assert service.acquire_instance_lease() is True
+    try:
+        recovered = service.recover_startup()
+    finally:
+        service.release_instance_lease()
+    assert recovered["experience_candidates_generated"] == 1
+    assert len(service.list_workspace_memories()) == 1
+
+    requested = service.request_plan(PlanRequest(objective="构造首次体验排除记录"))
+    ready = service.draft_plan(requested.plan_id)
+
+    def mark_onboarding(current):
+        assert current.plan is not None
+        current.plan.title = "Reply to Your First Customer"
+        current.plan_sha256 = _execution_plan_sha(current)
+        return current
+
+    ready = service.store.mutate(ready.plan_id, mark_onboarding)
+    service.confirm_plan(
+        ready.plan_id,
+        ConfirmRequest(plan_sha256=str(ready.plan_sha256), confirmed=True),
+    )
+
+    def mark_completed(current):
+        current.status = "completed_unverified"
+        current.execution = ExecutionState(
+            kind="aion_team",
+            status="completed_unverified",
+            finished_at="2026-07-24T20:00:00+00:00",
+            finish_event_recorded=True,
+        )
+        return current
+
+    service.store.mutate(ready.plan_id, mark_completed)
+    service._append(
+        "task_execution_finished",
+        ready.plan_id,
+        {
+            "schema_version": 1,
+            "status": "completed_unverified",
+            "outcome_verified": False,
+            "plan_sha256": ready.plan_sha256,
+            "paperclip_issue_id": None,
+        },
+    )
+    assert service.generate_experience_candidate(ready.plan_id) is None
+    assert all(
+        row.source_plan_id != ready.plan_id for row in service.list_workspace_memories()
+    )
+
+
+def test_workspace_memory_gets_do_not_generate_or_change_candidate_evidence(
+    console_env,
+    monkeypatch,
+):
+    settings, service, _, _ = console_env
+    service.refresh_execution(_running_aion_plan(service).plan_id)
+    candidate = next(
+        row
+        for row in service.list_workspace_memories()
+        if row.origin == "automatic_experience"
+    )
+    monkeypatch.setattr(service, "acquire_instance_lease", lambda: True)
+    monkeypatch.setattr(service, "recover_startup", lambda: {})
+    monkeypatch.setattr(service, "release_instance_lease", lambda: None)
+    app = create_app(settings, service=service)
+    before = json.dumps(service.ledger.read_all(), ensure_ascii=False, sort_keys=True)
+
+    with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+        listed = client.get("/api/v1/workspace-memory")
+        detail = client.get(f"/api/v1/workspace-memory/{candidate.version_id}")
+
+    assert listed.status_code == 200
+    assert detail.status_code == 200
+    assert detail.json()["fingerprint"] == candidate.fingerprint
+    assert json.dumps(service.ledger.read_all(), ensure_ascii=False, sort_keys=True) == before
+
+
+def test_experience_candidate_dismiss_api_is_hash_bound(console_env, monkeypatch):
+    settings, service, _, _ = console_env
+    service.refresh_execution(_running_aion_plan(service).plan_id)
+    candidate = next(
+        row
+        for row in service.list_workspace_memories()
+        if row.origin == "automatic_experience"
+    )
+    monkeypatch.setattr(service, "acquire_instance_lease", lambda: True)
+    monkeypatch.setattr(service, "recover_startup", lambda: {})
+    monkeypatch.setattr(service, "release_instance_lease", lambda: None)
+    app = create_app(settings, service=service)
+    csrf = app.state.csrf_token
+
+    with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+        missing_hashes = client.post(
+            f"/api/v1/workspace-memory/{candidate.version_id}/dismiss",
+            json={"confirmed": True},
+            headers={"X-QD-CSRF": csrf},
+        )
+        dismissed = client.post(
+            f"/api/v1/workspace-memory/{candidate.version_id}/dismiss",
+            json={
+                "reason": "Operator dismissed exact candidate",
+                "expected_content_sha256": candidate.content_sha256,
+                "expected_fingerprint": candidate.fingerprint,
+                "confirmed": True,
+            },
+            headers={"X-QD-CSRF": csrf},
+        )
+        active = client.get(
+            "/api/v1/workspace-memory",
+            params={"include_history": False},
+        )
+
+    assert missing_hashes.status_code == 409
+    assert dismissed.status_code == 200
+    assert dismissed.json()["state"] == "dismissed"
+    assert active.json() == []
+
+
+def test_experience_generation_fails_closed_on_duplicate_terminal_or_record_flag_mismatch(
+    console_env,
+    monkeypatch,
+):
+    _, service, _, _ = console_env
+    duplicate_run = _running_aion_plan(service)
+    with monkeypatch.context() as patch:
+        patch.setattr(service, "generate_experience_candidate", lambda plan_id: None)
+        duplicate_finished = service.refresh_execution(duplicate_run.plan_id)
+    terminal = next(
+        event
+        for event in service.ledger.read_all()
+        if event["kind"] == "task_execution_finished"
+        and event["run_id"] == duplicate_finished.plan_id
+    )
+    service._append(
+        "task_execution_finished",
+        duplicate_finished.plan_id,
+        {**terminal["payload"], "plan_sha256": "0" * 64},
+    )
+    with pytest.raises(ConsoleConflict, match="terminal evidence is not unique"):
+        service.generate_experience_candidate(duplicate_finished.plan_id)
+    assert service.list_workspace_memories() == []
+
+    mismatched_run = _running_aion_plan(service)
+    with monkeypatch.context() as patch:
+        patch.setattr(service, "generate_experience_candidate", lambda plan_id: None)
+        mismatched_finished = service.refresh_execution(mismatched_run.plan_id)
+
+    def clear_finish_evidence(current):
+        assert current.execution is not None
+        current.execution.finish_event_recorded = False
+        current.execution.outcome_verified = True
+        return current
+
+    service.store.mutate(mismatched_finished.plan_id, clear_finish_evidence)
+    assert service.generate_experience_candidate(mismatched_finished.plan_id) is None
+    assert service.list_workspace_memories() == []
+
+    inner_status_run = _running_aion_plan(service)
+    with monkeypatch.context() as patch:
+        patch.setattr(service, "generate_experience_candidate", lambda plan_id: None)
+        inner_status_finished = service.refresh_execution(inner_status_run.plan_id)
+
+    def mismatch_inner_status(current):
+        assert current.execution is not None
+        current.execution.status = "failed"
+        return current
+
+    service.store.mutate(inner_status_finished.plan_id, mismatch_inner_status)
+    assert service.generate_experience_candidate(inner_status_finished.plan_id) is None
+
+    invalid_time_run = _running_aion_plan(service)
+    with monkeypatch.context() as patch:
+        patch.setattr(service, "generate_experience_candidate", lambda plan_id: None)
+        invalid_time_finished = service.refresh_execution(invalid_time_run.plan_id)
+
+    def invalidate_finished_at(current):
+        assert current.execution is not None
+        current.execution.finished_at = "not-a-time"
+        return current
+
+    service.store.mutate(invalid_time_finished.plan_id, invalidate_finished_at)
+    assert service.generate_experience_candidate(invalid_time_finished.plan_id) is None
+    assert service.list_workspace_memories() == []
+
+
+def test_startup_recovers_append_before_finish_flag_and_generates_exactly_one_candidate(
+    console_env,
+    monkeypatch,
+):
+    settings, service, aion, paperclip = console_env
+    running = _running_aion_plan(service)
+    original_mutate = service.store.mutate
+
+    def crash_before_finish_flag(plan_id, fn):
+        current = service.store.get(plan_id)
+        if (
+            current.status == "completed_unverified"
+            and current.execution is not None
+            and current.execution.finish_event_recorded is False
+        ):
+            trial = fn(current.model_copy(deep=True))
+            if (
+                trial.execution is not None
+                and trial.execution.finish_event_recorded is True
+            ):
+                raise OSError("simulated crash after terminal append")
+        return original_mutate(plan_id, fn)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(service.store, "mutate", crash_before_finish_flag)
+        with pytest.raises(OSError, match="after terminal append"):
+            service.refresh_execution(running.plan_id)
+
+    crashed = service.store.get(running.plan_id)
+    assert crashed.status == "completed_unverified"
+    assert crashed.execution is not None
+    assert crashed.execution.finish_event_recorded is False
+    assert (
+        len(
+            [
+                event
+                for event in service.ledger.read_all()
+                if event["kind"] == "task_execution_finished"
+                and event["run_id"] == running.plan_id
+            ]
+        )
+        == 1
+    )
+    assert service.list_workspace_memories() == []
+
+    restarted = ConsoleService(
+        settings,
+        aion=aion,  # type: ignore[arg-type]
+        paperclip_factory=lambda: paperclip,  # type: ignore[arg-type,return-value]
+        background=False,
+    )
+    assert restarted.acquire_instance_lease() is True
+    try:
+        recovered = restarted.recover_startup()
+    finally:
+        restarted.release_instance_lease()
+        restarted.close()
+
+    assert recovered["terminal_finish_flags_recovered"] == 1
+    assert recovered["experience_candidates_generated"] == 1
+    restored = service.store.get(running.plan_id)
+    assert restored.execution is not None
+    assert restored.execution.finish_event_recorded is True
+    events = service.ledger.read_all()
+    assert (
+        len(
+            [
+                event
+                for event in events
+                if event["kind"] == "task_execution_finished"
+                and event["run_id"] == running.plan_id
+            ]
+        )
+        == 1
+    )
+    assert (
+        len(
+            [
+                event
+                for event in events
+                if event["kind"] == "workspace_memory_candidate_created"
+                and event["payload"].get("source_plan_id") == running.plan_id
+            ]
+        )
+        == 1
+    )

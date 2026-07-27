@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 from contextlib import asynccontextmanager
+from contextlib import suppress
 from ipaddress import ip_address
 from pathlib import Path
 from typing import AsyncIterator, Literal
+from urllib.parse import quote
 
 from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
@@ -29,24 +32,49 @@ from opswitness.console.pairing import (
     PairingStateError,
 )
 from opswitness.console.schemas import (
+    AgentContractPreviewRequest,
+    AgentContractRevisionRequest,
+    AgentGraphRevisionRequest,
     ApprovalDecisionRequest,
+    ArtifactSignoffRequest,
     ConfirmRequest,
     ContinueRunRequest,
     DeletePlanRequest,
+    DesktopDrainRequest,
     EraseRunRequest,
     ExecutionApprovalModeRequest,
     ExecutionControlRequest,
     ExecutionProfileRevisionRequest,
     ForkPlanRequest,
+    LibraryCardDecisionRequestV1,
+    LibraryCardJobRequestV1,
+    LibraryCollectionCreateV1,
+    LibraryCollectionRevisionRequestV1,
+    LibraryDocumentMetadataUpdateV1,
+    LibraryH5ExportPreviewRequestV1,
+    LibraryH5ExportRequestV1,
+    LibraryImportCommitRequestV1,
+    LibraryImportCreateRequestV1,
+    LibraryPlanRequestV1,
+    LibrarySearchRequestV1,
+    LibrarySemanticModelDownloadRequestV1,
     MailAuthorizationRequest,
     MailDisableRequest,
     MailOAuthClientRequest,
+    OnboardingFirstWorkRequest,
+    OnboardingMigrationRequest,
+    OnboardingProviderRequest,
     OrganizationRevisionRequest,
     PairingClaimRequest,
     PairingMutationRequest,
     PlanRequest,
     ProcessMemoryProposalRequest,
+    ProjectLibraryItem,
+    ProjectLibraryItemPreview,
+    ProjectLibraryMetadataUpdate,
     ProviderConnectionRequest,
+    RecoveryCheckRequest,
+    RecoveryDecisionRequest,
     RerunPlanRequest,
     RevisePlanRequest,
     RuntimeInputAnswerRequest,
@@ -163,11 +191,30 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         acquired_here = False
+        recovery_monitor: asyncio.Task[None] | None = None
+
+        async def monitor_recovery() -> None:
+            while True:
+                await asyncio.sleep(15)
+                try:
+                    await run_in_threadpool(service.monitor_recovery_cycle)
+                except (ConsoleConflict, ConsoleUnavailable, OSError, ValueError):
+                    # The next bounded cycle retries; the service records Work-level evidence.
+                    pass
+
         try:
             acquired_here = await run_in_threadpool(service.acquire_instance_lease)
             await run_in_threadpool(service.recover_startup)
+            recovery_monitor = asyncio.create_task(
+                monitor_recovery(),
+                name="opswitness-recovery-monitor",
+            )
             yield
         finally:
+            if recovery_monitor is not None:
+                recovery_monitor.cancel()
+                with suppress(asyncio.CancelledError):
+                    await recovery_monitor
             if owned_service:
                 service.close()
             elif acquired_here:
@@ -264,7 +311,20 @@ def create_app(
                     JSONResponse({"detail": "csrf token required"}, status_code=403),
                     request,
                 )
-            if not request.headers.get("content-type", "").startswith("application/json"):
+            is_library_upload = (
+                request.method == "PUT"
+                and request.url.path.startswith("/api/v1/library/imports/")
+                and "/files/" in request.url.path
+                and request.headers.get("content-type", "").startswith(
+                    "application/octet-stream"
+                )
+            )
+            if (
+                not is_library_upload
+                and not request.headers.get("content-type", "").startswith(
+                    "application/json"
+                )
+            ):
                 return secure_response(
                     JSONResponse({"detail": "application/json required"}, status_code=415),
                     request,
@@ -434,9 +494,456 @@ def create_app(
         }
         return payload
 
+    @app.get("/api/v1/onboarding")
+    async def onboarding() -> dict:
+        snapshot = await run_in_threadpool(service.onboarding_status)
+        return snapshot.model_dump(mode="json")
+
+    @app.get("/api/v1/works/{work_id}/recovery")
+    async def work_recovery(work_id: str) -> dict:
+        snapshot = await run_in_threadpool(service.recovery_status, work_id)
+        return snapshot.model_dump(mode="json")
+
+    @app.post("/api/v1/works/{work_id}/recovery/check")
+    async def check_work_recovery(
+        work_id: str,
+        body: RecoveryCheckRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del body, x_qd_csrf
+        snapshot = await run_in_threadpool(service.check_recovery, work_id)
+        return snapshot.model_dump(mode="json")
+
+    @app.post("/api/v1/works/{work_id}/recovery/decision")
+    async def decide_work_recovery(
+        work_id: str,
+        body: RecoveryDecisionRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        snapshot, repair_work = await run_in_threadpool(
+            service.decide_recovery,
+            work_id,
+            body,
+        )
+        return {
+            "recovery": snapshot.model_dump(mode="json"),
+            "repair_work": repair_work.model_dump(mode="json"),
+        }
+
+    @app.post("/api/v1/desktop/drain")
+    async def desktop_drain(
+        body: DesktopDrainRequest,
+        x_opswitness_desktop_instance: str = Header(
+            alias="X-OpsWitness-Desktop-Instance",
+            min_length=8,
+            max_length=128,
+        ),
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        return await run_in_threadpool(
+            service.desktop_drain,
+            x_opswitness_desktop_instance,
+            body.action,
+        )
+
+    @app.post("/api/v1/onboarding/migration")
+    async def select_onboarding_migration(
+        body: OnboardingMigrationRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        snapshot = await run_in_threadpool(service.select_onboarding_migration, body)
+        return snapshot.model_dump(mode="json")
+
+    @app.post("/api/v1/onboarding/provider")
+    async def select_onboarding_provider(
+        body: OnboardingProviderRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        snapshot = await run_in_threadpool(service.select_onboarding_provider, body)
+        return snapshot.model_dump(mode="json")
+
+    @app.post("/api/v1/onboarding/first-work", status_code=status.HTTP_201_CREATED)
+    async def create_first_onboarding_work(
+        body: OnboardingFirstWorkRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        snapshot, record = await run_in_threadpool(
+            service.create_first_onboarding_work,
+            body,
+        )
+        return {
+            "onboarding": snapshot.model_dump(mode="json"),
+            "plan": record.model_dump(mode="json"),
+        }
+
+    @app.post("/api/v1/works/{work_id}/artifact-signoff")
+    async def signoff_onboarding_artifacts(
+        work_id: str,
+        body: ArtifactSignoffRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        snapshot = await run_in_threadpool(
+            service.signoff_onboarding_artifacts,
+            work_id,
+            body,
+        )
+        return snapshot.model_dump(mode="json")
+
     @app.get("/api/v1/plans")
     async def plans() -> list[dict]:
         return [row.model_dump(mode="json") for row in await run_in_threadpool(service.list_plans)]
+
+    @app.get("/api/v1/project-library", response_model=list[ProjectLibraryItem])
+    async def project_library(
+        query: str = "",
+        tag: str = "",
+        file_type: str = "",
+        work_id: str = "",
+    ) -> list[dict]:
+        return await run_in_threadpool(
+            service.list_project_library,
+            query=query[:200],
+            tag=tag[:40],
+            file_type=file_type[:100],
+            work_id=work_id[:64],
+        )
+
+    @app.get(
+        "/api/v1/project-library/{asset_id}",
+        response_model=ProjectLibraryItemPreview,
+    )
+    async def project_library_item(asset_id: str) -> dict:
+        return await run_in_threadpool(service.get_project_library_item, asset_id)
+
+    @app.patch(
+        "/api/v1/project-library/{asset_id}",
+        response_model=ProjectLibraryItemPreview,
+    )
+    async def update_project_library_item(
+        asset_id: str,
+        body: ProjectLibraryMetadataUpdate,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        return await run_in_threadpool(
+            service.update_project_library_metadata,
+            asset_id,
+            body,
+        )
+
+    @app.get("/api/v1/project-library/{asset_id}/content")
+    async def project_library_content(asset_id: str) -> Response:
+        item = await run_in_threadpool(service.get_project_library_content, asset_id)
+        return Response(
+            content=item["content"],
+            media_type=item["mime"],
+            headers={
+                "Content-Disposition": (
+                    f"{item['disposition']}; filename*=UTF-8''{quote(item['name'], safe='')}"
+                ),
+                "X-OpsWitness-Artifact-SHA256": item["sha256"],
+            },
+        )
+
+    @app.get("/api/v1/library/collections")
+    async def library_collections() -> list[dict]:
+        rows = await run_in_threadpool(service.list_library_collections)
+        return [row.model_dump(mode="json") for row in rows]
+
+    @app.post("/api/v1/library/collections", status_code=status.HTTP_201_CREATED)
+    async def create_library_collection(
+        body: LibraryCollectionCreateV1,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        row = await run_in_threadpool(service.create_library_collection, body)
+        return row.model_dump(mode="json")
+
+    @app.post(
+        "/api/v1/library/collections/{collection_id}/revisions",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def revise_library_collection(
+        collection_id: str,
+        body: LibraryCollectionRevisionRequestV1,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        row = await run_in_threadpool(
+            service.revise_library_collection,
+            collection_id,
+            body,
+        )
+        return row.model_dump(mode="json")
+
+    @app.post("/api/v1/library/imports", status_code=status.HTTP_201_CREATED)
+    async def create_library_import(
+        body: LibraryImportCreateRequestV1,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        row = await run_in_threadpool(service.create_library_import, body)
+        return row.model_dump(mode="json")
+
+    @app.put("/api/v1/library/imports/{import_id}/files/{entry_id}")
+    async def upload_library_import_entry(
+        import_id: str,
+        entry_id: str,
+        request: Request,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        row = await service.upload_library_import_entry(
+            import_id,
+            entry_id,
+            request.stream(),
+        )
+        return row.model_dump(mode="json")
+
+    @app.get("/api/v1/library/imports/{import_id}")
+    async def get_library_import(import_id: str) -> dict:
+        row = await run_in_threadpool(service.get_library_import, import_id)
+        return row.model_dump(mode="json")
+
+    @app.post("/api/v1/library/imports/{import_id}/commit")
+    async def commit_library_import(
+        import_id: str,
+        body: LibraryImportCommitRequestV1,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        row = await run_in_threadpool(
+            service.commit_library_import,
+            import_id,
+            body,
+        )
+        return row.model_dump(mode="json")
+
+    @app.delete("/api/v1/library/imports/{import_id}")
+    async def cancel_library_import(
+        import_id: str,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        row = await run_in_threadpool(service.cancel_library_import, import_id)
+        return row.model_dump(mode="json")
+
+    @app.get("/api/v1/library/documents")
+    async def library_documents(
+        collection_id: str = "",
+        include_history: bool = False,
+    ) -> list[dict]:
+        rows = await run_in_threadpool(
+            service.list_library_documents,
+            collection_id=collection_id,
+            include_history=include_history,
+        )
+        return [row.model_dump(mode="json") for row in rows]
+
+    @app.get("/api/v1/library/documents/{version_id}")
+    async def library_document(version_id: str) -> dict:
+        row = await run_in_threadpool(service.get_library_document, version_id)
+        return row.model_dump(mode="json")
+
+    @app.get("/api/v1/library/documents/{version_id}/content")
+    async def library_document_content(version_id: str) -> Response:
+        item = await run_in_threadpool(
+            service.get_library_document_content,
+            version_id,
+        )
+        return Response(
+            content=item["content"],
+            media_type=item["mime"],
+            headers={
+                "Content-Disposition": (
+                    f"attachment; filename*=UTF-8''{quote(item['name'], safe='')}"
+                ),
+                "X-OpsWitness-Library-SHA256": item["sha256"],
+            },
+        )
+
+    @app.patch("/api/v1/library/documents/{version_id}")
+    async def update_library_document(
+        version_id: str,
+        body: LibraryDocumentMetadataUpdateV1,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        row = await run_in_threadpool(
+            service.update_library_document_metadata,
+            version_id,
+            body,
+        )
+        return row.model_dump(mode="json")
+
+    @app.delete("/api/v1/library/documents/{version_id}")
+    async def tombstone_library_document(
+        version_id: str,
+        body: LibraryDocumentMetadataUpdateV1,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        row = await run_in_threadpool(
+            service.tombstone_library_document,
+            version_id,
+            body,
+        )
+        return row.model_dump(mode="json")
+
+    @app.post("/api/v1/library/card-jobs", status_code=status.HTTP_202_ACCEPTED)
+    async def create_library_card_job(
+        body: LibraryCardJobRequestV1,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        row = await run_in_threadpool(service.create_library_card_job, body)
+        return row.model_dump(mode="json")
+
+    @app.get("/api/v1/library/card-jobs/{job_id}")
+    async def get_library_card_job(job_id: str) -> dict:
+        row = await run_in_threadpool(service.get_library_card_job, job_id)
+        return row.model_dump(mode="json")
+
+    @app.get("/api/v1/library/cards")
+    async def library_cards(
+        collection_id: str = "",
+        state: str = "",
+    ) -> list[dict]:
+        rows = await run_in_threadpool(
+            service.list_library_cards,
+            collection_id=collection_id,
+            state=state,
+        )
+        return [row.model_dump(mode="json") for row in rows]
+
+    async def decide_library_card(
+        version_id: str,
+        action: Literal["approve", "dismiss", "revoke"],
+        body: LibraryCardDecisionRequestV1,
+    ) -> dict:
+        row = await run_in_threadpool(
+            service.decide_library_card,
+            version_id,
+            action,
+            body,
+        )
+        return row.model_dump(mode="json")
+
+    @app.post("/api/v1/library/cards/{version_id}/approve")
+    async def approve_library_card(
+        version_id: str,
+        body: LibraryCardDecisionRequestV1,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        return await decide_library_card(version_id, "approve", body)
+
+    @app.post("/api/v1/library/cards/{version_id}/dismiss")
+    async def dismiss_library_card(
+        version_id: str,
+        body: LibraryCardDecisionRequestV1,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        return await decide_library_card(version_id, "dismiss", body)
+
+    @app.post("/api/v1/library/cards/{version_id}/revoke")
+    async def revoke_library_card(
+        version_id: str,
+        body: LibraryCardDecisionRequestV1,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        return await decide_library_card(version_id, "revoke", body)
+
+    @app.post("/api/v1/library/search")
+    async def library_search(
+        body: LibrarySearchRequestV1,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        result = await run_in_threadpool(service.search_library, body)
+        return result.model_dump(mode="json")
+
+    @app.get("/api/v1/library/index/status")
+    async def library_index_status() -> dict:
+        row = await run_in_threadpool(service.library_index_status)
+        return row.model_dump(mode="json")
+
+    @app.post("/api/v1/library/index/rebuild", status_code=status.HTTP_202_ACCEPTED)
+    async def rebuild_library_index(
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        row = await run_in_threadpool(service.rebuild_library_index)
+        return row.model_dump(mode="json")
+
+    @app.get("/api/v1/library/semantic-model/status")
+    async def library_semantic_model_status() -> dict:
+        row = await run_in_threadpool(service.library_semantic_model_status)
+        return row.model_dump(mode="json")
+
+    @app.post(
+        "/api/v1/library/semantic-model/download",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def download_library_semantic_model(
+        body: LibrarySemanticModelDownloadRequestV1,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del body, x_qd_csrf
+        row = await run_in_threadpool(
+            service.request_library_semantic_model_download
+        )
+        return row.model_dump(mode="json")
+
+    @app.post("/api/v1/plans/from-library", status_code=status.HTTP_202_ACCEPTED)
+    async def create_plan_from_library(
+        body: LibraryPlanRequestV1,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        record = await run_in_threadpool(service.request_plan_from_library, body)
+        return record.model_dump(mode="json")
+
+    @app.post("/api/v1/library/exports/preview")
+    async def preview_library_export(
+        body: LibraryH5ExportPreviewRequestV1,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        return await run_in_threadpool(
+            service.preview_library_export,
+            body.collection_id,
+            body.expected_collection_revision,
+            body.policy,
+        )
+
+    @app.post("/api/v1/library/exports", status_code=status.HTTP_201_CREATED)
+    async def create_library_export(
+        body: LibraryH5ExportRequestV1,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        row = await run_in_threadpool(service.create_library_export, body)
+        return row.model_dump(mode="json")
+
+    @app.get("/api/v1/library/exports/{export_id}/download")
+    async def download_library_export(export_id: str) -> FileResponse:
+        item = await run_in_threadpool(service.get_library_export_download, export_id)
+        row = item["record"]
+        return FileResponse(
+            item["path"],
+            media_type="application/zip",
+            filename=f"opswitness-knowledge-{export_id}.zip",
+            headers={"X-OpsWitness-Export-SHA256": row.output_sha256},
+        )
 
     @app.post("/api/v1/plans", status_code=status.HTTP_202_ACCEPTED)
     async def create_plan(
@@ -477,6 +984,66 @@ def create_app(
         del x_qd_csrf
         record = await run_in_threadpool(service.revise_plan_organization, plan_id, body)
         return record.model_dump(mode="json")
+
+    @app.post(
+        "/api/v1/plans/{plan_id}/agent-graph/revisions",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def revise_plan_agent_graph(
+        plan_id: str,
+        body: AgentGraphRevisionRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        record = await run_in_threadpool(service.revise_plan_agent_graph, plan_id, body)
+        return record.model_dump(mode="json")
+
+    @app.post("/api/v1/plans/{plan_id}/agent-contract/preview")
+    async def preview_plan_agent_contract(
+        plan_id: str,
+        body: AgentContractPreviewRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        preview = await run_in_threadpool(
+            service.preview_agent_contract,
+            plan_id,
+            body,
+        )
+        return preview.model_dump(mode="json")
+
+    @app.post(
+        "/api/v1/plans/{plan_id}/agent-contract/revisions",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def revise_plan_agent_contract(
+        plan_id: str,
+        body: AgentContractRevisionRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        record = await run_in_threadpool(
+            service.revise_plan_agent_contract,
+            plan_id,
+            body,
+        )
+        return record.model_dump(mode="json")
+
+    @app.get("/api/v1/plans/{plan_id}/agent-contract/versions")
+    async def list_plan_agent_contract_versions(plan_id: str) -> list[dict]:
+        return await run_in_threadpool(service.list_agent_contract_versions, plan_id)
+
+    @app.get("/api/v1/plans/{child_plan_id}/agent-contract/diff")
+    async def diff_plan_agent_contract(
+        child_plan_id: str,
+        base_plan_id: str,
+    ) -> list[dict]:
+        rows = await run_in_threadpool(
+            service.diff_agent_contract_versions,
+            child_plan_id,
+            base_plan_id,
+        )
+        return [row.model_dump(mode="json") for row in rows]
 
     @app.post(
         "/api/v1/plans/{plan_id}/runtimes",
@@ -781,6 +1348,16 @@ def create_app(
     ) -> dict:
         del x_qd_csrf
         row = await run_in_threadpool(service.approve_workspace_memory, version_id, body)
+        return row.model_dump(mode="json")
+
+    @app.post("/api/v1/workspace-memory/{version_id}/dismiss")
+    async def dismiss_workspace_memory(
+        version_id: str,
+        body: WorkspaceMemoryDecisionRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        row = await run_in_threadpool(service.dismiss_workspace_memory, version_id, body)
         return row.model_dump(mode="json")
 
     @app.post("/api/v1/workspace-memory/{version_id}/revoke")

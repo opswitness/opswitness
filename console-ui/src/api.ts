@@ -1,4 +1,6 @@
 import type {
+  AgentContractDiffEntry,
+  AgentContractPreview,
   Bootstrap,
   ApprovalMode,
   AgentRuntimeAssignment,
@@ -6,13 +8,28 @@ import type {
   MailAuthorizationJob,
   MailAuthorizationStatus,
   MailSummaryJob,
+  KnowledgeCardVersion,
+  LibraryCardJob,
+  LibraryCollection,
+  LibraryCollectionPolicy,
+  LibraryDocumentVersion,
+  LibraryExport,
+  LibraryImport,
+  LibraryIndexStatus,
+  LibrarySemanticModelStatus,
+  LibrarySearchResult,
+  OnboardingFirstWork,
+  OnboardingStatus,
   PairedDevice,
   PairingInvitation,
   PlanArtifact,
   PlanArtifactPreview,
   PlanningAttachmentUpload,
   PlanRecord,
+  ProjectLibraryItem,
+  ProjectLibraryItemPreview,
   ProviderConnectionJob,
+  RecoveryState,
   ReportingLine,
   RuntimeInputArtifact,
   RuntimeInputArtifactPreview,
@@ -28,6 +45,7 @@ import {
   translateApiError,
   UI_LANGUAGE_STORAGE_KEY,
 } from './i18n.js';
+import type { AgentGraphRevisionPayload } from './agent-graph-model.js';
 
 let csrfToken = '';
 
@@ -61,10 +79,76 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function apiBinary<T>(path: string, body: Blob): Promise<T> {
+  const headers = new Headers({
+    'Content-Type': 'application/octet-stream',
+    'X-QD-CSRF': csrfToken,
+  });
+  const response = await fetch(path, {
+    method: 'PUT',
+    headers,
+    body,
+    credentials: 'same-origin',
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return (await response.json()) as T;
+}
+
 export async function loadBootstrap(): Promise<Bootstrap> {
   const payload = await api<Bootstrap>('/api/v1/bootstrap');
   csrfToken = payload.csrf_token;
   return payload;
+}
+
+export function loadOnboarding(): Promise<OnboardingStatus> {
+  return api('/api/v1/onboarding');
+}
+
+export function chooseOnboardingMigration(
+  choice: 'fresh' | 'import',
+): Promise<OnboardingStatus> {
+  return api('/api/v1/onboarding/migration', {
+    method: 'POST',
+    body: JSON.stringify({ choice, confirmed: true }),
+  });
+}
+
+export function selectOnboardingProvider(
+  provider: 'openai' | 'anthropic',
+): Promise<OnboardingStatus> {
+  return api('/api/v1/onboarding/provider', {
+    method: 'POST',
+    body: JSON.stringify({ provider, confirmed: true }),
+  });
+}
+
+export function prepareOnboardingFirstWork(
+  replaceUnstartedLegacy = false,
+  replaceIncompleteTerminal = false,
+): Promise<OnboardingFirstWork> {
+  return api('/api/v1/onboarding/first-work', {
+    method: 'POST',
+    body: JSON.stringify({
+      confirmed: true,
+      replace_unstarted_legacy: replaceUnstartedLegacy,
+      replace_incomplete_terminal: replaceIncompleteTerminal,
+    }),
+  });
+}
+
+export function signoffOnboardingArtifacts(
+  planId: string,
+  review: {
+    first_work_event_id: string;
+    first_work_sha256: string;
+    verification_event_id: string;
+    verification_sha256: string;
+  },
+): Promise<OnboardingStatus> {
+  return api(`/api/v1/works/${encodeURIComponent(planId)}/artifact-signoff`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmed: true, ...review }),
+  });
 }
 
 export function getPairedDevices(): Promise<PairedDevice[]> {
@@ -98,6 +182,31 @@ export function requestPlan(body: {
 
 export function getPlan(planId: string): Promise<PlanRecord> {
   return api(`/api/v1/plans/${encodeURIComponent(planId)}`);
+}
+
+export function getWorkRecovery(workId: string): Promise<RecoveryState> {
+  return api(`/api/v1/works/${encodeURIComponent(workId)}/recovery`);
+}
+
+export function checkWorkRecovery(workId: string): Promise<RecoveryState> {
+  return api(`/api/v1/works/${encodeURIComponent(workId)}/recovery/check`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmed: true }),
+  });
+}
+
+export function decideWorkRecovery(
+  workId: string,
+  expectedProposalSha256: string,
+): Promise<{ recovery: RecoveryState; repair_work: PlanRecord }> {
+  return api(`/api/v1/works/${encodeURIComponent(workId)}/recovery/decision`, {
+    method: 'POST',
+    body: JSON.stringify({
+      action: 'create_repair_work',
+      expected_proposal_sha256: expectedProposalSha256,
+      confirmed: true,
+    }),
+  });
 }
 
 export function revisePlan(planId: string, instruction: string): Promise<PlanRecord> {
@@ -169,6 +278,69 @@ export function revisePlanOrganization(
       confirmed: true,
     }),
   });
+}
+
+export function revisePlanAgentGraph(
+  planId: string,
+  payload: AgentGraphRevisionPayload,
+): Promise<PlanRecord> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/agent-graph/revisions`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function previewPlanAgentContract(
+  planId: string,
+  expectedPlanSha256: string,
+  draft: Record<string, unknown> | null,
+): Promise<AgentContractPreview> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/agent-contract/preview`, {
+    method: 'POST',
+    body: JSON.stringify({
+      expected_plan_sha256: expectedPlanSha256,
+      draft,
+    }),
+  });
+}
+
+export function revisePlanAgentContract(
+  planId: string,
+  expectedPlanSha256: string,
+  draft: Record<string, unknown>,
+): Promise<PlanRecord> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/agent-contract/revisions`, {
+    method: 'POST',
+    body: JSON.stringify({
+      expected_plan_sha256: expectedPlanSha256,
+      draft,
+      confirmed: true,
+    }),
+  });
+}
+
+export function getAgentContractVersions(planId: string): Promise<Array<{
+  plan_id: string;
+  plan_sha256: string;
+  parent_plan_id?: string | null;
+  parent_plan_sha256?: string | null;
+  revision_number: number;
+  status: PlanRecord['status'];
+  created_at: string;
+  agent_count: number;
+  contract_sha256: string;
+}>> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/agent-contract/versions`);
+}
+
+export function diffAgentContractVersions(
+  childPlanId: string,
+  basePlanId: string,
+): Promise<AgentContractDiffEntry[]> {
+  const query = new URLSearchParams({ base_plan_id: basePlanId });
+  return api(
+    `/api/v1/plans/${encodeURIComponent(childPlanId)}/agent-contract/diff?${query.toString()}`,
+  );
 }
 
 export function revisePlanRuntimes(
@@ -313,10 +485,34 @@ export function proposeProcessMemory(
 export function approveWorkspaceMemory(
   versionId: string,
   reason = '',
+  expectedContentSha256: string | null = null,
+  expectedFingerprint: string | null = null,
 ): Promise<WorkspaceMemoryView> {
   return api(`/api/v1/workspace-memory/${encodeURIComponent(versionId)}/approve`, {
     method: 'POST',
-    body: JSON.stringify({ reason, confirmed: true }),
+    body: JSON.stringify({
+      reason,
+      expected_content_sha256: expectedContentSha256,
+      expected_fingerprint: expectedFingerprint,
+      confirmed: true,
+    }),
+  });
+}
+
+export function dismissWorkspaceMemory(
+  versionId: string,
+  expectedContentSha256: string,
+  expectedFingerprint: string | null,
+  reason = '',
+): Promise<WorkspaceMemoryView> {
+  return api(`/api/v1/workspace-memory/${encodeURIComponent(versionId)}/dismiss`, {
+    method: 'POST',
+    body: JSON.stringify({
+      reason,
+      expected_content_sha256: expectedContentSha256,
+      expected_fingerprint: expectedFingerprint,
+      confirmed: true,
+    }),
   });
 }
 
@@ -405,10 +601,259 @@ export function planArtifactContentUrl(planId: string, artifactName: string): st
   return `/api/v1/plans/${encodeURIComponent(planId)}/artifacts/${encodeURIComponent(artifactName)}/content`;
 }
 
+export function getProjectLibrary(filters: {
+  query?: string;
+  tag?: string;
+  file_type?: string;
+  work_id?: string;
+} = {}): Promise<ProjectLibraryItem[]> {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value?.trim()) params.set(key, value.trim());
+  });
+  const suffix = params.toString();
+  return api(`/api/v1/project-library${suffix ? `?${suffix}` : ''}`);
+}
+
+export function getProjectLibraryItem(assetId: string): Promise<ProjectLibraryItemPreview> {
+  return api(`/api/v1/project-library/${encodeURIComponent(assetId)}`);
+}
+
+export function updateProjectLibraryItem(
+  assetId: string,
+  body: {
+    expected_sha256: string;
+    user_tags: string[];
+    supersedes_asset_id: string | null;
+  },
+): Promise<ProjectLibraryItemPreview> {
+  return api(`/api/v1/project-library/${encodeURIComponent(assetId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ ...body, confirmed: true }),
+  });
+}
+
+export function getLibraryCollections(): Promise<LibraryCollection[]> {
+  return api('/api/v1/library/collections');
+}
+
+export function createLibraryCollection(body: {
+  name: string;
+  policy: LibraryCollectionPolicy;
+}): Promise<LibraryCollection> {
+  return api('/api/v1/library/collections', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function createLibraryImport(body: {
+  collection_id: string;
+  expected_collection_revision: number;
+  entries: Array<{
+    relative_path: string;
+    size_bytes: number;
+    media_type: string;
+    source_kind: 'file';
+  }>;
+}): Promise<LibraryImport> {
+  return api('/api/v1/library/imports', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function uploadLibraryImportEntry(
+  importId: string,
+  entryId: string,
+  file: File,
+): Promise<LibraryImport> {
+  return apiBinary(
+    `/api/v1/library/imports/${encodeURIComponent(importId)}/files/${encodeURIComponent(entryId)}`,
+    file,
+  );
+}
+
+export function getLibraryImport(importId: string): Promise<LibraryImport> {
+  return api(`/api/v1/library/imports/${encodeURIComponent(importId)}`);
+}
+
+export function commitLibraryImport(
+  importId: string,
+  expectedCollectionRevision: number,
+  confirmedManifestSha256: string,
+): Promise<LibraryImport> {
+  return api(`/api/v1/library/imports/${encodeURIComponent(importId)}/commit`, {
+    method: 'POST',
+    body: JSON.stringify({
+      expected_collection_revision: expectedCollectionRevision,
+      confirmed_manifest_sha256: confirmedManifestSha256,
+      confirmed: true,
+    }),
+  });
+}
+
+export function cancelLibraryImport(importId: string): Promise<LibraryImport> {
+  return api(`/api/v1/library/imports/${encodeURIComponent(importId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({}),
+  });
+}
+
+export function getLibraryDocuments(
+  collectionId = '',
+  includeHistory = false,
+): Promise<LibraryDocumentVersion[]> {
+  const params = new URLSearchParams();
+  if (collectionId) params.set('collection_id', collectionId);
+  if (includeHistory) params.set('include_history', 'true');
+  const suffix = params.toString();
+  return api(`/api/v1/library/documents${suffix ? `?${suffix}` : ''}`);
+}
+
+export function createLibraryCardJob(body: {
+  collection_id: string;
+  document_version_ids: string[];
+  provider: 'openai' | 'anthropic';
+  model: string;
+  disclosed_character_count: number;
+  confirmed_source_disclosure: true;
+}): Promise<LibraryCardJob> {
+  return api('/api/v1/library/card-jobs', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function getLibraryCardJob(jobId: string): Promise<LibraryCardJob> {
+  return api(`/api/v1/library/card-jobs/${encodeURIComponent(jobId)}`);
+}
+
+export function getLibraryCards(
+  collectionId = '',
+  state = '',
+): Promise<KnowledgeCardVersion[]> {
+  const params = new URLSearchParams();
+  if (collectionId) params.set('collection_id', collectionId);
+  if (state) params.set('state', state);
+  const suffix = params.toString();
+  return api(`/api/v1/library/cards${suffix ? `?${suffix}` : ''}`);
+}
+
+export function decideLibraryCard(
+  versionId: string,
+  action: 'approve' | 'dismiss' | 'revoke',
+  expectedCardSha256: string,
+): Promise<KnowledgeCardVersion> {
+  return api(
+    `/api/v1/library/cards/${encodeURIComponent(versionId)}/${action}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        expected_card_sha256: expectedCardSha256,
+        confirmed: true,
+      }),
+    },
+  );
+}
+
+export function searchLibrary(body: {
+  query: string;
+  mode: 'lexical' | 'semantic' | 'hybrid';
+  collection_ids?: string[];
+  states?: string[];
+  source_types?: string[];
+  evidence_statuses?: string[];
+  limit?: number;
+  cursor?: string | null;
+}): Promise<LibrarySearchResult> {
+  return api('/api/v1/library/search', {
+    method: 'POST',
+    body: JSON.stringify({ schema_version: 1, ...body }),
+  });
+}
+
+export function getLibraryIndexStatus(): Promise<LibraryIndexStatus> {
+  return api('/api/v1/library/index/status');
+}
+
+export function rebuildLibraryIndex(): Promise<LibraryIndexStatus> {
+  return api('/api/v1/library/index/rebuild', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+export function getLibrarySemanticModelStatus(): Promise<LibrarySemanticModelStatus> {
+  return api('/api/v1/library/semantic-model/status');
+}
+
+export function downloadLibrarySemanticModel(): Promise<LibrarySemanticModelStatus> {
+  return api('/api/v1/library/semantic-model/download', {
+    method: 'POST',
+    body: JSON.stringify({ confirmed: true }),
+  });
+}
+
+export function requestPlanFromLibrary(body: {
+  objective: string;
+  constraints: string;
+  workspace: string;
+  preferred_cadence: string;
+  document_version_ids: string[];
+  knowledge_card_version_ids: string[];
+  confirmed_context_packet: true;
+}): Promise<PlanRecord> {
+  return api('/api/v1/plans/from-library', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export type LibraryExportPolicy = {
+  schema_version: 1;
+  profile: 'safe_partner';
+  include_card_version_ids: string[];
+  include_tags: boolean;
+  include_citation_excerpts: boolean;
+  custom_sensitive_terms: string[];
+};
+
+export function previewLibraryExport(body: {
+  collection_id: string;
+  expected_collection_revision: number;
+  policy: LibraryExportPolicy;
+}): Promise<{
+  preview_sha256: string;
+  included: Record<string, unknown>;
+  excluded: string[];
+  replacements: Record<string, unknown>;
+  static_share_boundary: string;
+}> {
+  return api('/api/v1/library/exports/preview', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function createLibraryExport(body: {
+  collection_id: string;
+  expected_collection_revision: number;
+  policy: LibraryExportPolicy;
+  expected_preview_sha256: string;
+  confirmed: true;
+}): Promise<LibraryExport> {
+  return api('/api/v1/library/exports', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export function connectProvider(
   provider: 'openai' | 'anthropic' | 'deepseek' | 'xai' | 'ollama' | 'lmstudio',
   method: 'account' | 'api' | 'api_key' | 'local' = 'account',
   apiKey?: string,
+  confirmed = false,
 ): Promise<ProviderConnectionJob> {
   const body: {
     method: 'account' | 'api' | 'api_key' | 'local';
@@ -416,7 +861,7 @@ export function connectProvider(
     confirmed?: true;
   } = { method };
   if (apiKey) body.api_key = apiKey;
-  if (method === 'api_key' || method === 'local') body.confirmed = true;
+  if (confirmed || method === 'api_key' || method === 'local') body.confirmed = true;
   return api(`/api/v1/providers/${provider}/connect`, {
     method: 'POST',
     body: JSON.stringify(body),

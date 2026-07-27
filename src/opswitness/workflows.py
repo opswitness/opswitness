@@ -222,6 +222,7 @@ def _worker_environment(settings: Settings) -> dict[str, str]:
     env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
     env["OPSWITNESS_CONFIG_DIR"] = str(config_dir())
     env["OPSWITNESS_LEDGER_DIR"] = str(settings.ledger_dir)
+    env["OPSWITNESS_SERVICES__LOG_DIR"] = str(settings.services.log_dir)
     return env
 
 

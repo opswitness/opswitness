@@ -34,6 +34,7 @@ function memoryStateLabel(row: WorkspaceMemoryView): string {
   if (row.state === 'approved' && row.active) return '已批准';
   if (row.state === 'candidate') return '待审核';
   if (row.state === 'superseded') return '已被新版替代';
+  if (row.state === 'dismissed') return '已忽略';
   return '已撤销';
 }
 
@@ -58,6 +59,7 @@ export function WorkspaceMemoryDialog({
   onCreate,
   onProposeProcess,
   onApprove,
+  onDismiss,
   onRevoke,
   onRollback,
 }: {
@@ -67,7 +69,18 @@ export function WorkspaceMemoryDialog({
   onLoad: (query?: string, includeHistory?: boolean) => Promise<WorkspaceMemoryView[]>;
   onCreate: (body: CandidateBody) => Promise<WorkspaceMemoryView>;
   onProposeProcess: (work: RepeatableWork) => Promise<WorkspaceMemoryView>;
-  onApprove: (versionId: string, reason?: string) => Promise<WorkspaceMemoryView>;
+  onApprove: (
+    versionId: string,
+    expectedContentSha256: string,
+    expectedFingerprint: string | null,
+    reason?: string,
+  ) => Promise<WorkspaceMemoryView>;
+  onDismiss: (
+    versionId: string,
+    expectedContentSha256: string,
+    expectedFingerprint: string | null,
+    reason?: string,
+  ) => Promise<WorkspaceMemoryView>;
   onRevoke: (versionId: string, reason?: string) => Promise<WorkspaceMemoryView>;
   onRollback: (versionId: string, reason: string) => Promise<WorkspaceMemoryView>;
 }) {
@@ -177,7 +190,7 @@ export function WorkspaceMemoryDialog({
 
   const decide = async (
     row: WorkspaceMemoryView,
-    action: 'approve' | 'revoke' | 'rollback',
+    action: 'approve' | 'dismiss' | 'revoke' | 'rollback',
   ) => {
     if (busy) return;
     if (action === 'rollback' && decisionReason.trim().length < 3) {
@@ -187,7 +200,22 @@ export function WorkspaceMemoryDialog({
     setBusy(`${action}:${row.version_id}`);
     setError('');
     try {
-      if (action === 'approve') await onApprove(row.version_id, decisionReason.trim());
+      if (action === 'approve') {
+        await onApprove(
+          row.version_id,
+          row.content_sha256,
+          row.fingerprint || null,
+          decisionReason.trim(),
+        );
+      }
+      if (action === 'dismiss') {
+        await onDismiss(
+          row.version_id,
+          row.content_sha256,
+          row.fingerprint || null,
+          decisionReason.trim(),
+        );
+      }
       if (action === 'revoke') await onRevoke(row.version_id, decisionReason.trim());
       if (action === 'rollback') await onRollback(row.version_id, decisionReason.trim());
       setDecisionReason('');
@@ -315,17 +343,35 @@ export function WorkspaceMemoryDialog({
                 <article className={`workspace-memory-row ${row.state}`} key={row.version_id}>
                   <div className="workspace-memory-row-heading">
                     <span className="memory-kind-icon">{row.kind === 'process' ? <GitBranch size={17} /> : <BookOpen size={17} />}</span>
-                    <div><strong>{row.title}</strong><small>{t('{kind} · 第 {version} 版 · {time}', { kind: t(row.kind === 'process' ? '流程记忆' : '知识记忆'), version: row.version_number, time: formatDate(row.created_at, language) })}</small></div>
+                    <div>
+                      <strong>{row.title}</strong>
+                      <small>{t('{kind} · 第 {version} 版 · {time}', { kind: t(row.kind === 'process' ? '流程记忆' : '知识记忆'), version: row.version_number, time: formatDate(row.created_at, language) })}</small>
+                      {row.origin === 'automatic_experience' && (
+                        <small className="memory-origin automatic">
+                          {t('自动生成的经验候选 · 尚未进入任何新 Work')}
+                        </small>
+                      )}
+                    </div>
                     <span className={`memory-state ${row.state}`}>{t(memoryStateLabel(row))}</span>
                   </div>
                   {row.tags.length > 0 && <div className="memory-tags">{row.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>}
                   <details className="memory-content-preview">
                     <summary>{t('查看内容与来源')}</summary>
                     <pre>{row.content}</pre>
+                    {row.origin === 'automatic_experience' && (
+                      <div className="memory-provenance">
+                        <strong>{t('本机确定性生成')}</strong>
+                        <span>{t('只使用已审核方案与完整终结记录；未读取交付物正文，也未调用模型。')}</span>
+                        {row.source_plan_id && <code>{t('来源 Work')} {row.source_plan_id}</code>}
+                        {row.source_terminal_event_id && <code>{t('终结证据')} {row.source_terminal_event_id}</code>}
+                        {row.fingerprint && <code>{t('候选指纹')} {row.fingerprint}</code>}
+                      </div>
+                    )}
                     <div><code>{row.relative_path}</code><code>SHA-256 {row.content_sha256.slice(0, 12)}…</code></div>
                   </details>
                   <div className="workspace-memory-row-actions">
                     <button className="text-button" type="button" disabled={Boolean(busy)} onClick={() => editVersion(row)}><GitBranch size={14} />{t('创建修订')}</button>
+                    {row.state === 'candidate' && <button className="secondary-button" type="button" disabled={Boolean(busy)} onClick={() => void decide(row, 'dismiss')}>{busy === `dismiss:${row.version_id}` ? <LoaderCircle size={14} className="spin" /> : <Ban size={14} />}{t('忽略候选')}</button>}
                     {row.state === 'candidate' && <button className="primary-button" type="button" disabled={Boolean(busy)} onClick={() => void decide(row, 'approve')}>{busy === `approve:${row.version_id}` ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}{t('批准')}</button>}
                     {row.state === 'approved' && row.active && <button className="danger-button" type="button" disabled={Boolean(busy)} onClick={() => void decide(row, 'revoke')}>{busy === `revoke:${row.version_id}` ? <LoaderCircle size={14} className="spin" /> : <Ban size={14} />}{t('撤销')}</button>}
                     {['superseded', 'revoked'].includes(row.state) && <button className="secondary-button" type="button" disabled={Boolean(busy) || decisionReason.trim().length < 3} onClick={() => void decide(row, 'rollback')}>{busy === `rollback:${row.version_id}` ? <LoaderCircle size={14} className="spin" /> : <RotateCcw size={14} />}{t('回滚到此版本')}</button>}
@@ -339,7 +385,7 @@ export function WorkspaceMemoryDialog({
 
           <div className="memory-trust-boundary">
             <ShieldCheck size={15} />
-            <span>{t('Agent 不能直接修改正式记忆。每次批准、替代、撤销和回滚都绑定版本与哈希并写入账本。')}</span>
+            <span>{t('Agent 不能直接修改正式记忆。自动经验只会成为候选；批准与忽略都绑定内容哈希和候选指纹并写入账本。')}</span>
           </div>
         </div>
       </section>

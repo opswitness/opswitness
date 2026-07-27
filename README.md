@@ -62,12 +62,33 @@ content-hashed into the immutable Plan identity, and revalidated before confirma
 Aion team receives hash-verified read-only copies in its execution workspace. File bodies and names
 do not enter the append-only ledger; it records only the material count and manifest hash.
 
+The source candidate also implements a private **Knowledge Hub** for material that should remain
+available across Work. It provides named collections, one-time file/folder snapshots, streaming
+SHA-256 deduplication into a separate input CAS, version relationships, citation-bound knowledge
+card candidates, human approval, Chinese/English FTS5 search, and a hash-revalidated “Use in new
+Work” path. Direct planning upload keeps the limits above; a library-backed draft may select up to
+ten exact versions and 250 MiB, and still returns to ordinary plan review before it can run.
+Optional local semantic search downloads one exact manifest-pinned model only after confirmation
+and never falls back to a hosted embedding API. Offline `safe_partner` H5 export includes only
+selected approved cards and redacted citation excerpts; a copied static export cannot be revoked
+or given real recipient access control. See [Knowledge Hub](docs/KNOWLEDGE-HUB.md).
+
 OpsWitness also keeps an Obsidian-compatible private **Workspace Memory** vault for process lessons
 and sourced knowledge. Agents can propose candidates; only human-approved, immutable versions are
 included read-only in a new planning snapshot. Approval, supersession, revocation, and rollback are
 hash-bound ledger events, while the memory body stays in local `0600` Markdown files. History and
 CAS artifacts do not become memory merely because they exist. See
 [ADR-0008](docs/adr/0008-repeatable-work-and-auditable-workspace-memory.md).
+
+The current source also implements the review-time **Agent Contract v2** surface: stable Agent IDs,
+one-to-five Agent add/delete, six-page structured editing, per-Agent Memory selection, exact
+OpsWitness-managed execution-envelope preview, JSON Pointer field diffs, immutable child versions,
+and per-Agent tool policy enforcement over the mapped Aion approval bridge. In Aion-compatible
+mode, file/data scope, handoffs, loop counts, retries, and timeouts remain execution instructions;
+they are not filesystem or process isolation. A strict sequential coordinator and private-workspace
+primitives exist, but no current Aion adapter satisfies the strict runtime protocol, so a Contract
+that requires strict isolation is rejected before execution rather than silently downgraded. See
+[From Skills to Structured Work](docs/STRUCTURED-WORK.md).
 
 ## Current release status
 
@@ -80,6 +101,11 @@ OpsWitness source is public, but the product is **not released yet**:
 - `opswitness.com` is reserved but not deployed;
 - runtime durability, a fresh 24-hour canary, professional confusing-similarity review, and final
   release-asset validation remain open.
+- Agent Contract v2 is source-complete but has not passed a rebuilt Mac App, clean-machine first
+  Work, recovery drill, or new executable canary; the strict runtime adapter remains unavailable.
+- Knowledge Hub source is implemented but is not part of an approved public binary. Its exact
+  App bundle, backup/restore drill, fresh-machine first Work, packaging license review, and new
+  executable canary remain release gates.
 
 The durable product goal and the simplicity tests for future features are recorded in
 [PRODUCT-VISION.md](docs/PRODUCT-VISION.md).

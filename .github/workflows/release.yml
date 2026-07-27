@@ -1,38 +1,38 @@
-name: release
+name: release-candidate
+
 on:
-  push:
-    tags: ["v0.1.0-alpha.1"]
   workflow_dispatch:
     inputs:
       tag:
-        description: Release identity to validate without publishing
+        description: Fixed Alpha release identity
         required: true
         default: v0.1.0-alpha.1
 
 permissions:
   contents: read
 
+concurrency:
+  group: release-candidate-${{ github.sha }}
+  cancel-in-progress: false
+
 env:
-  RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
+  RELEASE_TAG: ${{ inputs.tag }}
 
 jobs:
   preflight:
     permissions: {}
     runs-on: ubuntu-latest
     steps:
-      - name: Reject unapproved public tag
-        if: startsWith(github.ref, 'refs/tags/') && vars.PUBLIC_RELEASE_APPROVED != 'true'
-        run: |
-          echo "PUBLIC_RELEASE_APPROVED=true is required before any tagged build or attestation."
-          exit 1
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        if: startsWith(github.ref, 'refs/tags/')
         with: { fetch-depth: 0 }
-      - name: Require the tag to point at main
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Require the exact Alpha identity and main commit
         run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          python scripts/check_release_identity.py --tag "$RELEASE_TAG"
+
   quality:
     needs: preflight
     strategy:
@@ -44,7 +44,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with: { fetch-depth: 0 }
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with: { python-version: "3.12" }
+        with: { python-version: "3.12.10" }
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "22"
@@ -63,9 +63,10 @@ jobs:
       - run: python scripts/check_release_identity.py --tag "$RELEASE_TAG"
       - run: ruff check .
       - run: mypy src/opswitness
-      - run: pytest -q
+      - run: python -m pytest -q
       - run: git diff --check
       - run: test -z "$(git status --porcelain --untracked-files=all)"
+
   dco:
     needs: preflight
     runs-on: ubuntu-latest
@@ -73,6 +74,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with: { fetch-depth: 0 }
       - run: python .github/scripts/check_dco.py 0000000000000000000000000000000000000000 "$GITHUB_SHA"
+
   gitleaks:
     needs: preflight
     runs-on: ubuntu-latest
@@ -91,6 +93,7 @@ jobs:
         run: |
           "$(go env GOPATH)/bin/gitleaks" version
           "$(go env GOPATH)/bin/gitleaks" git --redact --no-banner --verbose .
+
   build:
     needs: [preflight, quality, dco, gitleaks]
     permissions:
@@ -100,7 +103,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with: { fetch-depth: 0 }
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with: { python-version: "3.12" }
+        with: { python-version: "3.12.10" }
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "22"
@@ -134,46 +137,461 @@ jobs:
           wheel_root="${RUNNER_TEMP}/opswitness-release-wheel"
           mkdir -p "$wheel_root"
           python -m zipfile -e "${{ steps.release-wheel.outputs.path }}" "$wheel_root"
-      - name: Generate SPDX SBOM
+      - name: Generate Python SPDX SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
           path: ${{ runner.temp }}/opswitness-release-wheel
           format: spdx-json
-          output-file: dist/sbom.spdx.json
+          output-file: dist/python-sbom.spdx.json
           upload-artifact: false
           upload-release-assets: false
       - run: python scripts/build_manifest.py dist --tag "$RELEASE_TAG" --require-sbom
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: distributions
+          name: python-distributions-${{ github.run_id }}-${{ github.run_attempt }}
           path: dist/*
+          if-no-files-found: error
+          retention-days: 30
 
-  publish:
-    if: startsWith(github.ref, 'refs/tags/') && vars.PUBLIC_RELEASE_APPROVED == 'true'
-    needs: build
+  macos:
+    needs: [preflight, quality, dco, gitleaks, build]
     permissions:
-      contents: write
-      id-token: write
-      attestations: write
-      artifact-metadata: write
-    runs-on: ubuntu-latest
+      contents: read
+    runs-on: macos-14
+    env:
+      RUST_VERSION: "1.88.0"
+      RUST_TOOLCHAIN: 1.88.0-aarch64-apple-darwin
+      MACOS_INITIAL_FREE_GIB: "24"
+      MACOS_BUILD_FREE_GIB: "18"
+      MACOS_POST_BUILD_FREE_GIB: "8"
+      MACOS_FALLBACK_RUNNER_FREE_GIB: "30"
     steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with: { fetch-depth: 0 }
+      - name: Prepare an arm64 runner with deterministic disk headroom
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$(uname -m)" != arm64 ]]; then
+            echo "::error title=Wrong macOS runner architecture::The signed candidate requires an Apple Silicon runner (arm64)."
+            exit 1
+          fi
+
+          active_developer=$(xcode-select -p)
+          case "$active_developer" in
+            /Applications/Xcode*.app/Contents/Developer)
+              active_xcode=${active_developer%/Contents/Developer}
+              ;;
+            *)
+              echo "::error title=Unexpected Xcode location::Refusing to clean Xcode bundles while the active developer directory is $active_developer."
+              exit 1
+              ;;
+          esac
+          test -d "$active_xcode"
+
+          # GitHub-hosted macOS images can contain multiple complete Xcode
+          # bundles. Preserve the selected bundle and remove only recognized,
+          # inactive bundles on this ephemeral release runner.
+          while IFS= read -r -d '' candidate; do
+            candidate_name=${candidate##*/}
+            if [[ ! "$candidate_name" =~ ^Xcode(_[0-9]+([.][0-9]+){1,2}(_(beta|Beta|RC)[0-9]*)?)?[.]app$ ]]; then
+              continue
+            fi
+            if [[ "$candidate" -ef "$active_xcode" ]]; then
+              continue
+            fi
+            echo "Removing inactive Xcode bundle: $candidate"
+            sudo rm -rf -- "$candidate"
+          done < <(
+            find /Applications -mindepth 1 -maxdepth 1 \
+              \( -type d -o -type l \) -print0
+          )
+
+          # These are rebuildable caches below the ephemeral runner account.
+          # Do not touch the selected Xcode bundle, checkout, or downloaded
+          # release inputs.
+          for candidate in \
+            "$HOME/Library/Caches/Homebrew" \
+            "$HOME/Library/Caches/pip" \
+            "$HOME/.cache/pip" \
+            "$HOME/.npm/_cacache" \
+            "$HOME/.cargo/registry/cache" \
+            "$HOME/.cargo/git/db"
+          do
+            case "$candidate" in
+              "$HOME"/*) rm -rf -- "$candidate" ;;
+              *)
+                echo "::error title=Unsafe cleanup path::Refusing to remove $candidate."
+                exit 1
+                ;;
+            esac
+          done
+
+          free_kib=$(df -Pk "$GITHUB_WORKSPACE" | awk 'END {print $4}')
+          required_kib=$((MACOS_INITIAL_FREE_GIB * 1024 * 1024))
+          if [[ ! "$free_kib" =~ ^[0-9]+$ ]]; then
+            echo "::error title=Unreadable macOS release disk::Could not determine free workspace capacity."
+            exit 1
+          fi
+          if (( free_kib < required_kib )); then
+            free_gib=$((free_kib / 1024 / 1024))
+            echo "::error title=Insufficient macOS release disk::After safe cleanup the runner has ${free_gib} GiB free; the candidate requires at least ${MACOS_INITIAL_FREE_GIB} GiB. Use an arm64 runner with at least ${MACOS_FALLBACK_RUNNER_FREE_GIB} GiB free workspace."
+            exit 1
+          fi
+          {
+            echo "### macOS release runner"
+            echo
+            echo "- Architecture: \`arm64\`"
+            echo "- Active Xcode preserved: \`$active_xcode\`"
+            echo "- Free workspace after safe cleanup: $((free_kib / 1024 / 1024)) GiB"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24.11.0"
+          cache: npm
+          cache-dependency-path: console-ui/package-lock.json
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: distributions
+          name: python-distributions-${{ github.run_id }}-${{ github.run_attempt }}
           path: dist
-      - name: Verify downloaded release asset hashes
-        run: cd dist && sha256sum --check SHA256SUMS
-      - name: Attest distributions
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
-        with:
-          subject-path: |
-            dist/*.whl
-            dist/*.tar.gz
-            dist/*.spdx.json
-            dist/SHA256SUMS
-            dist/build-manifest.json
-      - name: Create GitHub release
+      - name: Install CPython from the exact verified arm64 archive
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes --prerelease
+          PYTHON_RUNTIME_URL: https://github.com/astral-sh/python-build-standalone/releases/download/20260510/cpython-3.12.13%2B20260510-aarch64-apple-darwin-install_only.tar.gz
+          PYTHON_RUNTIME_SHA256: 5a30271f8d345a5b02b0c9e4e31e0f1e1455a8e4a04fba95cd9762472abc3b17
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/cpython-3.12.13-arm64.tar.gz"
+          runtime_root="$RUNNER_TEMP/opswitness-python-runtime"
+          mkdir -p "$runtime_root"
+          curl --fail --location --silent --show-error \
+            --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --output "$archive" "$PYTHON_RUNTIME_URL"
+          printf '%s  %s\n' "$PYTHON_RUNTIME_SHA256" "$archive" \
+            | shasum -a 256 --check -
+          tar -xzf "$archive" -C "$runtime_root"
+          python_bin="$runtime_root/python/bin/python3.12"
+          test -x "$python_bin"
+          test "$("$python_bin" -c 'import platform; print(platform.machine())')" = arm64
+          test "$("$python_bin" -c 'import sys; print(sys.version.split()[0])')" = 3.12.13
+          test "$(/usr/bin/lipo -archs "$python_bin")" = arm64
+          rm -f -- "$archive"
+          echo "$runtime_root/python/bin" >> "$GITHUB_PATH"
+          echo "OPSWITNESS_PYTHON=$python_bin" >> "$GITHUB_ENV"
+      - name: Install pinned build toolchains
+        run: |
+          set -euo pipefail
+          python -c 'import platform,sys; assert sys.version_info[:3] == (3, 12, 13); assert platform.machine() == "arm64"'
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --no-self-update
+          rustup override set "$RUST_TOOLCHAIN"
+          test "$(rustc --version | awk '{print $2}')" = "$RUST_VERSION"
+          test "$(rustc -vV | awk '/^host:/ {print $2}')" = aarch64-apple-darwin
+          cargo install tauri-cli --version 2.8.4 --locked
+          npm ci --prefix console-ui
+      - name: Validate desktop project and release scripts
+        env:
+          OPSWITNESS_UPDATER_PUBLIC_KEY: ${{ vars.OPSWITNESS_UPDATER_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          cargo check --locked --manifest-path desktop/src-tauri/Cargo.toml
+          bash -n desktop/scripts/build_backend.sh
+          bash -n scripts/macos_sign_inside_out.sh
+          bash -n scripts/macos_notarize.sh
+          bash -n scripts/macos_validate_distribution.sh
+          bash -n scripts/macos_fresh_install_smoke.sh
+          python -m py_compile \
+            scripts/build_manifest.py \
+            scripts/github_actions_artifact.py \
+            scripts/macos_canary_handoff.py \
+            scripts/provision_macos_vendor.py \
+            scripts/release_candidate.py \
+            scripts/macos_write_signing_metadata.py
+      - name: Enforce the signed-candidate release gate
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
+          APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          OPSWITNESS_UPDATER_PUBLIC_KEY: ${{ vars.OPSWITNESS_UPDATER_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          for name in \
+            APPLE_CERTIFICATE_P12_BASE64 \
+            APPLE_CERTIFICATE_PASSWORD \
+            APPLE_KEYCHAIN_PASSWORD \
+            APPLE_SIGNING_IDENTITY \
+            APPLE_NOTARY_APPLE_ID \
+            APPLE_NOTARY_TEAM_ID \
+            APPLE_NOTARY_PASSWORD \
+            TAURI_SIGNING_PRIVATE_KEY \
+            TAURI_SIGNING_PRIVATE_KEY_PASSWORD \
+            OPSWITNESS_UPDATER_PUBLIC_KEY
+          do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Signed candidate gate is missing $name." >&2
+              exit 1
+            fi
+          done
+          python -c \
+            'import importlib.util,pathlib; p=pathlib.Path("scripts/build_manifest.py"); s=importlib.util.spec_from_file_location("m",p); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); m.assert_vendor_lock(pathlib.Path("desktop/vendor-lock.json"), require_complete=True, allow_first_party_unresolved=True, root=pathlib.Path.cwd())'
+          python scripts/provision_macos_vendor.py \
+            --lock desktop/vendor-lock.json \
+            --validate-only
+      - name: Provision exact vendor archives on the empty runner
+        run: |
+          set -euo pipefail
+          python scripts/provision_macos_vendor.py \
+            --lock desktop/vendor-lock.json \
+            --destination "$RUNNER_TEMP/opswitness-vendor" \
+            --github-env "$GITHUB_ENV" \
+            --output "$RUNNER_TEMP/vendor-provisioning.json"
+          # The verified extracted trees are the canonical inputs from this
+          # point onward. Remove their now-redundant top-level archives.
+          for component in node paperclip aioncore codex; do
+            component_root="$RUNNER_TEMP/opswitness-vendor/$component"
+            test -d "$component_root"
+            find "$component_root" -mindepth 1 -maxdepth 1 -type f -print0 |
+              while IFS= read -r -d '' archive; do
+                rm -f -- "$archive"
+              done
+          done
+      - name: Bind the exact release wheel to the backend build
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          if [[ "${#wheels[@]}" -ne 1 ]]; then
+            echo "Expected exactly one release wheel, found ${#wheels[@]}." >&2
+            exit 1
+          fi
+          wheel=$(cd "$(dirname "${wheels[0]}")" && pwd)/$(basename "${wheels[0]}")
+          echo "OPSWITNESS_RELEASE_WHEEL=$wheel" >> "$GITHUB_ENV"
+          echo "OPSWITNESS_RELEASE_WHEEL_SHA256=$(shasum -a 256 "$wheel" | awk '{print $1}')" \
+            >> "$GITHUB_ENV"
+      - name: Import Developer ID certificate and configure notarization
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
+          APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/opswitness-signing.keychain-db"
+          certificate="$RUNNER_TEMP/developer-id.p12"
+          printf '%s' "$APPLE_CERTIFICATE_P12_BASE64" | base64 -D > "$certificate"
+          security create-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$APPLE_KEYCHAIN_PASSWORD" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          xcrun notarytool store-credentials opswitness-ci \
+            --apple-id "$APPLE_NOTARY_APPLE_ID" \
+            --team-id "$APPLE_NOTARY_TEAM_ID" \
+            --password "$APPLE_NOTARY_PASSWORD"
+      - name: Build pinned application resources
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          OPSWITNESS_RELEASE_COMMIT: ${{ github.sha }}
+          OPSWITNESS_VENDOR_MODE: release
+          OPSWITNESS_UPDATER_PUBLIC_KEY: ${{ vars.OPSWITNESS_UPDATER_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          npm run build --prefix console-ui
+          OPSWITNESS_VENDOR_MODE=release desktop/scripts/build_backend.sh
+          OPSWITNESS_VENDOR_MODE=release desktop/scripts/stage_runtime.sh
+
+          # Staging is a complete copy with its own integrity manifest. Reclaim
+          # the extracted vendor inputs and PyInstaller intermediates before
+          # Cargo reaches its peak, while retaining first-party provenance.
+          rm -rf -- "$RUNNER_TEMP/opswitness-vendor"
+          rm -rf -- desktop/dist/pyinstaller desktop/dist/pyinstaller-work
+          rm -rf -- console-ui/node_modules
+
+          free_kib=$(df -Pk "$GITHUB_WORKSPACE" | awk 'END {print $4}')
+          required_kib=$((MACOS_BUILD_FREE_GIB * 1024 * 1024))
+          if [[ ! "$free_kib" =~ ^[0-9]+$ ]]; then
+            echo "::error title=Unreadable Cargo build disk::Could not determine free workspace capacity."
+            exit 1
+          fi
+          if (( free_kib < required_kib )); then
+            free_gib=$((free_kib / 1024 / 1024))
+            echo "::error title=Insufficient Cargo build disk::The staged candidate has ${free_gib} GiB free; Cargo requires at least ${MACOS_BUILD_FREE_GIB} GiB. Use an arm64 runner with at least ${MACOS_FALLBACK_RUNNER_FREE_GIB} GiB free workspace."
+            exit 1
+          fi
+
+          cargo_source_root="${CARGO_HOME:-$HOME/.cargo}"
+          RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }--remap-path-prefix=$GITHUB_WORKSPACE=/workspace --remap-path-prefix=$cargo_source_root=/cargo"
+          export RUSTFLAGS
+
+          (
+            cd desktop/src-tauri
+            cargo tauri build \
+              --config tauri.staged.conf.json \
+              --bundles app \
+              -- \
+              --locked
+          )
+          test -d desktop/src-tauri/target/release/bundle/macos/OpsWitness.app
+      - name: Preserve the exact App and reclaim build-only space
+        shell: bash
+        run: |
+          set -euo pipefail
+          target_root="$GITHUB_WORKSPACE/desktop/src-tauri/target"
+          app="$target_root/release/bundle/macos/OpsWitness.app"
+          hold="$GITHUB_WORKSPACE/.opswitness-release-app-hold"
+          test -d "$app"
+          test ! -L "$target_root"
+          test ! -e "$hold"
+
+          mkdir -p "$hold"
+          mv "$app" "$hold/OpsWitness.app"
+          rm -rf -- "$target_root"
+          mkdir -p "$target_root/release/bundle/macos"
+          mv "$hold/OpsWitness.app" "$target_root/release/bundle/macos/OpsWitness.app"
+          rmdir "$hold"
+
+          # The sealed App is now the only required Cargo output. The staged
+          # runtime, Cargo registry and Git checkout are rebuildable copies.
+          rm -rf -- \
+            desktop/.stage/runtime/aioncore \
+            desktop/.stage/runtime/backend \
+            desktop/.stage/runtime/codex \
+            desktop/.stage/runtime/node \
+            desktop/.stage/runtime/paperclip
+          rm -f -- \
+            desktop/.stage/runtime/architecture-provenance.json \
+            desktop/.stage/runtime/resource-manifest.json
+          test -f desktop/.stage/runtime/.gitkeep
+          test -z "$(
+            find desktop/.stage/runtime -mindepth 1 -maxdepth 1 \
+              ! -name .gitkeep -print -quit
+          )"
+          rm -rf -- "$HOME/.cargo/registry" "$HOME/.cargo/git"
+
+          test -d "$app"
+          free_kib=$(df -Pk "$GITHUB_WORKSPACE" | awk 'END {print $4}')
+          required_kib=$((MACOS_POST_BUILD_FREE_GIB * 1024 * 1024))
+          if [[ ! "$free_kib" =~ ^[0-9]+$ ]]; then
+            echo "::error title=Unreadable signing disk::Could not determine free workspace capacity."
+            exit 1
+          fi
+          if (( free_kib < required_kib )); then
+            free_gib=$((free_kib / 1024 / 1024))
+            echo "::error title=Insufficient signing disk::After preserving the exact App the runner has ${free_gib} GiB free; signing and DMG assembly require at least ${MACOS_POST_BUILD_FREE_GIB} GiB. Use an arm64 runner with at least ${MACOS_FALLBACK_RUNNER_FREE_GIB} GiB free workspace."
+            exit 1
+          fi
+      - name: Sign inside-out and create DMG and updater archive
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          app="desktop/src-tauri/target/release/bundle/macos/OpsWitness.app"
+          dmg="dist/OpsWitness-0.1.0-alpha.1-macos-arm64.dmg"
+          updater="dist/OpsWitness-0.1.0-alpha.1-macos-arm64-updater.tar.gz"
+          cp NOTICE THIRD_PARTY_NOTICES.txt LICENSE "$app/Contents/Resources/"
+          scripts/macos_sign_inside_out.sh "$app" "$APPLE_SIGNING_IDENTITY"
+          # Archive the already-verified App directly instead of creating a
+          # second 2 GiB updater tree.
+          tar -C "$(dirname "$app")" -czf "$updater" "$(basename "$app")"
+          key="$RUNNER_TEMP/tauri-updater.key"
+          printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > "$key"
+          cargo tauri signer sign \
+            --private-key "$key" \
+            --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
+            "$updater"
+          rm -f -- "$key"
+          python scripts/macos_build_update_feed.py \
+            --version 0.1.0-alpha.1 \
+            --archive-url \
+              "https://github.com/opswitness/opswitness/releases/download/v0.1.0-alpha.1/$(basename "$updater")" \
+            --signature "$updater.sig" \
+            --output dist/updates-alpha-latest.json
+          dmg_root="$RUNNER_TEMP/opswitness-dmg"
+          mkdir -p "$dmg_root"
+          ditto "$app" "$dmg_root/OpsWitness.app"
+          ln -s /Applications "$dmg_root/Applications"
+          hdiutil create -volname OpsWitness -srcfolder "$dmg_root" -format UDZO "$dmg"
+          rm -rf -- "$dmg_root"
+          codesign --force --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$dmg"
+      - name: Notarize, staple, and assess the exact DMG
+        run: |
+          scripts/macos_notarize.sh \
+            dist/OpsWitness-0.1.0-alpha.1-macos-arm64.dmg \
+            opswitness-ci \
+            "$RUNNER_TEMP/notary.json"
+          scripts/macos_validate_distribution.sh \
+            desktop/src-tauri/target/release/bundle/macos/OpsWitness.app \
+            dist/OpsWitness-0.1.0-alpha.1-macos-arm64.dmg \
+            developer-id \
+            dist/macos-signing.json \
+            "$RUNNER_TEMP/notary.json"
+          scripts/macos_fresh_install_smoke.sh \
+            dist/OpsWitness-0.1.0-alpha.1-macos-arm64.dmg
+      - name: Generate complete App SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: desktop/src-tauri/target/release/bundle/macos/OpsWitness.app
+          format: spdx-json
+          output-file: dist/app-sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Assemble and verify immutable signed candidate
+        run: |
+          set -euo pipefail
+          cp THIRD_PARTY_NOTICES.txt dist/THIRD_PARTY_NOTICES.txt
+          cp desktop/dist/backend-build-provenance.json \
+            dist/backend-build-provenance.json
+          cp desktop/.stage/vendor-lock.resolved.json dist/vendor-lock.json
+          python scripts/build_manifest.py dist \
+            --tag "$RELEASE_TAG" \
+            --require-sbom \
+            --require-macos \
+            --require-release-ready \
+            --vendor-lock dist/vendor-lock.json \
+            --macos-metadata dist/macos-signing.json \
+            --candidate-run-id "$GITHUB_RUN_ID" \
+            --candidate-run-attempt "$GITHUB_RUN_ATTEMPT"
+          manifest_sha=$(shasum -a 256 dist/build-manifest.json | awk '{print $1}')
+          dmg_sha=$(shasum -a 256 \
+            dist/OpsWitness-0.1.0-alpha.1-macos-arm64.dmg | awk '{print $1}')
+          python scripts/release_candidate.py verify-candidate \
+            --dist dist \
+            --candidate-run-id "$GITHUB_RUN_ID" \
+            --candidate-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --commit "$GITHUB_SHA" \
+            --tag "$RELEASE_TAG" \
+            --dmg-sha256 "$dmg_sha" \
+            --manifest-sha256 "$manifest_sha"
+          {
+            echo "### Immutable signed Alpha candidate"
+            echo
+            echo "- Candidate run: $GITHUB_RUN_ID / $GITHUB_RUN_ATTEMPT"
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- DMG SHA-256: \`$dmg_sha\`"
+            echo "- Manifest SHA-256: \`$manifest_sha\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - id: candidate-artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+      - name: Record the immutable candidate artifact transport identity
+        run: |
+          {
+            echo
+            echo "- Artifact ID: ${{ steps.candidate-artifact.outputs.artifact-id }}"
+            echo "- Artifact SHA-256: \`${{ steps.candidate-artifact.outputs.artifact-digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

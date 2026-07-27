@@ -1,4 +1,4 @@
-import type { RuntimeActivity, StageProgress } from './types';
+import type { ExecutionProgress, RuntimeActivity, StageProgress } from './types';
 
 export type ExecutionControlAction = 'pause' | 'resume' | 'terminate';
 export type ExecutionControlButton = {
@@ -38,3 +38,31 @@ export function stageProgressSummary(stages: StageProgress[]): {
   activeOrder: number | null;
 };
 export function formatExecutionElapsed(seconds: number, language?: 'en' | 'zh'): string;
+
+export type OnboardingRunStage = {
+  order: number;
+  status: StageProgress['status'];
+  observed: boolean;
+  tone: 'active' | 'attention' | 'success' | 'danger' | 'neutral';
+  agentName: string;
+};
+
+export function onboardingRunProgress(input: {
+  workStatus: string;
+  plannedStages?: Array<{ order: number; owner: string }>;
+  progress?: ExecutionProgress | null;
+  startedAt?: string | null;
+  estimateMinutes?: number;
+  nowMs?: number;
+}): {
+  available: boolean;
+  observed: boolean;
+  stages: OnboardingRunStage[];
+  completed: number;
+  total: number;
+  currentOrder: number | null;
+  elapsedSeconds: number | null;
+  estimateMinutes: number | null;
+  estimateExceeded: boolean;
+  slow: boolean;
+};

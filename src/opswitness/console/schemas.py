@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Literal
+from pathlib import PurePosixPath
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+
+from opswitness.naming import validate_new_display_name, validate_optional_new_display_name
 
 
 def utc_now() -> str:
@@ -45,7 +48,15 @@ class ExecutionProfile(StrEnum):
     CUSTOM = "custom"
 
 
-class PlannedAgent(BaseModel):
+class ContractControl(StrEnum):
+    """Per-Agent tool/effect policy. Unknown operations are always denied."""
+
+    DENY = "deny"
+    ALWAYS_ASK = "always_ask"
+    INHERIT_RUN_MODE = "inherit_run_mode"
+
+
+class TaskPlanV1Agent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=80)
@@ -61,7 +72,10 @@ class PlannedAgent(BaseModel):
     reports_to: str | None = Field(default=None, min_length=1, max_length=80)
 
 
-class TaskStage(BaseModel):
+PlannedAgent = TaskPlanV1Agent
+
+
+class TaskPlanV1Stage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     order: int = Field(ge=1, le=20)
@@ -69,6 +83,9 @@ class TaskStage(BaseModel):
     owner: str = Field(min_length=1, max_length=80)
     outcome: str = Field(min_length=1, max_length=500)
     checkpoint: bool = False
+
+
+TaskStage = TaskPlanV1Stage
 
 
 class TaskCadence(BaseModel):
@@ -89,7 +106,7 @@ class AgentCollaborationLoop(BaseModel):
     max_iterations: int = Field(ge=1, le=10)
 
 
-class TaskPlan(BaseModel):
+class TaskPlanV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal[1] = 1
@@ -113,7 +130,7 @@ class TaskPlan(BaseModel):
     update_policy: str = Field(min_length=1, max_length=500)
 
     @model_validator(mode="after")
-    def validate_architecture(self) -> "TaskPlan":
+    def validate_architecture(self) -> "TaskPlanV1":
         leaders = [agent for agent in self.agents if agent.role == AgentRole.LEAD]
         if len(leaders) != 1:
             raise ValueError("a plan must contain exactly one lead agent")
@@ -173,6 +190,477 @@ class TaskPlan(BaseModel):
         if not any(agent.reports_to is not None for agent in self.agents):
             return {agent.name: None if agent is leader else leader.name for agent in self.agents}
         return {agent.name: agent.reports_to for agent in self.agents}
+
+
+def _normalized_contract_relative_path(value: str) -> str:
+    """Return one canonical workspace-relative POSIX path."""
+    if (
+        not value
+        or value != value.strip()
+        or "\\" in value
+        or "\x00" in value
+        or any(ord(char) < 32 for char in value)
+    ):
+        raise ValueError("contract paths must be canonical relative POSIX paths")
+    path = PurePosixPath(value)
+    if path.is_absolute() or value.startswith("~"):
+        raise ValueError("contract paths must be relative")
+    if any(part in {"", ".", ".."} for part in path.parts):
+        raise ValueError("contract paths cannot traverse or contain dot segments")
+    normalized = path.as_posix()
+    if normalized != value:
+        raise ValueError("contract paths must already be normalized")
+    return normalized
+
+
+def _normalized_managed_network_domain(value: str) -> str:
+    if (
+        not value
+        or value != value.strip()
+        or value != value.casefold()
+        or len(value) > 253
+        or value.startswith(".")
+        or value.endswith(".")
+        or "*" in value
+        or "://" in value
+        or ":" in value
+    ):
+        raise ValueError("managed network domains must be exact lowercase hostnames")
+    labels = value.split(".")
+    if any(
+        not label
+        or len(label) > 63
+        or not label[0].isalnum()
+        or not label[-1].isalnum()
+        or any(
+            ord(character) > 127
+            or not (character.isalnum() or character == "-")
+            for character in label
+        )
+        for label in labels
+    ):
+        raise ValueError("managed network domains must be exact lowercase hostnames")
+    return value
+
+
+class AgentContractInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    input_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    label: str = Field(min_length=1, max_length=160)
+    relative_path: str | None = Field(default=None, min_length=1, max_length=512)
+    source_agent_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$",
+    )
+    source_output_id: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+    )
+    required: bool = True
+    sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("relative_path")
+    @classmethod
+    def validate_relative_path(cls, value: str | None) -> str | None:
+        return None if value is None else _normalized_contract_relative_path(value)
+
+    @model_validator(mode="after")
+    def validate_source_reference(self) -> "AgentContractInput":
+        if (self.source_agent_id is None) != (self.source_output_id is None):
+            raise ValueError(
+                "Agent input source Agent and source output must be referenced together"
+            )
+        return self
+
+
+class AgentContractOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    output_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    label: str = Field(min_length=1, max_length=160)
+    relative_path: str = Field(min_length=1, max_length=512)
+    media_type: str | None = Field(default=None, min_length=1, max_length=100)
+    acceptance_criteria: list[str] = Field(default_factory=list, max_length=12)
+    required: bool = True
+
+    @field_validator("relative_path")
+    @classmethod
+    def validate_relative_path(cls, value: str) -> str:
+        return _normalized_contract_relative_path(value)
+
+
+class AgentToolRule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tool_name: str = Field(min_length=1, max_length=160)
+    policy: ContractControl = ContractControl.DENY
+
+    @field_validator("tool_name")
+    @classmethod
+    def normalize_tool_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if (
+            not normalized
+            or normalized != value
+            or any(
+                ord(char) > 127
+                or char not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.:-"
+                for char in normalized
+            )
+        ):
+            raise ValueError("tool names must be exact ASCII identifiers")
+        return normalized
+
+
+class AgentDataScope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    allowed_relative_paths: list[str] = Field(default_factory=list, max_length=40)
+    attachment_ids: list[str] = Field(default_factory=list, max_length=5)
+    managed_network_domains: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("allowed_relative_paths")
+    @classmethod
+    def validate_paths(cls, values: list[str]) -> list[str]:
+        normalized = [_normalized_contract_relative_path(value) for value in values]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("data scope paths must be unique")
+        return normalized
+
+    @field_validator("attachment_ids")
+    @classmethod
+    def validate_attachment_ids(cls, values: list[str]) -> list[str]:
+        if len(values) != len(set(values)):
+            raise ValueError("attachment ids must be unique")
+        for value in values:
+            if len(value) != 26 or any(char not in "0123456789ABCDEFGHJKMNPQRSTVWXYZ" for char in value):
+                raise ValueError("attachment ids must be ULIDs")
+        return values
+
+    @field_validator("managed_network_domains")
+    @classmethod
+    def validate_managed_network_domains(cls, values: list[str]) -> list[str]:
+        normalized = [_normalized_managed_network_domain(value) for value in values]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("managed network domains must be unique")
+        return normalized
+
+
+class AgentSideEffectPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file_write: ContractControl = ContractControl.DENY
+    operator_input: ContractControl = ContractControl.DENY
+    managed_network: ContractControl = ContractControl.DENY
+    send: ContractControl = ContractControl.DENY
+    publish: ContractControl = ContractControl.DENY
+    delete: Literal[ContractControl.DENY, ContractControl.ALWAYS_ASK] = ContractControl.DENY
+
+
+class AgentMemoryPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["none", "selected"] = "none"
+    version_ids: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_selection(self) -> "AgentMemoryPolicy":
+        if len(self.version_ids) != len(set(self.version_ids)):
+            raise ValueError("memory version ids must be unique")
+        for version_id in self.version_ids:
+            if len(version_id) != 26 or any(
+                char not in "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+                for char in version_id
+            ):
+                raise ValueError("memory version ids must be ULIDs")
+        if self.mode == "none" and self.version_ids:
+            raise ValueError("memory mode none cannot select versions")
+        if self.mode == "selected" and not self.version_ids:
+            raise ValueError("selected memory mode requires at least one version")
+        return self
+
+
+class AgentHandoffPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    allowed_target_agent_ids: list[str] = Field(default_factory=list, max_length=5)
+    acceptance_criteria: list[str] = Field(default_factory=list, max_length=12)
+    require_cas_receipt: bool = True
+
+
+class AgentEscalationPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_agent_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$",
+    )
+    conditions: list[str] = Field(default_factory=list, max_length=12)
+
+
+class AgentRetryPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    max_attempts: int = Field(default=1, ge=1, le=5)
+    retryable_errors: list[
+        Literal[
+            "runtime_temporarily_unavailable",
+            "rate_limited",
+            "network_temporarily_unavailable",
+            "tool_temporarily_unavailable",
+        ]
+    ] = Field(default_factory=list, max_length=4)
+    backoff_seconds: int = Field(default=5, ge=1, le=300)
+
+    @model_validator(mode="after")
+    def validate_retry(self) -> "AgentRetryPolicy":
+        if len(self.retryable_errors) != len(set(self.retryable_errors)):
+            raise ValueError("retryable error categories must be unique")
+        if self.max_attempts == 1 and self.retryable_errors:
+            raise ValueError("retry categories require at least two attempts")
+        return self
+
+
+class AgentStopPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    timeout_seconds: int = Field(default=900, ge=30, le=86400)
+    stop_conditions: list[str] = Field(default_factory=list, max_length=12)
+    stop_on_approval_rejection: bool = True
+    stop_on_contract_violation: bool = True
+    stop_on_digest_mismatch: bool = True
+
+
+class AgentContractV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    instructions: str = Field(min_length=1, max_length=12000)
+    prohibitions: list[str] = Field(default_factory=list, max_length=30)
+    inputs: list[AgentContractInput] = Field(default_factory=list, max_length=30)
+    outputs: list[AgentContractOutput] = Field(default_factory=list, max_length=30)
+    acceptance_criteria: list[str] = Field(default_factory=list, max_length=30)
+    default_tool_policy: ContractControl = ContractControl.DENY
+    tool_rules: list[AgentToolRule] = Field(default_factory=list, max_length=30)
+    data_scope: AgentDataScope = Field(default_factory=AgentDataScope)
+    side_effects: AgentSideEffectPolicy = Field(default_factory=AgentSideEffectPolicy)
+    memory: AgentMemoryPolicy = Field(default_factory=AgentMemoryPolicy)
+    handoff: AgentHandoffPolicy = Field(default_factory=AgentHandoffPolicy)
+    escalation: AgentEscalationPolicy = Field(default_factory=AgentEscalationPolicy)
+    approval_checkpoints: list[str] = Field(default_factory=list, max_length=20)
+    retry: AgentRetryPolicy = Field(default_factory=AgentRetryPolicy)
+    stop: AgentStopPolicy = Field(default_factory=AgentStopPolicy)
+
+    @model_validator(mode="after")
+    def validate_contract(self) -> "AgentContractV1":
+        input_ids = [item.input_id for item in self.inputs]
+        output_ids = [item.output_id for item in self.outputs]
+        tools = [item.tool_name for item in self.tool_rules]
+        if len(input_ids) != len(set(input_ids)):
+            raise ValueError("contract input ids must be unique")
+        if len(output_ids) != len(set(output_ids)):
+            raise ValueError("contract output ids must be unique")
+        if len(tools) != len(set(tools)):
+            raise ValueError("contract tool rules must be unique")
+        if self.default_tool_policy != ContractControl.DENY:
+            raise ValueError("v2 contracts must deny unknown tools")
+        return self
+
+
+class AgentRuntimeBinding(BaseModel):
+    """Read-only adapter identity captured by the service in the reviewed plan."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    adapter_version: str = Field(min_length=1, max_length=120)
+    executable_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    status: Literal["bound", "alias", "default", "unverified"]
+
+
+class TaskPlanV2Agent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    name: str = Field(min_length=1, max_length=80)
+    role: AgentRole
+    responsibility: str = Field(min_length=1, max_length=600)
+    runtime: RuntimeName
+    model: str = Field(default="default", min_length=1, max_length=200)
+    model_binding: Literal["exact", "alias", "default"] = "default"
+    runtime_binding: AgentRuntimeBinding = Field(
+        default_factory=lambda: AgentRuntimeBinding(
+            adapter_version="unavailable",
+            executable_sha256=None,
+            status="unverified",
+        )
+    )
+    runtime_reason: str = Field(min_length=3, max_length=240)
+    reports_to_agent_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$",
+    )
+    contract: AgentContractV1
+
+    @model_validator(mode="after")
+    def validate_model_binding(self) -> "TaskPlanV2Agent":
+        if self.model_binding == "default" and self.model != "default":
+            raise ValueError("default model binding must use model id default")
+        if self.model_binding != "default" and self.model == "default":
+            raise ValueError("alias/exact model binding requires a concrete model id")
+        return self
+
+
+class TaskPlanV2Stage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    order: int = Field(ge=1, le=20)
+    title: str = Field(min_length=1, max_length=100)
+    owner_agent_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    outcome: str = Field(min_length=1, max_length=500)
+    checkpoint: bool = False
+
+
+class AgentCollaborationLoopV2(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_agent_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    target_agent_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    condition: str = Field(min_length=3, max_length=300)
+    max_iterations: int = Field(ge=1, le=10)
+
+
+class TaskPlanV2(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[2] = 2
+    title: str = Field(min_length=1, max_length=120)
+    summary: str = Field(min_length=1, max_length=1200)
+    execution_profile: ExecutionProfile | None = None
+    execution_mode: Literal["aion_team"] = "aion_team"
+    workflow_id: None = None
+    runtime_mode: Literal["aion_compatible", "strict"] = "aion_compatible"
+    agents: list[TaskPlanV2Agent] = Field(min_length=1, max_length=5)
+    collaboration_loops: list[AgentCollaborationLoopV2] = Field(
+        default_factory=list,
+        max_length=5,
+    )
+    stages: list[TaskPlanV2Stage] = Field(min_length=1, max_length=8)
+    cadence: TaskCadence
+    tools: list[str] = Field(default_factory=list, max_length=12)
+    approvals: list[str] = Field(default_factory=list, max_length=12)
+    artifacts: list[str] = Field(default_factory=list, max_length=12)
+    risks: list[str] = Field(default_factory=list, max_length=12)
+    estimated_duration_minutes: int = Field(ge=1, le=10080)
+    update_policy: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_architecture(self) -> "TaskPlanV2":
+        leaders = [agent for agent in self.agents if agent.role == AgentRole.LEAD]
+        if len(leaders) != 1:
+            raise ValueError("a plan must contain exactly one lead agent")
+        ids = [agent.agent_id for agent in self.agents]
+        if len(ids) != len(set(ids)):
+            raise ValueError("agent ids must be unique")
+        names = [agent.name.casefold() for agent in self.agents]
+        if len(names) != len(set(names)):
+            raise ValueError("agent names must be unique")
+        agent_ids = set(ids)
+        leader = leaders[0]
+        if leader.reports_to_agent_id is not None:
+            raise ValueError("the lead agent cannot report to another agent")
+        parents: dict[str, str] = {}
+        for agent in self.agents:
+            if agent.agent_id == leader.agent_id:
+                continue
+            parent = agent.reports_to_agent_id
+            if parent is None or parent not in agent_ids or parent == agent.agent_id:
+                raise ValueError("every non-lead agent must have one valid direct manager")
+            parents[agent.agent_id] = parent
+        for node_id in parents:
+            seen = {node_id}
+            cursor = node_id
+            while cursor in parents:
+                cursor = parents[cursor]
+                if cursor in seen:
+                    raise ValueError("agent reporting lines must be acyclic")
+                seen.add(cursor)
+        orders = [stage.order for stage in self.stages]
+        if sorted(orders) != list(range(1, len(orders) + 1)):
+            raise ValueError("stage order must be contiguous from 1")
+        if any(stage.owner_agent_id not in agent_ids for stage in self.stages):
+            raise ValueError("every stage owner must reference a planned agent")
+        loop_pairs: set[tuple[str, str]] = set()
+        for loop in self.collaboration_loops:
+            pair = (loop.source_agent_id, loop.target_agent_id)
+            if (
+                loop.source_agent_id not in agent_ids
+                or loop.target_agent_id not in agent_ids
+                or pair in loop_pairs
+            ):
+                raise ValueError("collaboration loops must reference unique planned agents")
+            loop_pairs.add(pair)
+        output_owners = {
+            output.output_id: agent.agent_id
+            for agent in self.agents
+            for output in agent.contract.outputs
+        }
+        output_ids = set(output_owners)
+        if len(output_ids) != sum(len(agent.contract.outputs) for agent in self.agents):
+            raise ValueError("output ids must be unique across the plan")
+        attachment_ids = set()
+        for agent in self.agents:
+            contract = agent.contract
+            for input_item in contract.inputs:
+                if (
+                    input_item.source_agent_id is not None
+                    and input_item.source_agent_id not in agent_ids
+                ):
+                    raise ValueError("contract input source must reference a planned agent")
+                if input_item.source_output_id is not None and (
+                    input_item.source_output_id not in output_owners
+                    or output_owners[input_item.source_output_id]
+                    != input_item.source_agent_id
+                ):
+                    raise ValueError(
+                        "contract input source output must belong to its source Agent"
+                    )
+            handoff_targets = contract.handoff.allowed_target_agent_ids
+            if len(handoff_targets) != len(set(handoff_targets)):
+                raise ValueError("handoff targets must be unique")
+            if any(
+                target not in agent_ids or target == agent.agent_id
+                for target in handoff_targets
+            ):
+                raise ValueError("handoff targets must reference another planned agent")
+            escalation = contract.escalation.target_agent_id
+            if escalation is not None and (
+                escalation not in agent_ids or escalation == agent.agent_id
+            ):
+                raise ValueError("escalation must reference another planned agent")
+            attachment_ids.update(contract.data_scope.attachment_ids)
+        if len(attachment_ids) > 5:
+            raise ValueError("plan contracts reference too many attachments")
+        return self
+
+    def effective_reporting_lines(self) -> dict[str, str | None]:
+        by_id = {agent.agent_id: agent.name for agent in self.agents}
+        return {
+            agent.name: (
+                by_id[agent.reports_to_agent_id]
+                if agent.reports_to_agent_id is not None
+                else None
+            )
+            for agent in self.agents
+        }
+
+
+# Compatibility name for callers and fixtures that explicitly create historical v1 plans.
+TaskPlan = TaskPlanV1
+TaskPlanDocument = Annotated[
+    TaskPlanV1 | TaskPlanV2,
+    Field(discriminator="schema_version"),
+]
 
 
 class PlanningAttachmentUpload(BaseModel):
@@ -236,8 +724,692 @@ class PlanningAttachment(BaseModel):
     storage_plan_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     name: str = Field(min_length=1, max_length=160)
     media_type: str = Field(min_length=1, max_length=100)
-    size_bytes: int = Field(ge=1, le=5 * 1024 * 1024)
+    size_bytes: int = Field(ge=1, le=50 * 1024 * 1024)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ProjectLibraryMetadata(BaseModel):
+    """Private operator metadata bound to one exact projected file identity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    asset_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_kind: Literal["planning_input", "registered_output", "workspace_output"]
+    plan_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    source_ref: str = Field(min_length=1, max_length=256)
+    name: str = Field(min_length=1, max_length=256)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    user_tags: list[str] = Field(default_factory=list, max_length=20)
+    supersedes_asset_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    updated_at: str = Field(default_factory=utc_now)
+
+
+class ProjectLibraryItem(BaseModel):
+    """One live, re-verifiable projection over retained bytes owned elsewhere."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    asset_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_kind: Literal["planning_input", "registered_output", "workspace_output"]
+    source_ref: str = Field(min_length=1, max_length=256)
+    plan_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    work_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    work_title: str = Field(min_length=1, max_length=120)
+    revision_number: int = Field(ge=1, le=100)
+    name: str = Field(min_length=1, max_length=256)
+    mime: str = Field(min_length=1, max_length=100)
+    file_type: str = Field(min_length=1, max_length=100)
+    size: int = Field(ge=0, le=25 * 1024 * 1024)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evidence_status: Literal["retained_input", "registered", "workspace_unverified"]
+    preview_supported: bool
+    created_at: str
+    event_id: str | None = Field(default=None, max_length=128)
+    system_tags: list[str] = Field(default_factory=list, max_length=55)
+    user_tags: list[str] = Field(default_factory=list, max_length=20)
+    supersedes_asset_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    supersedes_status: Literal["none", "available", "unavailable"] = "none"
+    superseded_by_asset_ids: list[str] = Field(default_factory=list, max_length=500)
+    content_url: str = Field(min_length=1, max_length=256)
+
+
+class ProjectLibraryItemPreview(ProjectLibraryItem):
+    model_config = ConfigDict(extra="forbid")
+
+    preview_kind: Literal["none", "json", "text"] = "none"
+    preview: Any = None
+
+
+class ProjectLibraryMetadataUpdate(BaseModel):
+    """Replace user-managed tags and one explicit version predecessor."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    user_tags: list[str] = Field(default_factory=list, max_length=20)
+    supersedes_asset_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    confirmed: Literal[True]
+
+    @model_validator(mode="after")
+    def normalize_metadata(self) -> "ProjectLibraryMetadataUpdate":
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for raw_tag in self.user_tags:
+            tag = " ".join(raw_tag.split())
+            if not tag or len(tag) > 40 or any(ord(char) < 32 for char in tag):
+                raise ValueError("library tags must contain 1-40 printable characters")
+            folded = tag.casefold()
+            if folded in seen:
+                continue
+            seen.add(folded)
+            normalized.append(tag)
+        self.user_tags = normalized
+        return self
+
+
+LibraryFileFormat = Literal[
+    "csv",
+    "docx",
+    "jpeg",
+    "jpg",
+    "json",
+    "md",
+    "pdf",
+    "png",
+    "txt",
+    "webp",
+    "xlsx",
+]
+
+
+def _default_library_formats() -> list[LibraryFileFormat]:
+    return [
+        "txt",
+        "md",
+        "csv",
+        "json",
+        "pdf",
+        "docx",
+        "xlsx",
+        "png",
+        "jpg",
+        "jpeg",
+        "webp",
+    ]
+
+
+def _normalize_library_tags(values: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_tag in values:
+        tag = " ".join(raw_tag.split())
+        if not tag or len(tag) > 40 or any(ord(char) < 32 for char in tag):
+            raise ValueError("library tags must contain 1-40 printable characters")
+        folded = tag.casefold()
+        if folded in seen:
+            continue
+        seen.add(folded)
+        normalized.append(tag)
+    return normalized
+
+
+class LibraryCollectionPolicyV1(BaseModel):
+    """Immutable policy content; identity and hash live on the collection revision."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    purpose: str = Field(default="General reference material", max_length=500)
+    default_tags: list[str] = Field(default_factory=list, max_length=20)
+    allowed_formats: list[LibraryFileFormat] = Field(
+        default_factory=_default_library_formats,
+        min_length=1,
+        max_length=12,
+    )
+    exclude_name_patterns: list[str] = Field(
+        default_factory=lambda: [".DS_Store", "Thumbs.db"],
+        max_length=20,
+    )
+    knowledge_card_language: Literal["auto", "zh-CN", "en"] = "auto"
+    generation_instructions: str = Field(
+        default=(
+            "Summarize only supported source material. Keep claims bounded and attach an "
+            "exact source citation to every key point."
+        ),
+        max_length=2000,
+    )
+
+    @model_validator(mode="after")
+    def normalize_policy(self) -> "LibraryCollectionPolicyV1":
+        self.purpose = " ".join(self.purpose.split())
+        self.default_tags = _normalize_library_tags(self.default_tags)
+        self.allowed_formats = list(dict.fromkeys(self.allowed_formats))
+        patterns: list[str] = []
+        for raw_pattern in self.exclude_name_patterns:
+            pattern = raw_pattern.strip()
+            if (
+                not pattern
+                or len(pattern) > 100
+                or "/" in pattern
+                or "\\" in pattern
+                or any(ord(char) < 32 for char in pattern)
+            ):
+                raise ValueError("library exclusion patterns must be plain names")
+            if pattern not in patterns:
+                patterns.append(pattern)
+        self.exclude_name_patterns = patterns
+        self.generation_instructions = self.generation_instructions.strip()
+        return self
+
+
+class LibraryCollectionV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    collection_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    name: str = Field(min_length=1, max_length=100)
+    revision: int = Field(ge=1)
+    policy_version_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    policy_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    policy: LibraryCollectionPolicyV1
+    is_inbox: bool = False
+    document_count: int = Field(default=0, ge=0)
+    approved_card_count: int = Field(default=0, ge=0)
+    created_at: str = Field(default_factory=utc_now)
+    updated_at: str = Field(default_factory=utc_now)
+
+
+class LibraryCollectionCreateV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=100)
+    policy: LibraryCollectionPolicyV1 = Field(default_factory=LibraryCollectionPolicyV1)
+
+    @model_validator(mode="after")
+    def normalize_name(self) -> "LibraryCollectionCreateV1":
+        self.name = " ".join(self.name.split())
+        if not self.name:
+            raise ValueError("library collection name must not be blank")
+        return self
+
+
+class LibraryCollectionRevisionRequestV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=100)
+    policy: LibraryCollectionPolicyV1
+    confirmed: Literal[True]
+
+    @model_validator(mode="after")
+    def normalize_name(self) -> "LibraryCollectionRevisionRequestV1":
+        self.name = " ".join(self.name.split())
+        if not self.name:
+            raise ValueError("library collection name must not be blank")
+        return self
+
+
+class LibraryImportEntryRequestV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    relative_path: str = Field(min_length=1, max_length=500)
+    size_bytes: int = Field(ge=1, le=50 * 1024 * 1024)
+    media_type: str = Field(default="application/octet-stream", min_length=1, max_length=100)
+    source_kind: Literal["file", "hidden", "package", "symlink"] = "file"
+
+    @model_validator(mode="after")
+    def validate_relative_path(self) -> "LibraryImportEntryRequestV1":
+        raw = self.relative_path.replace("\\", "/")
+        path = PurePosixPath(raw)
+        if (
+            path.is_absolute()
+            or not path.parts
+            or raw != path.as_posix()
+            or any(part in {"", ".", ".."} for part in path.parts)
+            or any(any(ord(char) < 32 for char in part) for part in path.parts)
+        ):
+            raise ValueError("library import path must be a normalized relative path")
+        self.relative_path = raw
+        self.media_type = self.media_type.strip().casefold()
+        return self
+
+
+class LibraryImportCreateRequestV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    collection_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    expected_collection_revision: int = Field(ge=1)
+    entries: list[LibraryImportEntryRequestV1] = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_batch(self) -> "LibraryImportCreateRequestV1":
+        if sum(entry.size_bytes for entry in self.entries) > 1024 * 1024 * 1024:
+            raise ValueError("library import exceeds the 1 GiB batch limit")
+        paths = [entry.relative_path.casefold() for entry in self.entries]
+        if len(paths) != len(set(paths)):
+            raise ValueError("library import paths must be unique within a batch")
+        return self
+
+
+class LibraryImportEntryV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    entry_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    relative_path: str = Field(min_length=1, max_length=500)
+    size_bytes: int = Field(ge=1, le=50 * 1024 * 1024)
+    media_type: str = Field(min_length=1, max_length=100)
+    file_format: str = Field(min_length=1, max_length=20)
+    status: Literal[
+        "pending",
+        "uploaded",
+        "duplicate",
+        "new_version",
+        "skipped",
+        "error",
+        "committed",
+    ]
+    sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    classification: Literal["new", "duplicate", "new_version", "skipped"] | None = None
+    reason: str | None = Field(default=None, max_length=300)
+    document_version_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$",
+    )
+
+
+class LibraryImportV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    import_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    collection_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    collection_revision: int = Field(ge=1)
+    policy_version_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    policy_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    status: Literal["staging", "ready", "committing", "committed", "cancelled", "expired"]
+    entries: list[LibraryImportEntryV1] = Field(max_length=500)
+    files_total: int = Field(ge=1, le=500)
+    files_uploaded: int = Field(default=0, ge=0, le=500)
+    files_skipped: int = Field(default=0, ge=0, le=500)
+    files_failed: int = Field(default=0, ge=0, le=500)
+    bytes_total: int = Field(ge=1, le=1024 * 1024 * 1024)
+    bytes_uploaded: int = Field(default=0, ge=0, le=1024 * 1024 * 1024)
+    manifest_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    created_at: str = Field(default_factory=utc_now)
+    updated_at: str = Field(default_factory=utc_now)
+    expires_at: str
+
+
+class LibraryImportCommitRequestV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_collection_revision: int = Field(ge=1)
+    confirmed_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    confirmed: Literal[True]
+
+
+LibraryExtractionStatus = Literal[
+    "included",
+    "metadata_only",
+    "encrypted",
+    "no_text",
+    "extraction_failed",
+]
+
+
+class LibraryDocumentVersionV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    document_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    version_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    collection_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    version_number: int = Field(ge=1)
+    previous_version_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$",
+    )
+    relative_path: str = Field(min_length=1, max_length=500)
+    display_name: str = Field(min_length=1, max_length=255)
+    media_type: str = Field(min_length=1, max_length=100)
+    file_format: str = Field(min_length=1, max_length=20)
+    size_bytes: int = Field(ge=1, le=50 * 1024 * 1024)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    blob_ref: str = Field(pattern=r"^sha256/[0-9a-f]{2}/[0-9a-f]{64}$")
+    aliases: list[str] = Field(default_factory=list, max_length=50)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    metadata_revision: int = Field(default=1, ge=1)
+    policy_version_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    policy_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    extraction_status: LibraryExtractionStatus
+    extraction_detail: str | None = Field(default=None, max_length=300)
+    text_chunk_count: int = Field(default=0, ge=0)
+    text_character_count: int = Field(default=0, ge=0)
+    text_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    status: Literal["active", "tombstoned"] = "active"
+    created_at: str = Field(default_factory=utc_now)
+    tombstoned_at: str | None = None
+
+
+class LibraryDocumentMetadataUpdateV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_metadata_revision: int = Field(ge=1)
+    expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    aliases: list[str] = Field(default_factory=list, max_length=50)
+    confirmed: Literal[True]
+
+    @model_validator(mode="after")
+    def normalize_metadata(self) -> "LibraryDocumentMetadataUpdateV1":
+        self.tags = _normalize_library_tags(self.tags)
+        aliases: list[str] = []
+        for raw_alias in self.aliases:
+            alias = " ".join(raw_alias.split())
+            if (
+                not alias
+                or len(alias) > 255
+                or "/" in alias
+                or "\\" in alias
+                or any(ord(char) < 32 for char in alias)
+            ):
+                raise ValueError("library aliases must be plain display names")
+            if alias.casefold() not in {item.casefold() for item in aliases}:
+                aliases.append(alias)
+        self.aliases = aliases
+        return self
+
+
+class LibraryCitationV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    document_version_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    document_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    locator_type: Literal["page", "sheet", "line", "chunk", "metadata"]
+    locator: str = Field(min_length=1, max_length=200)
+    chunk_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    excerpt: str = Field(default="", max_length=1000)
+    excerpt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class KnowledgeCardPointV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    statement: str = Field(min_length=1, max_length=1000)
+    citations: list[LibraryCitationV1] = Field(min_length=1, max_length=4)
+
+
+class KnowledgeCardVersionV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    card_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    version_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    collection_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    source_document_version_ids: list[str] = Field(min_length=1, max_length=20)
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(min_length=1, max_length=4000)
+    key_points: list[KnowledgeCardPointV1] = Field(default_factory=list, max_length=8)
+    suggested_tags: list[str] = Field(default_factory=list, max_length=20)
+    coverage_scope: str = Field(min_length=1, max_length=1000)
+    coverage: Literal["complete", "partial", "metadata_only"]
+    state: Literal["candidate", "approved", "superseded", "dismissed", "revoked"]
+    card_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    policy_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    provider: Literal["openai", "anthropic"]
+    model: str = Field(min_length=1, max_length=200)
+    generator_version: str = Field(min_length=1, max_length=100)
+    created_at: str = Field(default_factory=utc_now)
+    decided_at: str | None = None
+
+
+class LibraryCardJobRequestV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    collection_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    document_version_ids: list[str] = Field(min_length=1, max_length=20)
+    provider: Literal["openai", "anthropic"]
+    model: str = Field(min_length=1, max_length=200)
+    disclosed_character_count: int = Field(ge=0)
+    confirmed_source_disclosure: Literal[True]
+
+
+class LibraryCardJobV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    job_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    collection_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    document_version_ids: list[str] = Field(min_length=1, max_length=20)
+    provider: Literal["openai", "anthropic"]
+    model: str = Field(min_length=1, max_length=200)
+    status: Literal["queued", "running", "completed", "failed", "cancelled"]
+    files_total: int = Field(ge=1, le=20)
+    files_processed: int = Field(default=0, ge=0, le=20)
+    card_version_ids: list[str] = Field(default_factory=list, max_length=20)
+    error_code: str | None = Field(default=None, max_length=100)
+    created_at: str = Field(default_factory=utc_now)
+    updated_at: str = Field(default_factory=utc_now)
+
+
+class LibraryCardDecisionRequestV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_card_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    confirmed: Literal[True]
+
+
+class LibrarySearchRequestV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    query: str = Field(min_length=1, max_length=500)
+    mode: Literal["lexical", "semantic", "hybrid"] = "lexical"
+    collection_ids: list[str] = Field(default_factory=list, max_length=20)
+    states: list[str] = Field(default_factory=list, max_length=10)
+    source_types: list[str] = Field(default_factory=list, max_length=10)
+    evidence_statuses: list[str] = Field(default_factory=list, max_length=10)
+    limit: int = Field(default=20, ge=1, le=100)
+    cursor: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def normalize_query(self) -> "LibrarySearchRequestV1":
+        self.query = " ".join(self.query.split())
+        if not self.query:
+            raise ValueError("library search query must not be blank")
+        return self
+
+
+class LibrarySearchHitV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    hit_id: str = Field(min_length=1, max_length=160)
+    source_type: Literal["document", "knowledge_card", "project_library", "workspace_memory"]
+    collection_id: str | None = None
+    title: str = Field(min_length=1, max_length=300)
+    snippet: str = Field(default="", max_length=1200)
+    source_status: str = Field(min_length=1, max_length=100)
+    version_id: str = Field(min_length=1, max_length=128)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evidence_status: str = Field(min_length=1, max_length=100)
+    tags: list[str] = Field(default_factory=list, max_length=40)
+    locator: str | None = Field(default=None, max_length=200)
+    relevance_score: float
+
+
+LibrarySemanticStatus = Literal[
+    "not_requested",
+    "ready",
+    "model_missing",
+    "offline",
+    "integrity_failed",
+    "runtime_unavailable",
+]
+
+
+class LibrarySearchResultV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    query: str
+    mode_requested: Literal["lexical", "semantic", "hybrid"]
+    mode_used: Literal["lexical", "semantic", "hybrid"]
+    semantic_status: LibrarySemanticStatus
+    index_version: int = Field(ge=1)
+    hits: list[LibrarySearchHitV1] = Field(max_length=100)
+    next_cursor: str | None = None
+
+
+class LibraryIndexStatusV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    state: Literal["idle", "building", "ready", "failed"]
+    phase: str = Field(min_length=1, max_length=100)
+    files_scanned: int = Field(default=0, ge=0)
+    bytes_processed: int = Field(default=0, ge=0)
+    succeeded: int = Field(default=0, ge=0)
+    skipped: int = Field(default=0, ge=0)
+    failed: int = Field(default=0, ge=0)
+    index_version: int = Field(default=1, ge=1)
+    semantic_status: str = Field(default="model_missing", max_length=100)
+    updated_at: str = Field(default_factory=utc_now)
+
+
+class LibrarySemanticModelDownloadRequestV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirmed: Literal[True]
+
+
+class LibrarySemanticModelStatusV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    model_id: Literal["intfloat/multilingual-e5-small"] = (
+        "intfloat/multilingual-e5-small"
+    )
+    revision: str = Field(pattern=r"^[0-9a-f]{40}$")
+    state: Literal[
+        "model_missing",
+        "downloading",
+        "ready",
+        "offline",
+        "integrity_failed",
+        "runtime_unavailable",
+        "failed",
+    ]
+    bytes_total: int = Field(ge=0)
+    bytes_downloaded: int = Field(default=0, ge=0)
+    current_file: str | None = Field(default=None, max_length=100)
+    manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    error_code: str | None = Field(default=None, max_length=100)
+    updated_at: str = Field(default_factory=utc_now)
+
+
+class LibraryInputBindingItemV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_version_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    collection_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    name: str = Field(min_length=1, max_length=255)
+    media_type: str = Field(min_length=1, max_length=100)
+    size_bytes: int = Field(ge=1, le=50 * 1024 * 1024)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    attachment_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+
+
+class LibraryInputBindingV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    binding_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    items: list[LibraryInputBindingItemV1] = Field(min_length=1, max_length=10)
+    knowledge_card_version_ids: list[str] = Field(default_factory=list, max_length=20)
+    knowledge_card_manifest_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    created_at: str = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def validate_card_binding(self) -> "LibraryInputBindingV1":
+        if bool(self.knowledge_card_version_ids) != bool(
+            self.knowledge_card_manifest_sha256
+        ):
+            raise ValueError("library knowledge card binding is incomplete")
+        return self
+
+
+class LibraryPlanRequestV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    objective: str = Field(min_length=3, max_length=2000)
+    constraints: str = Field(default="", max_length=2000)
+    workspace: str = Field(default="", max_length=1024)
+    preferred_cadence: Literal["once", "daily", "weekdays", "weekly", "manual"] = "once"
+    document_version_ids: list[str] = Field(min_length=1, max_length=10)
+    knowledge_card_version_ids: list[str] = Field(default_factory=list, max_length=20)
+    confirmed_context_packet: Literal[True]
+
+
+class LibraryH5ExportPolicyV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    profile: Literal["safe_partner"] = "safe_partner"
+    include_card_version_ids: list[str] = Field(min_length=1, max_length=500)
+    include_tags: bool = True
+    include_citation_excerpts: bool = True
+    custom_sensitive_terms: list[str] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_sensitive_terms(self) -> "LibraryH5ExportPolicyV1":
+        normalized: list[str] = []
+        for raw_term in self.custom_sensitive_terms:
+            term = raw_term.strip()
+            if not term or len(term) > 200 or any(ord(char) < 32 for char in term):
+                raise ValueError("custom sensitive terms must contain printable text")
+            if term not in normalized:
+                normalized.append(term)
+        self.custom_sensitive_terms = normalized
+        return self
+
+
+class LibraryH5ExportPreviewRequestV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    collection_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    expected_collection_revision: int = Field(ge=1)
+    policy: LibraryH5ExportPolicyV1
+
+
+class LibraryH5ExportRequestV1(LibraryH5ExportPreviewRequestV1):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_preview_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    confirmed: Literal[True]
+
+
+class LibraryH5ExportV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    export_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    collection_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    status: Literal["ready", "expired", "failed"]
+    policy_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    output_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    card_count: int = Field(ge=1)
+    created_at: str = Field(default_factory=utc_now)
+    expires_at: str
+    download_url: str = Field(min_length=1, max_length=300)
 
 
 class RevisePlanRequest(BaseModel):
@@ -276,6 +1448,96 @@ class OrganizationRevisionRequest(BaseModel):
         if len(names) != len(set(names)):
             raise ValueError("reporting lines must name each employee once")
         return self
+
+
+class AgentGraphStageAssignment(BaseModel):
+    """Bind one existing sequential stage to one Agent in a graph revision."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stage_order: int = Field(ge=1, le=20)
+    owner: str = Field(min_length=1, max_length=80)
+
+
+class AgentGraphRevisionRequest(BaseModel):
+    """Atomically replace the editable Agent projection of one reviewed Plan."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    expected_plan_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    agents: list[PlannedAgent] = Field(min_length=1, max_length=5)
+    collaboration_loops: list[AgentCollaborationLoop] = Field(
+        default_factory=list,
+        max_length=5,
+    )
+    stage_assignments: list[AgentGraphStageAssignment] = Field(min_length=1, max_length=8)
+    confirmed: Literal[True]
+
+    @model_validator(mode="after")
+    def validate_graph_request(self) -> "AgentGraphRevisionRequest":
+        names = [agent.name.casefold() for agent in self.agents]
+        if len(names) != len(set(names)):
+            raise ValueError("agent graph names must be unique")
+        orders = [assignment.stage_order for assignment in self.stage_assignments]
+        if len(orders) != len(set(orders)):
+            raise ValueError("agent graph stage assignments must name each stage once")
+        return self
+
+
+class AgentContractPreviewRequest(BaseModel):
+    """Preview one complete v2 draft without creating an immutable version."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    expected_plan_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    draft: dict[str, Any] | None = None
+
+
+class AgentContractRevisionRequest(AgentContractPreviewRequest):
+    """Create one reviewed immutable v2 child from the same preview draft."""
+
+    confirmed: Literal[True]
+
+
+class AgentContractDiffEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    change: Literal["added", "removed", "changed"]
+    direction: Literal["tighter", "looser", "neutral"]
+    before: Any = None
+    after: Any = None
+
+
+class AgentExecutionEnvelopeView(BaseModel):
+    """User-visible exact normalized payload plus its content identity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    agent_name: str
+    delivery: Literal["exact_lead_payload", "exact_plan_packet", "strict_runtime"]
+    canonical_json: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    enforcement: dict[str, Literal[
+        "software_enforced",
+        "runtime_approval",
+        "execution_instruction",
+        "unsupported",
+    ]]
+
+
+class AgentContractPreview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    parent_plan_id: str
+    parent_plan_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    normalized_plan: TaskPlanV2
+    candidate_plan_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    diff: list[AgentContractDiffEntry]
+    envelopes: list[AgentExecutionEnvelopeView]
+    strict_runtime_available: bool
 
 
 class AgentRuntimeAssignment(BaseModel):
@@ -400,6 +1662,90 @@ class PairingMutationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     confirmed: Literal[True]
+
+
+class DesktopDrainRequest(BaseModel):
+    """Supervisor-only transition that fences new Work dispatches."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["begin", "cancel"]
+
+
+class OnboardingMigrationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    choice: Literal["fresh", "import"]
+    confirmed: Literal[True]
+
+
+class OnboardingProviderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Literal["openai", "anthropic"]
+    confirmed: Literal[True]
+
+
+class OnboardingFirstWorkRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirmed: Literal[True]
+    replace_unstarted_legacy: bool = False
+    replace_incomplete_terminal: bool = False
+
+
+class ArtifactSignoffRequest(BaseModel):
+    """A local review of captured evidence, not a business-outcome assertion."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    confirmed: Literal[True]
+    first_work_event_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    first_work_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    verification_event_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    verification_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class OnboardingFailure(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(min_length=1, max_length=100)
+    detail: str = Field(min_length=1, max_length=500)
+    retryable: bool
+
+
+class OnboardingStatus(BaseModel):
+    """Recoverable desktop first-use projection; secrets and file contents are excluded."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    state: Literal[
+        "preparing",
+        "self_check",
+        "migration_required",
+        "provider_required",
+        "first_work_ready",
+        "first_work_running",
+        "evidence_review",
+        "complete",
+        "failed",
+    ]
+    complete: bool
+    required_free_bytes: int = Field(ge=1)
+    available_free_bytes: int = Field(ge=0)
+    disk_ready: bool
+    migration_required: bool
+    legacy_sources: list[str] = Field(default_factory=list, max_length=5)
+    migration_choice: Literal["fresh", "import"] | None = None
+    provider_choice: Literal["openai", "anthropic"] | None = None
+    runtime_ready: bool
+    provider_runtime_ready: bool
+    first_work_plan_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$",
+    )
+    failure: OnboardingFailure | None = None
 
 
 class ConfirmRequest(BaseModel):
@@ -535,10 +1881,177 @@ class RuntimeInputAnswerRequest(BaseModel):
         return self
 
 
+class OnboardingArtifactWriteRequest(BaseModel):
+    """One exact App-managed write awaiting or carrying a single-use decision."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: str = Field(pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
+    approval_id: str = Field(min_length=1, max_length=128)
+    agent_name: Literal["Business Assistant", "Review Assistant"]
+    relative_path: Literal[
+        "artifacts/first-work.json",
+        "artifacts/verification.json",
+    ]
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    nonce: str = Field(pattern=r"^[0-9a-f]{64}$")
+    requested_at: str = Field(default_factory=utc_now)
+    status: Literal["pending", "committed", "rejected"] = "pending"
+    decided_at: str | None = None
+    artifact_event_id: str | None = None
+
+
+class RecoveryModelDiagnosis(BaseModel):
+    """Strict, content-free response accepted from the managed recovery model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    category: Literal[
+        "progress_stalled",
+        "runtime_unavailable",
+        "remote_paused",
+        "approval_wait",
+        "input_wait",
+        "unknown",
+    ]
+    summary: str = Field(min_length=3, max_length=500)
+    recommended_action: Literal[
+        "refresh_status",
+        "resume_same_run",
+        "create_repair_work",
+        "request_operator",
+    ]
+    rationale_codes: list[
+        Literal[
+            "unchanged_progress",
+            "runtime_unreachable",
+            "remote_run_paused",
+            "operator_approval_required",
+            "operator_input_required",
+            "identity_unverified",
+            "insufficient_evidence",
+        ]
+    ] = Field(min_length=1, max_length=4)
+    confidence: Literal["low", "medium", "high"]
+
+
+class RecoveryStageBaseline(BaseModel):
+    """Stable stage state used to prove monotonic forward recovery progress."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stage_order: int = Field(ge=1, le=20)
+    status: Literal[
+        "not_started",
+        "pending",
+        "running",
+        "blocked",
+        "completed",
+        "failed",
+        "unknown",
+    ]
+    task_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class RecoveryEvidenceBaseline(BaseModel):
+    """Bounded causal evidence descriptor; timestamps and member presence are excluded."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stages: list[RecoveryStageBaseline] = Field(default_factory=list, max_length=8)
+    completed_or_observed_activity_ids: list[str] = Field(
+        default_factory=list,
+        max_length=100,
+    )
+
+
+class RecoveryState(BaseModel):
+    """Durable, bounded state for one governed Work recovery attempt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    state: Literal[
+        "idle",
+        "observing",
+        "diagnosing",
+        "proposal_ready",
+        "auto_recovering",
+        "verifying",
+        "recovered",
+        "failed",
+        "escalated",
+    ] = "idle"
+    progress_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    progress_changed_at: str | None = None
+    observation_baseline: RecoveryEvidenceBaseline | None = None
+    last_observed_at: str | None = None
+    stalled_since: str | None = None
+    attempt_count: int = Field(default=0, ge=0, le=2)
+    diagnosis_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$",
+    )
+    diagnosis_claimed_at: str | None = None
+    diagnosis_category: str | None = Field(default=None, max_length=80)
+    diagnosis_summary: str | None = Field(default=None, max_length=500)
+    recommended_action: Literal[
+        "refresh_status",
+        "resume_same_run",
+        "create_repair_work",
+        "request_operator",
+    ] | None = None
+    rationale_codes: list[str] = Field(default_factory=list, max_length=4)
+    proposal_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    diagnosed_at: str | None = None
+    bound_plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    bound_team_id: str | None = Field(default=None, min_length=1, max_length=128)
+    previous_team_run_id: str | None = Field(default=None, min_length=1, max_length=128)
+    resulting_team_run_id: str | None = Field(default=None, min_length=1, max_length=128)
+    action_started_at: str | None = None
+    action_completed_at: str | None = None
+    verification_evidence_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    verification_baseline: RecoveryEvidenceBaseline | None = None
+    verification_deadline: str | None = None
+    repair_work_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$",
+    )
+    cooldown_until: str | None = None
+    last_error_code: Literal[
+        "model_unavailable",
+        "identity_changed",
+        "action_not_auto_allowed",
+        "action_unconfirmed",
+        "attempt_limit_reached",
+    ] | None = None
+
+
+class RecoveryCheckRequest(BaseModel):
+    """Explicit retry of the same bounded recovery check; it grants no new capability."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    confirmed: Literal[True]
+
+
+class RecoveryDecisionRequest(BaseModel):
+    """Explicitly approve creation of a separate, still-unconfirmed Repair Work."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["create_repair_work"]
+    expected_proposal_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    confirmed: Literal[True]
+
+
 class ExecutionState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["aion_team", "workflow"]
+    kind: Literal["aion_team", "workflow", "onboarding_managed"]
     status: Literal[
         "dispatching",
         "queued",
@@ -561,7 +2074,12 @@ class ExecutionState(BaseModel):
     aion_agent_sessions: list["AgentSession"] = Field(default_factory=list)
     member_observations: list["AgentObservation"] = Field(default_factory=list)
     progress: ExecutionProgress | None = None
+    recovery: RecoveryState = Field(default_factory=RecoveryState)
     input_requests: list[RuntimeInputRequest] = Field(default_factory=list, max_length=20)
+    onboarding_artifact_writes: list[OnboardingArtifactWriteRequest] = Field(
+        default_factory=list,
+        max_length=2,
+    )
     workflow_run_id: str | None = None
     error: str | None = Field(default=None, max_length=500)
     control_error: str | None = Field(default=None, max_length=500)
@@ -598,7 +2116,8 @@ class PlanRecord(BaseModel):
     constraints: str = ""
     workspace: str = ""
     preferred_cadence: Literal["once", "daily", "weekdays", "weekly", "manual"] = "once"
-    attachments: list[PlanningAttachment] = Field(default_factory=list, max_length=5)
+    attachments: list[PlanningAttachment] = Field(default_factory=list, max_length=10)
+    library_input_binding: LibraryInputBindingV1 | None = None
     source_blueprint_id: str | None = Field(default=None, pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$")
     source_blueprint_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     memory_snapshot_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
@@ -608,7 +2127,7 @@ class PlanRecord(BaseModel):
     confirmed_at: str | None = None
     approval_mode: ApprovalMode | None = None
     planning_progress: PlanningProgress | None = None
-    plan: TaskPlan | None = None
+    plan: TaskPlanDocument | None = None
     plan_sha256: str | None = None
     parent_plan_id: str | None = None
     parent_plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
@@ -629,6 +2148,18 @@ class PlanRecord(BaseModel):
         pattern=r"^[0-9a-f]{64}$",
     )
     continuation_message_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    recovery_source_plan_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$",
+    )
+    recovery_source_plan_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    recovery_proposal_sha256: str | None = Field(
         default=None,
         pattern=r"^[0-9a-f]{64}$",
     )
@@ -752,6 +2283,11 @@ class TeamBlueprintSaveRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     confirmed: Literal[True]
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return validate_new_display_name(value)
+
 
 class TeamBlueprintArchiveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -821,12 +2357,22 @@ class TaskTemplateSaveRequest(BaseModel):
     objective: str = Field(min_length=3, max_length=2000)
     confirmed: Literal[True]
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return validate_new_display_name(value)
+
 
 class TaskTemplateFromPlanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=100)
     confirmed: Literal[True]
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return validate_new_display_name(value)
 
 
 class TaskTemplateArchiveRequest(BaseModel):
@@ -873,6 +2419,17 @@ class WorkspaceMemoryVersion(BaseModel):
         default=None,
         pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$",
     )
+    origin: Literal["operator", "automatic_experience"] = "operator"
+    generation_key: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    source_terminal_event_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$",
+    )
+    source_terminal_event_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
     created_at: str = Field(default_factory=utc_now)
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     document_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -882,7 +2439,7 @@ class WorkspaceMemoryVersion(BaseModel):
 class WorkspaceMemoryView(WorkspaceMemoryVersion):
     """Operator view: immutable content plus ledger-derived lifecycle state."""
 
-    state: Literal["candidate", "approved", "superseded", "revoked"]
+    state: Literal["candidate", "approved", "superseded", "revoked", "dismissed"]
     active: bool = False
     content: str = Field(min_length=1, max_length=24_000)
     decided_at: str | None = None
@@ -903,6 +2460,11 @@ class WorkspaceMemoryCandidateRequest(BaseModel):
     )
     confirmed: Literal[True]
 
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: str) -> str:
+        return validate_new_display_name(value)
+
 
 class ProcessMemoryProposalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -910,11 +2472,18 @@ class ProcessMemoryProposalRequest(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=120)
     confirmed: Literal[True]
 
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: str | None) -> str | None:
+        return validate_optional_new_display_name(value)
+
 
 class WorkspaceMemoryDecisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: str = Field(default="", max_length=500)
+    expected_content_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    expected_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     confirmed: Literal[True]
 
 
@@ -997,6 +2566,15 @@ class TaskRunEvidence(BaseModel):
         "task_execution_cancel_requested",
         "task_execution_cancelled",
         "task_execution_control_failed",
+        "task_recovery_stall_detected",
+        "task_recovery_diagnosed",
+        "task_recovery_diagnosis_failed",
+        "task_recovery_action_started",
+        "task_recovery_action_finished",
+        "task_recovery_reconciliation_failed",
+        "task_recovery_escalated",
+        "task_recovery_repair_work_requested",
+        "task_recovery_repair_work_created",
         "task_approval_mode_change_requested",
         "task_approval_mode_changed",
         "task_approval_mode_change_aborted",

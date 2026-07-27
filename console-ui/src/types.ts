@@ -45,8 +45,80 @@ export type ApprovalCard = {
 
 export type ApprovalMode = 'automatic' | 'automatic_safe' | 'manual_all';
 export type ExecutionProfile = 'fast' | 'balanced' | 'deep' | 'custom';
+export type ContractControl = 'deny' | 'always_ask' | 'inherit_run_mode';
+
+export type AgentContract = {
+  schema_version: 1;
+  instructions: string;
+  prohibitions: string[];
+  inputs: Array<{
+    input_id: string;
+    label: string;
+    relative_path?: string | null;
+    source_agent_id?: string | null;
+    source_output_id?: string | null;
+    required: boolean;
+    sha256?: string | null;
+  }>;
+  outputs: Array<{
+    output_id: string;
+    label: string;
+    relative_path: string;
+    media_type?: string | null;
+    acceptance_criteria: string[];
+    required: boolean;
+  }>;
+  acceptance_criteria: string[];
+  default_tool_policy: ContractControl;
+  tool_rules: Array<{ tool_name: string; policy: ContractControl }>;
+  data_scope: {
+    allowed_relative_paths: string[];
+    attachment_ids: string[];
+    managed_network_domains: string[];
+  };
+  side_effects: {
+    file_write: ContractControl;
+    operator_input: ContractControl;
+    managed_network: ContractControl;
+    send: ContractControl;
+    publish: ContractControl;
+    delete: 'deny' | 'always_ask';
+  };
+  memory: {
+    mode: 'none' | 'selected';
+    version_ids: string[];
+  };
+  handoff: {
+    allowed_target_agent_ids: string[];
+    acceptance_criteria: string[];
+    require_cas_receipt: boolean;
+  };
+  escalation: {
+    target_agent_id?: string | null;
+    conditions: string[];
+  };
+  approval_checkpoints: string[];
+  retry: {
+    max_attempts: number;
+    retryable_errors: Array<
+      | 'runtime_temporarily_unavailable'
+      | 'rate_limited'
+      | 'network_temporarily_unavailable'
+      | 'tool_temporarily_unavailable'
+    >;
+    backoff_seconds: number;
+  };
+  stop: {
+    timeout_seconds: number;
+    stop_conditions: string[];
+    stop_on_approval_rejection: boolean;
+    stop_on_contract_violation: boolean;
+    stop_on_digest_mismatch: boolean;
+  };
+};
 
 export type PlannedAgent = {
+  agent_id?: string;
   name: string;
   role: 'lead' | 'researcher' | 'operator' | 'reviewer' | 'reporter' | 'specialist';
   responsibility: string;
@@ -54,6 +126,14 @@ export type PlannedAgent = {
   model?: string | null;
   runtime_reason: string;
   reports_to?: string | null;
+  reports_to_agent_id?: string | null;
+  model_binding?: 'exact' | 'alias' | 'default';
+  runtime_binding?: {
+    adapter_version: string;
+    executable_sha256?: string | null;
+    status: 'bound' | 'alias' | 'default' | 'unverified';
+  };
+  contract?: AgentContract;
 };
 
 export type ReportingLine = {
@@ -62,25 +142,29 @@ export type ReportingLine = {
 };
 
 export type CollaborationLoop = {
-  source_agent: string;
-  target_agent: string;
+  source_agent?: string;
+  target_agent?: string;
+  source_agent_id?: string;
+  target_agent_id?: string;
   condition: string;
   max_iterations: number;
 };
 
 export type TaskPlan = {
-  schema_version: 1;
+  schema_version: 1 | 2;
   title: string;
   summary: string;
   execution_profile?: ExecutionProfile | null;
   execution_mode: 'aion_team' | 'workflow';
   workflow_id: string | null;
+  runtime_mode?: 'aion_compatible' | 'strict';
   agents: PlannedAgent[];
   collaboration_loops: CollaborationLoop[];
   stages: Array<{
     order: number;
     title: string;
-    owner: string;
+    owner?: string;
+    owner_agent_id?: string;
     outcome: string;
     checkpoint: boolean;
   }>;
@@ -96,6 +180,35 @@ export type TaskPlan = {
   risks: string[];
   estimated_duration_minutes: number;
   update_policy: string;
+};
+
+export type AgentContractDiffEntry = {
+  path: string;
+  change: 'added' | 'removed' | 'changed';
+  direction: 'tighter' | 'looser' | 'neutral';
+  before: unknown;
+  after: unknown;
+};
+
+export type AgentContractPreview = {
+  parent_plan_id: string;
+  parent_plan_sha256: string;
+  normalized_plan: TaskPlan;
+  candidate_plan_sha256: string;
+  contract_sha256: string;
+  diff: AgentContractDiffEntry[];
+  envelopes: Array<{
+    agent_id: string;
+    agent_name: string;
+    delivery: 'exact_lead_payload' | 'exact_plan_packet' | 'strict_runtime';
+    canonical_json: string;
+    sha256: string;
+    enforcement: Record<
+      string,
+      'software_enforced' | 'runtime_approval' | 'execution_instruction' | 'unsupported'
+    >;
+  }>;
+  strict_runtime_available: boolean;
 };
 
 export type ActiveMemberProgress = {
@@ -139,6 +252,54 @@ export type ExecutionProgress = {
   stages: StageProgress[];
 };
 
+export type RecoveryAction =
+  | 'refresh_status'
+  | 'resume_same_run'
+  | 'create_repair_work'
+  | 'request_operator';
+
+export type RecoveryState = {
+  schema_version: 1;
+  state:
+    | 'idle'
+    | 'observing'
+    | 'diagnosing'
+    | 'proposal_ready'
+    | 'auto_recovering'
+    | 'verifying'
+    | 'recovered'
+    | 'failed'
+    | 'escalated';
+  progress_sha256?: string | null;
+  progress_changed_at?: string | null;
+  last_observed_at?: string | null;
+  stalled_since?: string | null;
+  attempt_count: number;
+  diagnosis_id?: string | null;
+  diagnosis_claimed_at?: string | null;
+  diagnosis_category?: string | null;
+  diagnosis_summary?: string | null;
+  recommended_action?: RecoveryAction | null;
+  rationale_codes: string[];
+  proposal_sha256?: string | null;
+  diagnosed_at?: string | null;
+  bound_team_id?: string | null;
+  previous_team_run_id?: string | null;
+  action_started_at?: string | null;
+  action_completed_at?: string | null;
+  repair_work_id?: string | null;
+  verification_evidence_sha256?: string | null;
+  verification_deadline?: string | null;
+  cooldown_until?: string | null;
+  last_error_code?:
+    | 'model_unavailable'
+    | 'identity_changed'
+    | 'action_not_auto_allowed'
+    | 'action_unconfirmed'
+    | 'attempt_limit_reached'
+    | null;
+};
+
 export type RuntimeInputRequest = {
   request_id: string;
   agent_name: string;
@@ -178,6 +339,267 @@ export type PlanArtifactPreview = PlanArtifact & {
   content: unknown;
 };
 
+export type ProjectLibraryItem = {
+  schema_version: 1;
+  asset_id: string;
+  source_kind: 'planning_input' | 'registered_output' | 'workspace_output';
+  source_ref: string;
+  plan_id: string;
+  work_id: string;
+  work_title: string;
+  revision_number: number;
+  name: string;
+  mime: string;
+  file_type: string;
+  size: number;
+  sha256: string;
+  evidence_status: 'retained_input' | 'registered' | 'workspace_unverified';
+  preview_supported: boolean;
+  created_at: string;
+  event_id?: string | null;
+  system_tags: string[];
+  user_tags: string[];
+  supersedes_asset_id?: string | null;
+  supersedes_status: 'none' | 'available' | 'unavailable';
+  superseded_by_asset_ids: string[];
+  content_url: string;
+};
+
+export type ProjectLibraryItemPreview = ProjectLibraryItem & {
+  preview_kind: 'none' | 'json' | 'text';
+  preview: unknown;
+};
+
+export type LibraryCollectionPolicy = {
+  schema_version: 1;
+  purpose: string;
+  default_tags: string[];
+  allowed_formats: string[];
+  exclude_name_patterns: string[];
+  knowledge_card_language: 'auto' | 'zh-CN' | 'en';
+  generation_instructions: string;
+};
+
+export type LibraryCollection = {
+  schema_version: 1;
+  collection_id: string;
+  name: string;
+  revision: number;
+  policy_version_id: string;
+  policy_sha256: string;
+  policy: LibraryCollectionPolicy;
+  is_inbox: boolean;
+  document_count: number;
+  approved_card_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LibraryImportEntry = {
+  entry_id: string;
+  relative_path: string;
+  size_bytes: number;
+  media_type: string;
+  file_format: string;
+  status:
+    | 'pending'
+    | 'uploaded'
+    | 'duplicate'
+    | 'new_version'
+    | 'skipped'
+    | 'error'
+    | 'committed';
+  sha256?: string | null;
+  classification?: 'new' | 'duplicate' | 'new_version' | 'skipped' | null;
+  reason?: string | null;
+  document_version_id?: string | null;
+};
+
+export type LibraryImport = {
+  schema_version: 1;
+  import_id: string;
+  collection_id: string;
+  collection_revision: number;
+  policy_version_id: string;
+  policy_sha256: string;
+  status: 'staging' | 'ready' | 'committing' | 'committed' | 'cancelled' | 'expired';
+  entries: LibraryImportEntry[];
+  files_total: number;
+  files_uploaded: number;
+  files_skipped: number;
+  files_failed: number;
+  bytes_total: number;
+  bytes_uploaded: number;
+  manifest_sha256?: string | null;
+  created_at: string;
+  updated_at: string;
+  expires_at: string;
+};
+
+export type LibraryDocumentVersion = {
+  schema_version: 1;
+  document_id: string;
+  version_id: string;
+  collection_id: string;
+  version_number: number;
+  previous_version_id?: string | null;
+  relative_path: string;
+  display_name: string;
+  media_type: string;
+  file_format: string;
+  size_bytes: number;
+  sha256: string;
+  blob_ref: string;
+  aliases: string[];
+  tags: string[];
+  metadata_revision: number;
+  policy_version_id: string;
+  policy_sha256: string;
+  extraction_status:
+    | 'included'
+    | 'metadata_only'
+    | 'encrypted'
+    | 'no_text'
+    | 'extraction_failed';
+  extraction_detail?: string | null;
+  text_chunk_count: number;
+  text_character_count: number;
+  text_sha256?: string | null;
+  status: 'active' | 'tombstoned';
+  created_at: string;
+  tombstoned_at?: string | null;
+};
+
+export type LibraryCitation = {
+  schema_version: 1;
+  document_version_id: string;
+  document_sha256: string;
+  locator_type: 'page' | 'sheet' | 'line' | 'chunk' | 'metadata';
+  locator: string;
+  chunk_id?: string | null;
+  excerpt: string;
+  excerpt_sha256: string;
+};
+
+export type KnowledgeCardVersion = {
+  schema_version: 1;
+  card_id: string;
+  version_id: string;
+  collection_id: string;
+  source_document_version_ids: string[];
+  title: string;
+  summary: string;
+  key_points: Array<{ statement: string; citations: LibraryCitation[] }>;
+  suggested_tags: string[];
+  coverage_scope: string;
+  coverage: 'complete' | 'partial' | 'metadata_only';
+  state: 'candidate' | 'approved' | 'superseded' | 'dismissed' | 'revoked';
+  card_sha256: string;
+  source_manifest_sha256: string;
+  policy_sha256: string;
+  provider: 'openai' | 'anthropic';
+  model: string;
+  generator_version: string;
+  created_at: string;
+  decided_at?: string | null;
+};
+
+export type LibraryCardJob = {
+  schema_version: 1;
+  job_id: string;
+  collection_id: string;
+  document_version_ids: string[];
+  provider: 'openai' | 'anthropic';
+  model: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  files_total: number;
+  files_processed: number;
+  card_version_ids: string[];
+  error_code?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LibrarySearchHit = {
+  hit_id: string;
+  source_type: 'document' | 'knowledge_card' | 'project_library' | 'workspace_memory';
+  collection_id?: string | null;
+  title: string;
+  snippet: string;
+  source_status: string;
+  version_id: string;
+  sha256: string;
+  evidence_status: string;
+  tags: string[];
+  locator?: string | null;
+  relevance_score: number;
+};
+
+export type LibrarySearchResult = {
+  schema_version: 1;
+  query: string;
+  mode_requested: 'lexical' | 'semantic' | 'hybrid';
+  mode_used: 'lexical' | 'semantic' | 'hybrid';
+  semantic_status:
+    | 'not_requested'
+    | 'ready'
+    | 'model_missing'
+    | 'offline'
+    | 'integrity_failed'
+    | 'runtime_unavailable';
+  index_version: number;
+  hits: LibrarySearchHit[];
+  next_cursor?: string | null;
+};
+
+export type LibraryIndexStatus = {
+  schema_version: 1;
+  state: 'idle' | 'building' | 'ready' | 'failed';
+  phase: string;
+  files_scanned: number;
+  bytes_processed: number;
+  succeeded: number;
+  skipped: number;
+  failed: number;
+  index_version: number;
+  semantic_status: string;
+  updated_at: string;
+};
+
+export type LibrarySemanticModelStatus = {
+  schema_version: 1;
+  model_id: 'intfloat/multilingual-e5-small';
+  revision: string;
+  state:
+    | 'model_missing'
+    | 'downloading'
+    | 'ready'
+    | 'offline'
+    | 'integrity_failed'
+    | 'runtime_unavailable'
+    | 'failed';
+  bytes_total: number;
+  bytes_downloaded: number;
+  current_file?: string | null;
+  manifest_sha256: string;
+  error_code?: string | null;
+  updated_at: string;
+};
+
+export type LibraryExport = {
+  schema_version: 1;
+  export_id: string;
+  collection_id: string;
+  status: 'ready' | 'expired' | 'failed';
+  policy_sha256: string;
+  manifest_sha256: string;
+  output_sha256: string;
+  card_count: number;
+  created_at: string;
+  expires_at: string;
+  download_url: string;
+};
+
 export type PlanningAttachmentUpload = {
   name: string;
   media_type: string;
@@ -194,7 +616,7 @@ export type PlanningAttachment = {
 };
 
 export type ExecutionState = {
-  kind: 'aion_team' | 'workflow';
+  kind: 'aion_team' | 'workflow' | 'onboarding_managed';
   status:
     | 'dispatching'
     | 'queued'
@@ -216,7 +638,20 @@ export type ExecutionState = {
   aion_agent_sessions?: Array<{ agent_name: string; conversation_id: string }>;
   member_observations?: AgentObservation[];
   progress?: ExecutionProgress | null;
+  recovery?: RecoveryState;
   input_requests: RuntimeInputRequest[];
+  onboarding_artifact_writes?: Array<{
+    request_id: string;
+    approval_id: string;
+    agent_name: 'Business Assistant' | 'Review Assistant';
+    relative_path: 'artifacts/first-work.json' | 'artifacts/verification.json';
+    content_sha256: string;
+    nonce: string;
+    requested_at: string;
+    status: 'pending' | 'committed' | 'rejected';
+    decided_at?: string | null;
+    artifact_event_id?: string | null;
+  }>;
   workflow_run_id?: string | null;
   error?: string | null;
   control_error?: string | null;
@@ -250,6 +685,23 @@ export type PlanRecord = {
   workspace: string;
   preferred_cadence: string;
   attachments?: PlanningAttachment[];
+  library_input_binding?: {
+    schema_version: 1;
+    binding_id: string;
+    items: Array<{
+      document_version_id: string;
+      collection_id: string;
+      name: string;
+      media_type: string;
+      size_bytes: number;
+      sha256: string;
+      attachment_id: string;
+    }>;
+    knowledge_card_version_ids: string[];
+    knowledge_card_manifest_sha256?: string | null;
+    manifest_sha256: string;
+    created_at: string;
+  } | null;
   source_blueprint_id?: string | null;
   source_blueprint_sha256?: string | null;
   memory_snapshot_sha256?: string | null;
@@ -363,7 +815,12 @@ export type RepeatableWork = {
   outcome_verified: boolean;
 };
 
-export type WorkspaceMemoryState = 'candidate' | 'approved' | 'superseded' | 'revoked';
+export type WorkspaceMemoryState =
+  | 'candidate'
+  | 'approved'
+  | 'superseded'
+  | 'revoked'
+  | 'dismissed';
 
 export type WorkspaceMemorySummary = {
   schema_version: 1;
@@ -377,6 +834,11 @@ export type WorkspaceMemorySummary = {
   source_plan_id?: string | null;
   source_plan_sha256?: string | null;
   parent_version_id?: string | null;
+  origin: 'operator' | 'automatic_experience';
+  generation_key?: string | null;
+  fingerprint?: string | null;
+  source_terminal_event_id?: string | null;
+  source_terminal_event_sha256?: string | null;
   created_at: string;
   content_sha256: string;
   document_sha256: string;
@@ -536,6 +998,44 @@ export type Workflow = {
   title: string;
   description: string;
   ready: boolean;
+};
+
+export type OnboardingState =
+  | 'preparing'
+  | 'self_check'
+  | 'migration_required'
+  | 'provider_required'
+  | 'first_work_ready'
+  | 'first_work_running'
+  | 'evidence_review'
+  | 'complete'
+  | 'failed';
+
+export type OnboardingFailure = {
+  code: string;
+  detail: string;
+  retryable: boolean;
+};
+
+export type OnboardingStatus = {
+  state: OnboardingState;
+  complete: boolean;
+  required_free_bytes: number;
+  available_free_bytes: number;
+  disk_ready: boolean;
+  migration_required: boolean;
+  legacy_sources: string[];
+  migration_choice?: 'fresh' | 'import' | null;
+  runtime_ready: boolean;
+  provider_runtime_ready: boolean;
+  provider_choice: 'openai' | 'anthropic' | null;
+  first_work_plan_id?: string | null;
+  failure?: OnboardingFailure | null;
+};
+
+export type OnboardingFirstWork = {
+  onboarding: OnboardingStatus;
+  plan: PlanRecord;
 };
 
 export type Bootstrap = {

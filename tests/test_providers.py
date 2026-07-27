@@ -213,7 +213,7 @@ def test_claude_probe_identifies_opswitness_managed_api_key_helper(tmp_path, mon
     assert result["auth_mode"] == "api_key"
 
 
-def test_provider_login_uses_only_fixed_vendor_owned_flows(tmp_path):
+def test_provider_login_rejects_anthropic_subscription_flows(tmp_path):
     codex = _executable(tmp_path / "codex")
     claude = _executable(tmp_path / "claude")
     settings = Settings(console={"codex_bin": codex}, gate={"claude_bin": claude})
@@ -223,32 +223,10 @@ def test_provider_login_uses_only_fixed_vendor_owned_flows(tmp_path):
         "login",
         "--with-api-key",
     ]
-    assert login_command(settings, "anthropic") == [
-        str(claude),
-        "auth",
-        "login",
-        "--claudeai",
-    ]
-    assert login_command(settings, "anthropic", method="api") == [
-        str(claude),
-        "auth",
-        "login",
-        "--console",
-    ]
-    calls = []
-    assert login_provider(
-        settings,
-        "anthropic",
-        runner=lambda argv, timeout: calls.append((argv, timeout)) or CommandResult(0),
-    )
-    assert calls == [([str(claude), "auth", "login", "--claudeai"], 420.0)]
-    assert login_provider(
-        settings,
-        "anthropic",
-        method="api",
-        runner=lambda argv, timeout: calls.append((argv, timeout)) or CommandResult(0),
-    )
-    assert calls[-1] == ([str(claude), "auth", "login", "--console"], 420.0)
+    with pytest.raises(ValueError, match="API keys only"):
+        login_command(settings, "anthropic")
+    with pytest.raises(ValueError, match="API keys only"):
+        login_command(settings, "anthropic", method="api")
 
 
 def test_openai_api_key_login_only_passes_key_to_stdin_runner(tmp_path):

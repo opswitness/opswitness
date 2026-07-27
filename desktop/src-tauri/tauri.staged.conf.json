@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "resources": {
+      "../.stage/vendor-lock.resolved.json": "runtime/vendor-lock.json",
+      "../.stage/runtime/": "runtime/payload/"
+    }
+  }
+}

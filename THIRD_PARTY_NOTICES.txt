@@ -1,0 +1,114 @@
+OpsWitness macOS application third-party notices
+=================================================
+
+This file describes the pinned runtime families intended for the
+OpsWitness 0.1.0-alpha.1 macOS arm64 application. The authoritative
+artifact versions, source URLs, hashes, architectures, and redistribution
+review status are recorded in desktop/vendor-lock.json and the release SBOM.
+If those records are incomplete, the public release workflow must fail.
+
+AionUi Web / AionCore
+---------------------
+Version: AionUi Web 2.1.33; bundled AionCore 0.1.45
+Project: https://github.com/iOfficeAI/AionUi
+License: Apache License 2.0
+Copyright and attribution remain with the AionUi contributors.
+
+Anthropic Claude Agent SDK (inside AionCore managed resources)
+-------------------------------------------------------------
+Version: claude-agent-acp 0.58.1, including the darwin-arm64 Claude Agent SDK binary
+Project: https://platform.claude.com/docs/en/agent-sdk/overview
+Terms: Anthropic Commercial Terms and the license distributed with the exact component
+Copyright and attribution remain with Anthropic.
+
+This proprietary component is present in the verified AionUi managed-resource tree.
+Its public-redistribution review is intentionally blocked in desktop/vendor-lock.json.
+It must not be included in a public candidate until counsel or an authorized reviewer
+has approved the exact binary, terms, notices, and SBOM entry.
+
+Paperclip
+---------
+Version: 2026.707.0
+Project: https://github.com/paperclipai/paperclip
+License: MIT License
+Copyright and attribution remain with the Paperclip contributors.
+
+Embedded PostgreSQL and PostgreSQL
+----------------------------------
+Wrapper: @embedded-postgres/darwin-arm64 18.1.0-beta.16
+PostgreSQL project: https://www.postgresql.org/
+License: PostgreSQL License
+Copyright and attribution remain with the PostgreSQL Global Development Group
+and the respective wrapper contributors.
+
+Node.js
+-------
+Version: 24.11.0, as managed by the pinned AionUi Web runtime
+Project: https://nodejs.org/
+License: MIT License and component-specific licenses distributed by Node.js
+Copyright and attribution remain with the Node.js contributors and dependency
+authors.
+
+OpenAI Codex CLI
+----------------
+Version: 0.145.0
+Project: https://github.com/openai/codex
+License: Apache License 2.0
+Copyright and attribution remain with OpenAI and the Codex contributors.
+
+Python and Python packages
+--------------------------
+Runtime: CPython 3.12.13 arm64 via python-build-standalone 20260510
+Project: https://www.python.org/
+Build/distribution project: https://github.com/astral-sh/python-build-standalone
+License: Python Software Foundation License Version 2 and historical notices;
+Mozilla Public License 2.0 applies to python-build-standalone materials
+
+The frozen Python dependency inventory is recorded in
+desktop/python-requirements.lock. The package-by-package redistribution review
+in desktop/python-backend-license-review.json and the runtime archive review,
+including bundled component licenses and any MPL source-code offer, are
+intentionally incomplete.
+The public release gate remains blocked until that review, the SPDX 2.3 SBOM,
+and every required notice or source-code offer agree for the exact lock.
+OpsWitness does not replace or narrow any third-party license terms.
+
+Knowledge Hub local semantic search
+-----------------------------------
+The optional local semantic-search feature downloads its model only after the
+operator confirms the exact signed manifest in the App. The model is not part
+of the DMG and is excluded from encrypted backups.
+
+Model: intfloat/multilingual-e5-small, exact commit
+614241f622f53c4eeff9890bdc4f31cfecc418b3
+Project: https://huggingface.co/intfloat/multilingual-e5-small
+License: MIT License
+Copyright and attribution remain with the model authors and contributors.
+
+Runtime: ONNX Runtime 1.27.0
+Project: https://onnxruntime.ai/
+License: MIT License
+Copyright and attribution remain with Microsoft and contributors.
+
+Vector extension: sqlite-vec 0.1.9
+Project: https://github.com/asg017/sqlite-vec
+License: MIT License or Apache License 2.0
+Copyright and attribution remain with the sqlite-vec contributors.
+
+Tokenizer runtime: Hugging Face tokenizers 0.22.2
+Project: https://github.com/huggingface/tokenizers
+License: Apache License 2.0
+Copyright and attribution remain with Hugging Face and contributors.
+
+Numerical runtime: NumPy 2.x as pinned by desktop/python-requirements.lock
+Project: https://numpy.org/
+License: BSD 3-Clause and component-specific licenses distributed with NumPy
+Copyright and attribution remain with the NumPy contributors and dependency
+authors.
+
+The exact model file sizes and SHA-256 values are recorded in
+src/opswitness/console/semantic_model_manifest.json. The downloader rejects
+missing, additional, truncated, or digest-mismatched files. The Python runtime
+packages above are governed by the same incomplete package-by-package review
+described in the preceding section, so public redistribution remains blocked
+until the exact lock, notices, SBOM, and license review agree.

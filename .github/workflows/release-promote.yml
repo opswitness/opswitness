@@ -1,0 +1,150 @@
+name: release-promote
+
+on:
+  push:
+    tags: ["v0.1.0-alpha.1"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-promote-v0.1.0-alpha.1
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    environment: alpha-release
+    permissions:
+      actions: read
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    runs-on: ubuntu-latest
+    env:
+      CANDIDATE_RUN_ID: ${{ vars.ALPHA_CANDIDATE_RUN_ID }}
+      CANDIDATE_RUN_ATTEMPT: ${{ vars.ALPHA_CANDIDATE_RUN_ATTEMPT }}
+      CANDIDATE_COMMIT: ${{ vars.ALPHA_CANDIDATE_COMMIT }}
+      CANDIDATE_DMG_SHA256: ${{ vars.ALPHA_CANDIDATE_DMG_SHA256 }}
+      CANDIDATE_MANIFEST_SHA256: ${{ vars.ALPHA_CANDIDATE_MANIFEST_SHA256 }}
+      CANDIDATE_ARTIFACT_SHA256: ${{ vars.ALPHA_CANDIDATE_ARTIFACT_SHA256 }}
+      CANARY_RUN_ID: ${{ vars.ALPHA_CANARY_RUN_ID }}
+      CANARY_RUN_ATTEMPT: ${{ vars.ALPHA_CANARY_RUN_ATTEMPT }}
+      CANARY_EVIDENCE_SHA256: ${{ vars.ALPHA_CANARY_EVIDENCE_SHA256 }}
+      CANARY_ARTIFACT_SHA256: ${{ vars.ALPHA_CANARY_ARTIFACT_SHA256 }}
+      CANDIDATE_WORKFLOW_ID: ${{ vars.ALPHA_CANDIDATE_WORKFLOW_ID }}
+      CANARY_WORKFLOW_ID: ${{ vars.ALPHA_CANARY_WORKFLOW_ID }}
+      CANARY_HOST_IDENTITY_SHA256: ${{ vars.ALPHA_CANARY_HOST_IDENTITY_SHA256 }}
+    steps:
+      - name: Reject a tag without explicit immutable promotion inputs
+        env:
+          PUBLIC_RELEASE_APPROVED: ${{ vars.PUBLIC_RELEASE_APPROVED }}
+        run: |
+          set -euo pipefail
+          test "$PUBLIC_RELEASE_APPROVED" = "true"
+          for name in \
+            CANDIDATE_RUN_ID \
+            CANDIDATE_RUN_ATTEMPT \
+            CANDIDATE_COMMIT \
+            CANDIDATE_DMG_SHA256 \
+            CANDIDATE_MANIFEST_SHA256 \
+            CANDIDATE_ARTIFACT_SHA256 \
+            CANARY_RUN_ID \
+            CANARY_RUN_ATTEMPT \
+            CANARY_EVIDENCE_SHA256 \
+            CANARY_ARTIFACT_SHA256 \
+            CANDIDATE_WORKFLOW_ID \
+            CANARY_WORKFLOW_ID \
+            CANARY_HOST_IDENTITY_SHA256
+          do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Promotion gate is missing $name." >&2
+              exit 1
+            fi
+          done
+          [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANARY_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANARY_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CANDIDATE_DMG_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CANDIDATE_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CANDIDATE_ARTIFACT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CANARY_EVIDENCE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CANARY_ARTIFACT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CANDIDATE_WORKFLOW_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANARY_WORKFLOW_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANARY_HOST_IDENTITY_SHA256" =~ ^[0-9a-f]{64}$ ]]
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with: { fetch-depth: 0 }
+      - name: Require tag, candidate, and main to identify the same commit
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          test "$GITHUB_REF_NAME" = "v0.1.0-alpha.1"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_COMMIT"
+          test "$(git rev-parse origin/main)" = "$CANDIDATE_COMMIT"
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with: { python-version: "3.12.10" }
+      - name: Download the candidate from the fixed successful producer
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/github_actions_artifact.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --repository-id "${{ github.repository_id }}" \
+            --run-id "$CANDIDATE_RUN_ID" \
+            --run-attempt "$CANDIDATE_RUN_ATTEMPT" \
+            --head-sha "$CANDIDATE_COMMIT" \
+            --workflow-id "$CANDIDATE_WORKFLOW_ID" \
+            --workflow-path .github/workflows/release.yml \
+            --event workflow_dispatch \
+            --artifact-name \
+              "release-candidate-${CANDIDATE_RUN_ID}-${CANDIDATE_RUN_ATTEMPT}" \
+            --artifact-digest "$CANDIDATE_ARTIFACT_SHA256" \
+            --destination dist
+      - name: Download canary evidence from the fixed successful producer
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/github_actions_artifact.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --repository-id "${{ github.repository_id }}" \
+            --run-id "$CANARY_RUN_ID" \
+            --run-attempt "$CANARY_RUN_ATTEMPT" \
+            --head-sha "$CANDIDATE_COMMIT" \
+            --workflow-id "$CANARY_WORKFLOW_ID" \
+            --workflow-path .github/workflows/release-canary.yml \
+            --event workflow_dispatch \
+            --artifact-name \
+              "alpha-canary-evidence-${CANARY_RUN_ID}-${CANARY_RUN_ATTEMPT}" \
+            --artifact-digest "$CANARY_ARTIFACT_SHA256" \
+            --destination evidence
+      - name: Verify exact candidate and 24–48 hour canary evidence
+        run: |
+          set -euo pipefail
+          python scripts/release_candidate.py verify-promotion \
+            --dist dist \
+            --candidate-run-id "$CANDIDATE_RUN_ID" \
+            --candidate-run-attempt "$CANDIDATE_RUN_ATTEMPT" \
+            --commit "$CANDIDATE_COMMIT" \
+            --tag "$GITHUB_REF_NAME" \
+            --dmg-sha256 "$CANDIDATE_DMG_SHA256" \
+            --manifest-sha256 "$CANDIDATE_MANIFEST_SHA256" \
+            --evidence evidence/alpha-canary-evidence.json \
+            --canary-run-id "$CANARY_RUN_ID" \
+            --canary-run-attempt "$CANARY_RUN_ATTEMPT" \
+            --host-identity-sha256 "$CANARY_HOST_IDENTITY_SHA256" \
+            --evidence-sha256 "$CANARY_EVIDENCE_SHA256"
+      - name: Attest immutable candidate assets
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4
+        with:
+          subject-path: dist/*
+      - name: Create GitHub prerelease without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --verify-tag \
+            --generate-notes \
+            --prerelease

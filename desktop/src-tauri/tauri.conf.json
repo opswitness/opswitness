@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OpsWitness",
+  "version": "0.1.0-alpha.1",
+  "identifier": "com.opswitness.app",
+  "build": {
+    "frontendDist": "../shell-ui"
+  },
+  "app": {
+    "security": {
+      "csp": "default-src 'self' http://127.0.0.1:*; connect-src 'self' http://127.0.0.1:*; img-src 'self' data: http://127.0.0.1:*; style-src 'self' 'unsafe-inline' http://127.0.0.1:*; script-src 'self' http://127.0.0.1:*"
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "OpsWitness",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 980,
+        "minHeight": 640,
+        "visible": false,
+        "center": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": [
+      "../../console-ui/public/icons/opswitness-192.png",
+      "../../console-ui/public/icons/opswitness-512.png"
+    ],
+    "category": "Productivity",
+    "copyright": "Copyright © 2026 OpsWitness",
+    "shortDescription": "Local-first AI workforce console",
+    "longDescription": "Reviewed plans, approvals, recoverable execution, and local evidence.",
+    "resources": {
+      "../vendor-lock.json": "runtime/vendor-lock.json",
+      "../.stage/runtime/": "runtime/payload/"
+    },
+    "macOS": {
+      "minimumSystemVersion": "14.0",
+      "hardenedRuntime": true
+    }
+  }
+}

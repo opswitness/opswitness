@@ -116,3 +116,53 @@ export function formatExecutionElapsed(seconds, language = 'en') {
     ? `${hours} 小时 ${remainder} 分钟`
     : `${hours}h ${remainder}m`;
 }
+
+export function onboardingRunProgress({
+  workStatus,
+  plannedStages = [],
+  progress = null,
+  startedAt = null,
+  estimateMinutes = 0,
+  nowMs = Date.now(),
+}) {
+  const progressByOrder = new Map(
+    (progress?.stages || []).map((stage) => [stage.stage_order, stage]),
+  );
+  const stages = plannedStages.map((stage) => {
+    const runtime = progressByOrder.get(stage.order);
+    const observed = runtime?.source === 'aion_team_task';
+    const status = observed ? runtime.status : 'not_started';
+    return {
+      order: stage.order,
+      status,
+      observed,
+      tone: stageProgressPresentation(status, workStatus).tone,
+      agentName: observed ? runtime.agent_name : stage.owner,
+    };
+  });
+  const completed = stages.filter((stage) => stage.status === 'completed').length;
+  const running = stages.find((stage) => stage.status === 'running');
+  const next = stages.find((stage) => stage.status !== 'completed');
+  const parsedStartedAt = typeof startedAt === 'string' ? Date.parse(startedAt) : Number.NaN;
+  const elapsedSeconds = Number.isFinite(parsedStartedAt)
+    ? Math.max(0, Math.floor((nowMs - parsedStartedAt) / 1000))
+    : null;
+  const normalizedEstimate = Number.isFinite(estimateMinutes) && estimateMinutes > 0
+    ? estimateMinutes
+    : null;
+
+  return {
+    available: progress?.available === true,
+    observed: stages.some((stage) => stage.observed),
+    stages,
+    completed,
+    total: stages.length,
+    currentOrder: running?.order ?? next?.order ?? stages.at(-1)?.order ?? null,
+    elapsedSeconds,
+    estimateMinutes: normalizedEstimate,
+    estimateExceeded: elapsedSeconds !== null
+      && normalizedEstimate !== null
+      && elapsedSeconds > normalizedEstimate * 60,
+    slow: (progress?.active_members || []).some((member) => member.slow),
+  };
+}

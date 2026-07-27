@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import { LanguageProvider } from './language';
 import './styles.css';
+import './agent-graph-editor.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

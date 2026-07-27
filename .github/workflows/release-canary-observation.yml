@@ -1,0 +1,247 @@
+name: release-canary-observation
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Signed candidate workflow run ID
+        required: true
+      candidate_run_attempt:
+        description: Signed candidate workflow run attempt
+        required: true
+        default: "1"
+      candidate_commit:
+        description: Exact 40-hex candidate commit
+        required: true
+      candidate_dmg_sha256:
+        description: SHA-256 of the exact notarized DMG
+        required: true
+      candidate_manifest_sha256:
+        description: SHA-256 of the exact build-manifest.json
+        required: true
+      candidate_artifact_sha256:
+        description: SHA-256 digest reported by the candidate artifact upload
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-canary-observation-${{ inputs.candidate_run_id }}-${{ inputs.candidate_run_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    environment: alpha-canary-observation
+    runs-on:
+      group: opswitness-alpha-canary
+      labels: [self-hosted, macOS, ARM64, opswitness-alpha-canary]
+    timeout-minutes: 60
+    env:
+      EVIDENCE_ROOT: /Users/Shared/OpsWitnessAlphaCanary
+      CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+      CANDIDATE_RUN_ATTEMPT: ${{ inputs.candidate_run_attempt }}
+      CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+      CANDIDATE_DMG_SHA256: ${{ inputs.candidate_dmg_sha256 }}
+      CANDIDATE_MANIFEST_SHA256: ${{ inputs.candidate_manifest_sha256 }}
+      CANDIDATE_ARTIFACT_SHA256: ${{ inputs.candidate_artifact_sha256 }}
+      CANDIDATE_WORKFLOW_ID: ${{ vars.ALPHA_CANDIDATE_WORKFLOW_ID }}
+      CANARY_HOST_IDENTITY_SHA256: ${{ vars.ALPHA_CANARY_HOST_IDENTITY_SHA256 }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.candidate_commit }}
+          fetch-depth: 0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with: { python-version: "3.12.10" }
+      - name: Require the exact candidate and trusted producer identity
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CANDIDATE_DMG_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CANDIDATE_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CANDIDATE_ARTIFACT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$CANDIDATE_WORKFLOW_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANARY_HOST_IDENTITY_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$CANDIDATE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_COMMIT"
+      - name: Download the candidate from the fixed successful producer
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/github_actions_artifact.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --repository-id "${{ github.repository_id }}" \
+            --run-id "$CANDIDATE_RUN_ID" \
+            --run-attempt "$CANDIDATE_RUN_ATTEMPT" \
+            --head-sha "$CANDIDATE_COMMIT" \
+            --workflow-id "$CANDIDATE_WORKFLOW_ID" \
+            --workflow-path .github/workflows/release.yml \
+            --event workflow_dispatch \
+            --artifact-name \
+              "release-candidate-${CANDIDATE_RUN_ID}-${CANDIDATE_RUN_ATTEMPT}" \
+            --artifact-digest "$CANDIDATE_ARTIFACT_SHA256" \
+            --destination candidate
+      - name: Verify the exact signed candidate
+        run: |
+          python scripts/release_candidate.py verify-candidate \
+            --dist candidate \
+            --candidate-run-id "$CANDIDATE_RUN_ID" \
+            --candidate-run-attempt "$CANDIDATE_RUN_ATTEMPT" \
+            --commit "$CANDIDATE_COMMIT" \
+            --tag v0.1.0-alpha.1 \
+            --dmg-sha256 "$CANDIDATE_DMG_SHA256" \
+            --manifest-sha256 "$CANDIDATE_MANIFEST_SHA256"
+      - name: Request the closed observation bundle from the trusted canary host
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$EVIDENCE_ROOT" = "/Users/Shared/OpsWitnessAlphaCanary"
+          run_key="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          run_root=$(
+            python scripts/macos_canary_handoff.py \
+              --root "$EVIDENCE_ROOT" \
+              --run-id "$GITHUB_RUN_ID" \
+              --run-attempt "$GITHUB_RUN_ATTEMPT" \
+              --expected-host-identity-sha256 \
+                "$CANARY_HOST_IDENTITY_SHA256"
+          )
+          request="$EVIDENCE_ROOT/requests/$run_key.json"
+          test "$run_root" = "$EVIDENCE_ROOT/runs/$run_key"
+
+          REQUEST_PATH="$request" \
+          OBSERVATION_OUTPUT="$run_root/observation" \
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = {
+              "schema_version": 1,
+              "request_type": "opswitness-alpha-canary-observation-export",
+              "candidate": {
+                  "workflow_run_id": int(os.environ["CANDIDATE_RUN_ID"]),
+                  "workflow_run_attempt": int(
+                      os.environ["CANDIDATE_RUN_ATTEMPT"]
+                  ),
+                  "git_commit": os.environ["CANDIDATE_COMMIT"],
+                  "tag": "v0.1.0-alpha.1",
+                  "dmg_sha256": os.environ["CANDIDATE_DMG_SHA256"],
+                  "manifest_sha256": os.environ[
+                      "CANDIDATE_MANIFEST_SHA256"
+                  ],
+              },
+              "producer": {
+                  "workflow_run_id": int(os.environ["GITHUB_RUN_ID"]),
+                  "workflow_run_attempt": int(
+                      os.environ["GITHUB_RUN_ATTEMPT"]
+                  ),
+                  "host_identity_sha256": os.environ[
+                      "CANARY_HOST_IDENTITY_SHA256"
+                  ],
+              },
+              "output_directory": os.environ["OBSERVATION_OUTPUT"],
+          }
+          destination = Path(os.environ["REQUEST_PATH"])
+          with destination.open("x", encoding="utf-8") as handle:
+              json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
+              handle.write("\n")
+          destination.chmod(0o600)
+          PY
+          echo "OPSWITNESS_OBSERVATION_RUN_ROOT=$run_root" >> "$GITHUB_ENV"
+      - name: Ingest one stable six-file observation bundle
+        run: |
+          set -euo pipefail
+          source="$OPSWITNESS_OBSERVATION_RUN_ROOT/observation"
+          for _ in $(seq 1 90)
+          do
+            if [[ -d "$source" && ! -L "$source" ]]; then
+              break
+            fi
+            sleep 30
+          done
+          test -d "$source"
+          test ! -L "$source"
+          test -z "$(find "$source" -type l -print -quit)"
+          test -z "$(find "$source" -mindepth 1 ! -type f ! -type d -print -quit)"
+          test "$(find "$source" -mindepth 1 -type d | wc -l | tr -d ' ')" = "1"
+          test "$(find "$source" -type f | wc -l | tr -d ' ')" = "6"
+
+          inventory_before=$(
+            find "$source" -type f -exec shasum -a 256 {} \; |
+              LC_ALL=C sort |
+              shasum -a 256 |
+              awk '{print $1}'
+          )
+          sleep 5
+          inventory_after=$(
+            find "$source" -type f -exec shasum -a 256 {} \; |
+              LC_ALL=C sort |
+              shasum -a 256 |
+              awk '{print $1}'
+          )
+          test "$inventory_before" = "$inventory_after"
+
+          mkdir observation
+          cp -R "$source/." observation/
+          test -f observation/alpha-canary-observation.json
+          for file in \
+            sources/soak-status.json \
+            sources/cadence-summary.json \
+            sources/recovery-summary.json \
+            sources/clean-install-summary.json \
+            sources/first-work-summary.json
+          do
+            test -f "observation/$file"
+          done
+      - name: Validate every observation before upload
+        run: |
+          set -euo pipefail
+          observation_sha=$(
+            shasum -a 256 observation/alpha-canary-observation.json |
+              awk '{print $1}'
+          )
+          python scripts/release_candidate.py record-canary \
+            --dist candidate \
+            --candidate-run-id "$CANDIDATE_RUN_ID" \
+            --candidate-run-attempt "$CANDIDATE_RUN_ATTEMPT" \
+            --commit "$CANDIDATE_COMMIT" \
+            --tag v0.1.0-alpha.1 \
+            --dmg-sha256 "$CANDIDATE_DMG_SHA256" \
+            --manifest-sha256 "$CANDIDATE_MANIFEST_SHA256" \
+            --canary-run-id "$GITHUB_RUN_ID" \
+            --canary-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --observation-bundle observation \
+            --observation-sha256 "$observation_sha" \
+            --observation-run-id "$GITHUB_RUN_ID" \
+            --observation-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --host-identity-sha256 "$CANARY_HOST_IDENTITY_SHA256" \
+            --output "$RUNNER_TEMP/validated-observation.json"
+          echo "OPSWITNESS_OBSERVATION_SHA256=$observation_sha" >> "$GITHUB_ENV"
+      - id: observation-artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: alpha-canary-observation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            observation/alpha-canary-observation.json
+            observation/sources/soak-status.json
+            observation/sources/cadence-summary.json
+            observation/sources/recovery-summary.json
+            observation/sources/clean-install-summary.json
+            observation/sources/first-work-summary.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Record the immutable observation artifact transport identity
+        run: |
+          {
+            echo "### Immutable Alpha canary observation"
+            echo
+            echo "- Producer run: $GITHUB_RUN_ID / $GITHUB_RUN_ATTEMPT"
+            echo "- Observation SHA-256: \`$OPSWITNESS_OBSERVATION_SHA256\`"
+            echo "- Artifact ID: ${{ steps.observation-artifact.outputs.artifact-id }}"
+            echo "- Artifact SHA-256: \`${{ steps.observation-artifact.outputs.artifact-digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

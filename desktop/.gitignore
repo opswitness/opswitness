@@ -1,0 +1,9 @@
+/.stage/*
+!/.stage/runtime/
+/.stage/runtime/*
+!/.stage/runtime/.gitkeep
+/dist/
+/src-tauri/target/
+/src-tauri/gen/
+**/__pycache__/
+*.pyc

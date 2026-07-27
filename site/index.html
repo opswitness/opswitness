@@ -51,13 +51,13 @@
           <div class="hero-actions">
             <a
               class="button button-primary"
-              href="https://github.com/opswitness/opswitness/releases/tag/v0.1.0-alpha.1"
+              href="https://github.com/opswitness/opswitness/releases/download/v0.1.0-alpha.1/OpsWitness-0.1.0-alpha.1-macos-arm64.dmg"
             >
-              Download Community Alpha
+              Download Alpha
             </a>
             <a class="button button-secondary" href="#workflow">See how it works</a>
           </div>
-          <p class="hero-note">macOS 14+ / Python 3.12 / Apache-2.0 / GitHub Release only</p>
+          <p class="hero-note">macOS 14+ / Apple Silicon / Ad-hoc signed / Not notarized</p>
         </div>
       </section>
 
@@ -206,32 +206,40 @@
       <section class="section install-section" id="install" aria-labelledby="install-title">
         <div class="section-heading">
           <p class="eyebrow">INSTALL ON YOUR MAC</p>
-          <h2 id="install-title">Start with a local evidence run.</h2>
-          <p>Community Alpha is distributed through a signed GitHub prerelease, not PyPI.</p>
+          <h2 id="install-title">Drag to Applications. Run your first Work.</h2>
+          <p>
+            Community Alpha is distributed as an ad-hoc signed Apple Silicon Mac App through
+            GitHub Prerelease. It is not notarized, so macOS may require right-clicking the App
+            and choosing Open on first launch.
+          </p>
         </div>
         <div class="install-layout">
           <div class="install-copy">
             <ol>
-              <li>Install Python 3.12 and <code>uv</code>.</li>
-              <li>Install the wheel from the GitHub Release.</li>
-              <li>Run one synthetic wrapped command.</li>
-              <li>Open the local Workspace at <code>127.0.0.1</code>.</li>
+              <li>Download the DMG and verify its checksum.</li>
+              <li>Drag <strong>OpsWitness</strong> into Applications.</li>
+              <li>Open it and sign in to Codex with your own account.</li>
+              <li>Turn a fictional customer inquiry into a reviewed reply draft.</li>
             </ol>
             <p>
-              Start with synthetic or non-critical work. Full team execution additionally needs
-              compatible local AionUi and Paperclip services.
+              Python, Node, PostgreSQL, Paperclip, AionCore, Codex CLI, and managed runtime
+              components are included. Start with the built-in customer example, which has no
+              delivery step.
             </p>
           </div>
-          <pre class="install-command" aria-label="Installation command"><code>uv tool install --with mcp \
-  https://github.com/opswitness/opswitness/releases/download/v0.1.0-alpha.1/opswitness-0.1.0a1-py3-none-any.whl
-
-opswitness version
-opswitness wrap --job hello -- /usr/bin/true
-opswitness console serve --open</code></pre>
+          <div class="install-command" aria-label="First use summary">
+            <strong>One download. No dependency setup.</strong>
+            <p>macOS 14 or newer · Apple Silicon · 5 GB free during setup</p>
+            <p>Your App data and evidence stay on your Mac.</p>
+          </div>
         </div>
         <div class="install-actions">
-          <a class="button button-primary" href="https://github.com/opswitness/opswitness/releases/tag/v0.1.0-alpha.1">Open the release</a>
+          <a class="button button-primary" href="https://github.com/opswitness/opswitness/releases/download/v0.1.0-alpha.1/OpsWitness-0.1.0-alpha.1-macos-arm64.dmg">Download Alpha</a>
           <a class="button button-secondary" href="https://github.com/opswitness/opswitness/blob/main/docs/QUICKSTART.md">Read the full guide</a>
+        </div>
+        <div class="boundary-links">
+          <a href="https://github.com/opswitness/opswitness/releases/download/v0.1.0-alpha.1/SHA256SUMS">Checksums</a>
+          <a href="https://github.com/opswitness/opswitness/releases/tag/v0.1.0-alpha.1">Release notes</a>
         </div>
       </section>
 

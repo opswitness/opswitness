@@ -17,6 +17,13 @@ from typing import Callable
 import psutil
 
 from opswitness.config import Settings, config_dir, resolve_api_key, validate_config_files
+from opswitness.desktop_runtime import (
+    DesktopProcess,
+    DesktopRuntime,
+    desktop_mode_requested,
+    load_desktop_runtime,
+    process_identity_matches,
+)
 from opswitness.service import KEEPALIVE_SERVICE_NAMES, SERVICE_NAMES, _template_bytes
 from opswitness.workflows import load_workflows, workflow_catalog
 
@@ -236,6 +243,121 @@ def _qd_command_surface(
     return True, "required commands available: " + ", ".join(required)
 
 
+def _desktop_doctor_checks(
+    *,
+    settings: Settings | None,
+    runtime_loader: Callable[[], DesktopRuntime],
+    identity_matcher: Callable[[DesktopProcess], tuple[bool, str]],
+    port_open: Callable[[str, int], bool],
+    mail_probe: Callable[[Settings], dict] | None,
+) -> list[DoctorCheck]:
+    checks: list[DoctorCheck] = []
+    try:
+        runtime = runtime_loader()
+    except (OSError, ValueError) as exc:
+        checks.append(DoctorCheck("desktop_runtime_descriptor", "fail", str(exc)))
+        return checks
+
+    checks.append(
+        DoctorCheck(
+            "desktop_runtime_descriptor",
+            "pass",
+            (
+                f"schema=1 instance={runtime.instance_id} target=aarch64-apple-darwin; "
+                "complete resource inventory verified"
+            ),
+        )
+    )
+    supervisor_alive = psutil.pid_exists(runtime.supervisor_pid)
+    checks.append(
+        DoctorCheck(
+            "desktop_supervisor_pid",
+            "pass" if supervisor_alive else "fail",
+            f"pid={runtime.supervisor_pid} " + ("running" if supervisor_alive else "not running"),
+        )
+    )
+    checks.append(
+        DoctorCheck(
+            "desktop_codex",
+            "pass",
+            f"bundled executable={runtime.codex_executable}",
+        )
+    )
+    for name in ("paperclip", "aioncore", "backend"):
+        process = runtime.process(name)
+        if process is None:
+            checks.extend(
+                [
+                    DoctorCheck(
+                        f"desktop_{name}_identity",
+                        "fail",
+                        "process is absent from the supervisor descriptor",
+                    ),
+                    DoctorCheck(
+                        f"desktop_{name}_port",
+                        "fail",
+                        "dynamic loopback port is unavailable",
+                    ),
+                ]
+            )
+            continue
+        try:
+            identity_ok, identity_detail = identity_matcher(process)
+        except (OSError, psutil.Error) as exc:
+            identity_ok, identity_detail = False, f"cannot inspect process identity: {exc}"
+        checks.append(
+            DoctorCheck(
+                f"desktop_{name}_identity",
+                "pass" if identity_ok else "fail",
+                identity_detail,
+            )
+        )
+        opened = port_open("127.0.0.1", process.port)
+        checks.append(
+            DoctorCheck(
+                f"desktop_{name}_port",
+                "pass" if opened else "fail",
+                f"127.0.0.1:{process.port} " + ("open" if opened else "closed"),
+            )
+        )
+
+    if settings is None:
+        checks.append(DoctorCheck("service_log_security", "fail", "settings unavailable"))
+        checks.append(DoctorCheck("mail_adapter", "fail", "settings unavailable"))
+        return checks
+
+    log_security_ok, log_security_detail = _service_log_security(settings)
+    checks.append(
+        DoctorCheck(
+            "service_log_security",
+            "pass" if log_security_ok else "fail",
+            log_security_detail,
+        )
+    )
+    if not settings.mail.enabled:
+        checks.append(DoctorCheck("mail_adapter", "pass", "disabled"))
+    else:
+        try:
+            if mail_probe is None:
+                from opswitness.mail import mail_status
+
+                mail_result = mail_status(settings)
+            else:
+                mail_result = mail_probe(settings)
+            checks.append(
+                DoctorCheck(
+                    "mail_adapter",
+                    "pass" if mail_result.get("ready") is True else "fail",
+                    "metadata-only Gmail adapter ready"
+                    if mail_result.get("ready") is True
+                    else str(mail_result.get("error", "mail adapter is not ready")),
+                )
+            )
+        except (OSError, ValueError) as exc:
+            checks.append(DoctorCheck("mail_adapter", "fail", str(exc)))
+    return checks
+
+
 def run_doctor(
     *,
     settings_loader: Callable[[], Settings] = Settings,
@@ -246,6 +368,10 @@ def run_doctor(
     launchagents_dir: Path | None = None,
     launchd_runtime: Callable[[str], tuple[bool, str]] | None = None,
     mail_probe: Callable[[Settings], dict] | None = None,
+    desktop_runtime_loader: Callable[[], DesktopRuntime] = load_desktop_runtime,
+    desktop_process_identity: Callable[
+        [DesktopProcess], tuple[bool, str]
+    ] = process_identity_matches,
 ) -> dict:
     checks: list[DoctorCheck] = []
 
@@ -282,6 +408,22 @@ def run_doctor(
             f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         )
     )
+
+    if desktop_mode_requested():
+        checks.extend(
+            _desktop_doctor_checks(
+                settings=settings,
+                runtime_loader=desktop_runtime_loader,
+                identity_matcher=desktop_process_identity,
+                port_open=port_open,
+                mail_probe=mail_probe,
+            )
+        )
+        encoded = [asdict(check) for check in checks]
+        return {
+            "healthy": all(check.status == "pass" for check in checks),
+            "checks": encoded,
+        }
 
     for tool in ("node", "psql", "pg_dump", "age"):
         path = which(tool)

@@ -68,6 +68,7 @@ import {
   createWorkspaceMemoryCandidate,
   createPairingInvitation,
   deletePlan,
+  dismissWorkspaceMemory,
   eraseRun,
   disableTelegram,
   disableMail,
@@ -86,7 +87,9 @@ import {
   getTelegramStatus,
   forkPlan,
   loadBootstrap,
+  loadOnboarding,
   planArtifactContentUrl,
+  previewPlanAgentContract,
   preparePlanRerun,
   proposeProcessMemory,
   requestMailAuthorization,
@@ -95,6 +98,7 @@ import {
   revokeWorkspaceMemory,
   revokePairedDevice,
   revisePlan,
+  revisePlanAgentContract,
   revisePlanExecutionProfile,
   revisePlanOrganization,
   revisePlanRuntimes,
@@ -105,6 +109,11 @@ import {
   testTelegram,
 } from './api';
 import { WorkspaceMemoryDialog } from './workspace-memory-dialog';
+import { OnboardingFlow } from './onboarding';
+import { KnowledgeHubView } from './knowledge-hub';
+import { DocsCenter } from './docs-center';
+import { RecoveryAgentPanel } from './recovery-agent';
+import { AgentGraphEditor } from './agent-graph-editor';
 import {
   canReviseWork,
   canSaveRuntimeRevision,
@@ -159,12 +168,14 @@ import type {
   AgentObservation,
   ApprovalCard,
   ApprovalMode,
+  AgentContractPreview,
   CollaborationLoop,
   ExecutionProfile,
   Integration,
   MailAuthorizationJob,
   MailAuthorizationStatus,
   MailSummaryJob,
+  OnboardingStatus,
   PairedDevice,
   PairingInvitation,
   HomeAction,
@@ -187,11 +198,13 @@ import type {
   RuntimeInputArtifactPreview,
   TelegramSetupStatus,
   WorkspaceMemoryStatus,
+  WorkspaceMemorySummary,
   WorkspaceMemoryView,
   WorkspaceConversation,
 } from './types';
+import { SHOW_ANTHROPIC_PROVIDER_UI } from './product-boundaries';
 
-type View = 'workspace' | 'today' | 'work' | 'approvals' | 'settings';
+type View = 'workspace' | 'today' | 'work' | 'files' | 'docs' | 'approvals' | 'settings';
 type WorkTab = 'overview' | 'history' | 'settings';
 type HistoryTab = 'process' | 'results';
 type Translate = ReturnType<typeof useLanguage>['t'];
@@ -372,6 +385,8 @@ function translatedIntegrationDetail(detail: string | undefined, t: Translate): 
 function App() {
   const { language, t } = useLanguage();
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
+  const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
+  const [onboardingCompletionPending, setOnboardingCompletionPending] = useState(false);
   const [view, setView] = useState<View>('workspace');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activePlan, setActivePlan] = useState<PlanRecord | null>(null);
@@ -392,7 +407,9 @@ function App() {
     if (!quiet) setLoading(true);
     try {
       const next = await loadBootstrap();
+      const firstUse = await loadOnboarding();
       setBootstrap(next);
+      setOnboarding(firstUse);
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('控制台状态读取失败'));
@@ -428,6 +445,14 @@ function App() {
     setActivePlan(record);
     mergePlanIntoBootstrap(record);
   }, [mergePlanIntoBootstrap]);
+
+  const openRepairWork = useCallback((record: PlanRecord) => {
+    mergePlan(record);
+    setWorkFocusPlanId(record.plan_id);
+    setWorkFocusTab('overview');
+    setDrawerOpen(false);
+    setView('workspace');
+  }, [mergePlan]);
 
   const decideWorkApproval = useCallback(async (
     record: PlanRecord,
@@ -586,9 +611,31 @@ function App() {
     workspace: '工作台',
     today: '今日',
     work: '工作',
+    files: '项目资料库',
+    docs: '帮助文档',
     approvals: '审批',
     settings: '设置',
   }[view]);
+
+  if (
+    bootstrap
+    && onboarding
+    && (!onboarding.complete || onboardingCompletionPending)
+  ) {
+    return (
+      <OnboardingFlow
+        status={onboarding}
+        bootstrap={bootstrap}
+        onStatus={setOnboarding}
+        onComplete={(status) => {
+          setOnboarding(status);
+          setOnboardingCompletionPending(true);
+        }}
+        onFinish={() => setOnboardingCompletionPending(false)}
+        onRefresh={() => refresh(true)}
+      />
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -600,7 +647,7 @@ function App() {
       <main className="main-area">
         <header className="topbar">
           <div className="topbar-title">
-            <span className="eyebrow">OPSWITNESS · v{APP_VERSION}</span>
+            <span className="eyebrow">OpsWitness · v{APP_VERSION}</span>
             <h1>{title}</h1>
           </div>
           <div className="topbar-actions">
@@ -713,8 +760,33 @@ function App() {
                     await refresh(true);
                     return row;
                   }}
-                  onApproveWorkspaceMemory={async (versionId, reason) => {
-                    const row = await approveWorkspaceMemory(versionId, reason);
+                  onApproveWorkspaceMemory={async (
+                    versionId,
+                    expectedContentSha256,
+                    expectedFingerprint,
+                    reason,
+                  ) => {
+                    const row = await approveWorkspaceMemory(
+                      versionId,
+                      reason,
+                      expectedContentSha256,
+                      expectedFingerprint,
+                    );
+                    await refresh(true);
+                    return row;
+                  }}
+                  onDismissWorkspaceMemory={async (
+                    versionId,
+                    expectedContentSha256,
+                    expectedFingerprint,
+                    reason,
+                  ) => {
+                    const row = await dismissWorkspaceMemory(
+                      versionId,
+                      expectedContentSha256,
+                      expectedFingerprint,
+                      reason,
+                    );
                     await refresh(true);
                     return row;
                   }}
@@ -741,6 +813,7 @@ function App() {
                     mergePlan(await controlPlan(record.plan_id, action));
                     void refresh(true);
                   }}
+                  onRepairWorkCreated={openRepairWork}
                   approvals={bootstrap.approvals}
                   approvalsAvailable={bootstrap.approvals_available}
                   onDecideApproval={decideWorkApproval}
@@ -768,6 +841,7 @@ function App() {
                     setWorkFocusTab(tab);
                   }}
                   runtimeCapabilities={bootstrap.runtime_capabilities}
+                  workspaceMemories={bootstrap.workspace_memories}
                   onReview={reviewWork}
                   onRerun={async (record) => {
                     const rerun = await preparePlanRerun(record.plan_id);
@@ -793,18 +867,19 @@ function App() {
                     mergePlan(revision);
                     setWorkFocusPlanId(revision.plan_id);
                   }}
-                  onOrganizationSave={async (record, lines, loops) => {
-                    const revision = await revisePlanOrganization(record.plan_id, lines, loops);
-                    mergePlan(revision);
-                    setWorkFocusPlanId(revision.plan_id);
-                  }}
-                  onRuntimeSave={async (record, assignments) => {
-                    const revision = await revisePlanRuntimes(record.plan_id, assignments);
-                    mergePlan(revision);
-                    setWorkFocusPlanId(revision.plan_id);
-                  }}
-                  onProfileSave={async (record, profile) => {
-                    const revision = await revisePlanExecutionProfile(record.plan_id, profile);
+                  onAgentContractPreview={(record, payload) => (
+                    previewPlanAgentContract(
+                      record.plan_id,
+                      record.plan_sha256 || '',
+                      payload,
+                    )
+                  )}
+                  onAgentGraphSave={async (record, payload) => {
+                    const revision = await revisePlanAgentContract(
+                      record.plan_id,
+                      record.plan_sha256 || '',
+                      payload,
+                    );
                     mergePlan(revision);
                     setWorkFocusPlanId(revision.plan_id);
                   }}
@@ -835,11 +910,21 @@ function App() {
                     );
                     void refresh(true);
                   }}
+                  onRepairWorkCreated={openRepairWork}
                   onDelete={setDeleteTarget}
                   onEraseRun={setEraseRunTarget}
                   onNew={openNewTask}
                 />
               )}
+              {view === 'files' && (
+                <KnowledgeHubView
+                  onPlanCreated={(record) => {
+                    mergePlan(record);
+                    reviewWork(record);
+                  }}
+                />
+              )}
+              {view === 'docs' && <DocsCenter />}
               {view === 'approvals' && (
                 <ApprovalsView data={bootstrap} onChanged={refreshAfterIntegrationChange} />
               )}
@@ -892,6 +977,7 @@ function App() {
           mergePlan(await controlPlan(record.plan_id, action));
           void refresh(true);
         }}
+        onRepairWorkCreated={openRepairWork}
         approvals={bootstrap?.approvals || []}
         approvalsAvailable={bootstrap?.approvals_available ?? false}
         onDecideApproval={decideWorkApproval}
@@ -955,6 +1041,8 @@ function Sidebar({
   const items = [
     { id: 'workspace' as const, label: '工作台', icon: MessageSquare },
     { id: 'work' as const, label: '工作', icon: ListTodo },
+    { id: 'files' as const, label: '项目资料库', icon: Library },
+    { id: 'docs' as const, label: '帮助文档', icon: BookOpen },
     { id: 'settings' as const, label: '设置', icon: Settings },
   ];
   return (
@@ -1609,11 +1697,13 @@ function WorkspaceView({
   onCreateWorkspaceMemory,
   onProposeProcessMemory,
   onApproveWorkspaceMemory,
+  onDismissWorkspaceMemory,
   onRevokeWorkspaceMemory,
   onRollbackWorkspaceMemory,
   onConfirm,
   onAnswerInput,
   onControl,
+  onRepairWorkCreated,
   approvals,
   approvalsAvailable,
   onDecideApproval,
@@ -1677,6 +1767,14 @@ function WorkspaceView({
   onProposeProcessMemory: (work: RepeatableWork) => Promise<WorkspaceMemoryView>;
   onApproveWorkspaceMemory: (
     versionId: string,
+    expectedContentSha256: string,
+    expectedFingerprint: string | null,
+    reason?: string,
+  ) => Promise<WorkspaceMemoryView>;
+  onDismissWorkspaceMemory: (
+    versionId: string,
+    expectedContentSha256: string,
+    expectedFingerprint: string | null,
     reason?: string,
   ) => Promise<WorkspaceMemoryView>;
   onRevokeWorkspaceMemory: (
@@ -1690,6 +1788,7 @@ function WorkspaceView({
   onConfirm: (record: PlanRecord, approvalMode: ApprovalMode) => Promise<void>;
   onAnswerInput: (record: PlanRecord, requestId: string, answer: string) => Promise<void>;
   onControl: (record: PlanRecord, action: 'pause' | 'resume' | 'terminate') => Promise<void>;
+  onRepairWorkCreated: (record: PlanRecord) => void;
   approvals: ApprovalCard[];
   approvalsAvailable: boolean;
   onDecideApproval: (
@@ -1718,7 +1817,7 @@ function WorkspaceView({
 
   useEffect(() => {
     setConfirmed(false);
-    setApprovalMode(record?.approval_mode === 'manual_all' ? 'manual_all' : 'automatic');
+    setApprovalMode(record?.approval_mode ?? 'automatic');
     setRevisionOpen(false);
     setError('');
   }, [record?.plan_id, record?.status]);
@@ -2111,6 +2210,7 @@ function WorkspaceView({
                     )}
                     onAnswerInput={(requestId, answer) => onAnswerInput(record, requestId, answer)}
                     onControl={(action) => onControl(record, action)}
+                    onRepairWorkCreated={onRepairWorkCreated}
                   />
                 )}
                 {record.status === 'ready' && (
@@ -2123,7 +2223,13 @@ function WorkspaceView({
                       />
                     ) : (
                       <>
-                        <ApprovalModeControl mode={approvalMode} onChange={setApprovalMode} />
+                        <ApprovalModeControl
+                          mode={approvalMode}
+                          automaticMode={record.approval_mode === 'automatic_safe'
+                            ? 'automatic_safe'
+                            : 'automatic'}
+                          onChange={setApprovalMode}
+                        />
                         <label className="confirm-check">
                           <input
                             type="checkbox"
@@ -2275,6 +2381,7 @@ function WorkspaceView({
           onCreate={onCreateWorkspaceMemory}
           onProposeProcess={onProposeProcessMemory}
           onApprove={onApproveWorkspaceMemory}
+          onDismiss={onDismissWorkspaceMemory}
           onRevoke={onRevokeWorkspaceMemory}
           onRollback={onRollbackWorkspaceMemory}
         />
@@ -2505,14 +2612,14 @@ function WorkView({
   focusedTab,
   onFocus,
   runtimeCapabilities,
+  workspaceMemories,
   onReview,
   onRerun,
   onContinueRun,
   onFork,
   onRevise,
-  onOrganizationSave,
-  onRuntimeSave,
-  onProfileSave,
+  onAgentContractPreview,
+  onAgentGraphSave,
   onSaveBlueprint,
   approvals,
   approvalsAvailable,
@@ -2520,6 +2627,7 @@ function WorkView({
   onAnswerInput,
   onControl,
   onApprovalModeChange,
+  onRepairWorkCreated,
   onDelete,
   onEraseRun,
   onNew,
@@ -2530,23 +2638,19 @@ function WorkView({
   focusedTab: WorkTab;
   onFocus: (planId: string, tab: WorkTab) => void;
   runtimeCapabilities: RuntimeCapability[];
+  workspaceMemories: WorkspaceMemorySummary[];
   onReview: (record: PlanRecord) => void;
   onRerun: (record: PlanRecord) => Promise<void>;
   onContinueRun: (run: TaskRunHistory, message: string) => Promise<void>;
   onFork: (record: PlanRecord) => Promise<void>;
   onRevise: (record: PlanRecord, instruction: string) => Promise<void>;
-  onOrganizationSave: (
+  onAgentContractPreview: (
     record: PlanRecord,
-    lines: ReportingLine[],
-    loops: CollaborationLoop[],
-  ) => Promise<void>;
-  onRuntimeSave: (
+    payload: Record<string, unknown>,
+  ) => Promise<AgentContractPreview>;
+  onAgentGraphSave: (
     record: PlanRecord,
-    assignments: AgentRuntimeAssignment[],
-  ) => Promise<void>;
-  onProfileSave: (
-    record: PlanRecord,
-    profile: Exclude<ExecutionProfile, 'custom'>,
+    payload: Record<string, unknown>,
   ) => Promise<void>;
   onSaveBlueprint: (record: PlanRecord, name: string) => Promise<void>;
   approvals: ApprovalCard[];
@@ -2564,6 +2668,7 @@ function WorkView({
     approvalMode: 'automatic' | 'manual_all',
     expectedCurrentMode: ApprovalMode,
   ) => Promise<void>;
+  onRepairWorkCreated: (record: PlanRecord) => void;
   onDelete: (record: PlanRecord) => void;
   onEraseRun: (record: PlanRecord) => void;
   onNew: () => void;
@@ -2869,20 +2974,19 @@ function WorkView({
                           <h3>{t('团队')}</h3>
                           <span>{selected.plan.agents.length} Agent</span>
                         </div>
-                        <OrganizationChart
+                        <AgentGraphEditor
                           plan={selected.plan}
-                          editable={selected.status === 'ready' && selected.plan.execution_mode === 'aion_team'}
-                          onSave={(lines, loops) => onOrganizationSave(selected, lines, loops)}
+                          planSha256={selected.plan_sha256 || ''}
+                          editable={
+                            Boolean(selected.plan_sha256)
+                            && selected.status === 'ready'
+                            && selected.plan.execution_mode === 'aion_team'
+                          }
+                          runtimeCapabilities={runtimeCapabilities}
+                          workspaceMemories={workspaceMemories}
+                          onPreview={(payload) => onAgentContractPreview(selected, payload)}
+                          onSave={(payload) => onAgentGraphSave(selected, payload)}
                         />
-                        {selected.status === 'ready' && (
-                          <RuntimeAssignments
-                            agents={selected.plan.agents}
-                            capabilities={runtimeCapabilities}
-                            executionProfile={selected.plan.execution_profile}
-                            onProfileSave={(profile) => onProfileSave(selected, profile)}
-                            onSave={(assignments) => onRuntimeSave(selected, assignments)}
-                          />
-                        )}
                         {selected.status !== 'ready' && (
                           <div className="organization-readonly-note"><ShieldCheck size={15} />{t('执行中的组织关系已由方案哈希锁定，只能查看。')}</div>
                         )}
@@ -3000,6 +3104,7 @@ function WorkView({
                                   onApprovalModeChange={(approvalMode, expectedCurrentMode) => (
                                     onApprovalModeChange(selectedHistoryRecord, approvalMode, expectedCurrentMode)
                                   )}
+                                  onRepairWorkCreated={onRepairWorkCreated}
                                 />
                                 <div className="work-evidence-note"><Activity size={17} /><span>{t('显示可验证的阶段状态和活动；不显示隐藏推理、原始工具参数或输出正文。')}</span></div>
                                 {selectedHistoryRecord.plan && (
@@ -4113,7 +4218,7 @@ function ConnectionsView({
 
   const providerRows = [
     data.providers.openai,
-    data.providers.anthropic,
+    ...(SHOW_ANTHROPIC_PROVIDER_UI ? [data.providers.anthropic] : []),
     data.providers.deepseek,
     data.providers.xai,
     data.providers.ollama,
@@ -4241,35 +4346,16 @@ function ConnectionsView({
                       </button>
                     </>
                   ) : provider.provider === 'anthropic' ? (
-                    <>
-                      <button
-                        className="secondary-button provider-button"
-                        type="button"
-                        disabled={!provider.installed || connecting}
-                        onClick={() => void startConnection('anthropic', 'account')}
-                      >
-                        {connecting && job?.method === 'account' ? <LoaderCircle size={16} className="spin" /> : <ExternalLink size={16} />}
-                        {connecting && job?.method === 'account' ? t('等待登录') : t('Claude 账户')}
-                      </button>
-                      <button
-                        className="secondary-button provider-button"
-                        type="button"
-                        disabled={!provider.installed || connecting}
-                        onClick={() => void startConnection('anthropic', 'api')}
-                      >
-                        {connecting && job?.method === 'api' ? <LoaderCircle size={16} className="spin" /> : <ExternalLink size={16} />}
-                        {connecting && job?.method === 'api' ? t('等待登录') : t('Console 登录')}
-                      </button>
-                      <button
-                        className="primary-button provider-button"
-                        type="button"
-                        disabled={!provider.installed || connecting}
-                        onClick={() => setAnthropicApiKeyOpen(true)}
-                      >
-                        {connecting && job?.method === 'api_key' ? <LoaderCircle size={16} className="spin" /> : <ShieldCheck size={16} />}
-                        {connecting && job?.method === 'api_key' ? t('正在验证') : 'API Key'}
-                      </button>
-                    </>
+                    <button
+                      className="primary-button provider-button"
+                      type="button"
+                      disabled={!provider.installed || connecting}
+                      title={t('使用你自己的 Anthropic API Key；Claude Pro/Max 登录不能用于 OpsWitness')}
+                      onClick={() => setAnthropicApiKeyOpen(true)}
+                    >
+                      {connecting && job?.method === 'api_key' ? <LoaderCircle size={16} className="spin" /> : <ShieldCheck size={16} />}
+                      {connecting && job?.method === 'api_key' ? t('正在验证') : 'API Key'}
+                    </button>
                   ) : provider.provider === 'deepseek' ? (
                     <button
                       className="primary-button provider-button"
@@ -4335,9 +4421,7 @@ function ConnectionsView({
                 ? t('正在验证 xAI API Key，并将其保存到本机 macOS Keychain。')
               : job.provider === 'xai'
                 ? t('请在官方 xAI 页面完成 Grok 账户登录；OpsWitness 不会读取登录凭据。')
-              : job.provider === 'anthropic' && job.method === 'api'
-                ? t('请在已打开的 Anthropic Console 页面完成 API 登录。')
-                : t('请在厂商打开的页面完成登录；OpsWitness 不会读取登录凭据。')}
+              : t('请在厂商打开的页面完成登录；OpsWitness 不会读取登录凭据。')}
           </div>
         )}
         {job?.status === 'failed' && <InlineError text={job.error || t('登录未完成')} />}
@@ -5220,6 +5304,7 @@ function TaskDrawer({
   onConfirm,
   onAnswerInput,
   onControl,
+  onRepairWorkCreated,
   approvals,
   approvalsAvailable,
   onDecideApproval,
@@ -5250,6 +5335,7 @@ function TaskDrawer({
   onConfirm: (record: PlanRecord, approvalMode: ApprovalMode) => Promise<void>;
   onAnswerInput: (record: PlanRecord, requestId: string, answer: string) => Promise<void>;
   onControl: (record: PlanRecord, action: 'pause' | 'resume' | 'terminate') => Promise<void>;
+  onRepairWorkCreated: (record: PlanRecord) => void;
   approvals: ApprovalCard[];
   approvalsAvailable: boolean;
   onDecideApproval: (
@@ -5275,7 +5361,7 @@ function TaskDrawer({
   useEffect(() => {
     if (!open) return;
     setConfirmed(false);
-    setApprovalMode(record?.approval_mode === 'manual_all' ? 'manual_all' : 'automatic');
+    setApprovalMode(record?.approval_mode ?? 'automatic');
     setRevisionOpen(false);
     setError('');
     if (!record) {
@@ -5408,6 +5494,7 @@ function TaskDrawer({
               )}
               onAnswerInput={(requestId, answer) => onAnswerInput(record, requestId, answer)}
               onControl={(action) => onControl(record, action)}
+              onRepairWorkCreated={onRepairWorkCreated}
             />
           )}
         </div>
@@ -5423,7 +5510,13 @@ function TaskDrawer({
               />
             ) : (
               <>
-                <ApprovalModeControl mode={approvalMode} onChange={setApprovalMode} />
+                <ApprovalModeControl
+                  mode={approvalMode}
+                  automaticMode={record.approval_mode === 'automatic_safe'
+                    ? 'automatic_safe'
+                    : 'automatic'}
+                  onChange={setApprovalMode}
+                />
                 <label className="confirm-check">
                   <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
                   <span><Check size={15} />{t('确认此方案并启动受管执行')}</span>
@@ -5778,7 +5871,12 @@ function collaborationLoopError(
   const agentNames = new Set(agents.map((agent) => agent.name));
   const pairs = new Set<string>();
   for (const loop of loops) {
-    if (!agentNames.has(loop.source_agent) || !agentNames.has(loop.target_agent)) {
+    if (
+      !loop.source_agent
+      || !loop.target_agent
+      || !agentNames.has(loop.source_agent)
+      || !agentNames.has(loop.target_agent)
+    ) {
       return '循环协作必须选择当前团队中的员工';
     }
     if (loop.condition.trim().length < 3) return '请写明循环返回与停止条件';
@@ -6649,21 +6747,27 @@ function ExecutionStageList({
 
 function ApprovalModeControl({
   mode,
+  automaticMode = 'automatic',
   onChange,
 }: {
   mode: ApprovalMode;
+  automaticMode?: Extract<ApprovalMode, 'automatic' | 'automatic_safe'>;
   onChange: (mode: ApprovalMode) => void;
 }) {
   const { t } = useLanguage();
   const manual = mode === 'manual_all';
+  const bounded = mode === 'automatic_safe'
+    || (manual && automaticMode === 'automatic_safe');
   return (
     <section className="approval-mode-control" aria-label={t('审批模式')}>
       <div className="approval-mode-copy">
         <span className="approval-mode-icon"><ShieldCheck size={17} /></span>
         <div>
-          <strong>{t(manual ? '逐项人工审批' : '自动模式')}</strong>
+          <strong>{t(manual ? '逐项人工审批' : bounded ? '受限自动审批' : '自动模式')}</strong>
           <span>{t(manual
             ? '打开后，每个执行工具都会暂停等待你的决定。'
+            : bounded
+              ? '只自动放行固定的只读与编排工具；本地写入仍会暂停等待你的决定。'
             : '任务确认后，执行工具会自动单次放行并保留完整审计记录。')}</span>
         </div>
       </div>
@@ -6673,13 +6777,15 @@ function ApprovalModeControl({
           type="checkbox"
           role="switch"
           checked={manual}
-          onChange={(event) => onChange(event.target.checked ? 'manual_all' : 'automatic')}
+          onChange={(event) => onChange(event.target.checked ? 'manual_all' : automaticMode)}
         />
       </label>
       <p>
         <AlertTriangle size={13} />
         {t(manual
           ? '每项工具调用都需要人工批准或拒绝。'
+          : bounded
+            ? '首个 Work 的两次本地写入必须分别人工批准；其他未知工具默认不会自动放行。'
           : 'Auto 模式不会跳过方案确认；每次自动决定仍可审计。')}
       </p>
     </section>
@@ -7466,6 +7572,7 @@ function ExecutionView({
   onAnswerInput,
   onControl,
   onApprovalModeChange,
+  onRepairWorkCreated,
 }: {
   record: PlanRecord;
   approvals: ApprovalCard[];
@@ -7481,6 +7588,7 @@ function ExecutionView({
     approvalMode: 'automatic' | 'manual_all',
     expectedCurrentMode: ApprovalMode,
   ) => Promise<void>;
+  onRepairWorkCreated?: (record: PlanRecord) => void;
 }) {
   const { language, t } = useLanguage();
   const [controlBusy, setControlBusy] = useState<'pause' | 'resume' | 'terminate' | null>(null);
@@ -7750,6 +7858,13 @@ function ExecutionView({
             ? '审批详情暂未同步到此任务，请稍候刷新。'
             : '审批服务暂不可用；任务继续保持暂停。')} />
         )}
+
+        <RecoveryAgentPanel
+          planId={record.plan_id}
+          workStatus={record.status}
+          recovery={execution?.recovery}
+          onRepairWorkCreated={onRepairWorkCreated}
+        />
 
         {showProgressPanel && (
           <section className="live-progress" aria-label={t(showLiveProgress ? '实时进度' : '最后观测活动')}>

@@ -1,0 +1,386 @@
+{
+  "$id": "https://opswitness.com/schemas/alpha-canary-source-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "evidence_type": {
+            "const": "opswitness-alpha-soak-status"
+          }
+        },
+        "required": [
+          "evidence_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "authority": {
+            "const": "opswitness-soak-status"
+          },
+          "evidence": {
+            "$ref": "#/$defs/soakEvidence"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence_type": {
+            "const": "opswitness-alpha-cadence-summary"
+          }
+        },
+        "required": [
+          "evidence_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "authority": {
+            "const": "opswitness-soak-ledger"
+          },
+          "evidence": {
+            "$ref": "#/$defs/cadenceEvidence"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence_type": {
+            "const": "opswitness-alpha-recovery-summary"
+          }
+        },
+        "required": [
+          "evidence_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "authority": {
+            "const": "opswitness-desktop-recovery-smoke"
+          },
+          "evidence": {
+            "$ref": "#/$defs/recoveryEvidence"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence_type": {
+            "const": "opswitness-alpha-clean-install-summary"
+          }
+        },
+        "required": [
+          "evidence_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "authority": {
+            "const": "opswitness-mounted-dmg-smoke"
+          },
+          "evidence": {
+            "$ref": "#/$defs/cleanInstallEvidence"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence_type": {
+            "const": "opswitness-alpha-first-work-summary"
+          }
+        },
+        "required": [
+          "evidence_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "authority": {
+            "const": "opswitness-first-work-evidence"
+          },
+          "evidence": {
+            "$ref": "#/$defs/firstWorkEvidence"
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "authority": {
+      "enum": [
+        "opswitness-soak-status",
+        "opswitness-soak-ledger",
+        "opswitness-desktop-recovery-smoke",
+        "opswitness-mounted-dmg-smoke",
+        "opswitness-first-work-evidence"
+      ],
+      "type": "string"
+    },
+    "candidate": {
+      "$ref": "alpha-canary-observation.schema.json#/$defs/candidate"
+    },
+    "captured_at": {
+      "$ref": "alpha-canary-observation.schema.json#/$defs/timestamp"
+    },
+    "evidence": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/soakEvidence"
+        },
+        {
+          "$ref": "#/$defs/cadenceEvidence"
+        },
+        {
+          "$ref": "#/$defs/recoveryEvidence"
+        },
+        {
+          "$ref": "#/$defs/cleanInstallEvidence"
+        },
+        {
+          "$ref": "#/$defs/firstWorkEvidence"
+        }
+      ]
+    },
+    "evidence_type": {
+      "enum": [
+        "opswitness-alpha-soak-status",
+        "opswitness-alpha-cadence-summary",
+        "opswitness-alpha-recovery-summary",
+        "opswitness-alpha-clean-install-summary",
+        "opswitness-alpha-first-work-summary"
+      ],
+      "type": "string"
+    },
+    "observation_run_id": {
+      "$ref": "alpha-canary-observation.schema.json#/$defs/identifier"
+    },
+    "schema_version": {
+      "const": 1
+    }
+  },
+  "required": [
+    "schema_version",
+    "evidence_type",
+    "candidate",
+    "observation_run_id",
+    "captured_at",
+    "authority",
+    "evidence"
+  ],
+  "title": "OpsWitness Alpha canary source",
+  "type": "object",
+  "$defs": {
+    "cadenceEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "contract_id": {
+          "$ref": "alpha-canary-observation.schema.json#/$defs/identifier"
+        },
+        "details": {
+          "$ref": "alpha-canary-observation.schema.json#/$defs/cadence/properties/details"
+        },
+        "ledger_tail_sha256": {
+          "$ref": "alpha-canary-observation.schema.json#/$defs/sha256"
+        }
+      },
+      "required": [
+        "contract_id",
+        "ledger_tail_sha256",
+        "details"
+      ],
+      "type": "object"
+    },
+    "cleanInstallEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "details": {
+          "$ref": "alpha-canary-observation.schema.json#/$defs/cleanInstall/properties/details"
+        }
+      },
+      "required": [
+        "details"
+      ],
+      "type": "object"
+    },
+    "firstWorkEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "details": {
+          "$ref": "alpha-canary-observation.schema.json#/$defs/firstWork/properties/details"
+        }
+      },
+      "required": [
+        "details"
+      ],
+      "type": "object"
+    },
+    "recoveryEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "details": {
+          "$ref": "alpha-canary-observation.schema.json#/$defs/recovery/properties/details"
+        }
+      },
+      "required": [
+        "details"
+      ],
+      "type": "object"
+    },
+    "soakEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "ledger_tail_sha256": {
+          "$ref": "alpha-canary-observation.schema.json#/$defs/sha256"
+        },
+        "status": {
+          "$ref": "#/$defs/soakStatus"
+        }
+      },
+      "required": [
+        "status",
+        "ledger_tail_sha256"
+      ],
+      "type": "object"
+    },
+    "soakJob": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_gap_seconds": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "failures": {
+          "const": 0
+        },
+        "last_started": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "max_gap_seconds": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "running": {
+          "const": 0
+        },
+        "starts": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "successes": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "starts",
+        "successes",
+        "failures",
+        "running",
+        "last_started",
+        "max_gap_seconds",
+        "allowed_gap_seconds"
+      ],
+      "type": "object"
+    },
+    "soakStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "anchor_run_id": {
+          "oneOf": [
+            {
+              "$ref": "alpha-canary-observation.schema.json#/$defs/identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blockers": {
+          "maxItems": 0,
+          "type": "array"
+        },
+        "checked_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "contract_event_id": {
+          "$ref": "alpha-canary-observation.schema.json#/$defs/identifier"
+        },
+        "contract_kind": {
+          "enum": [
+            "soak_started",
+            "soak_reset"
+          ]
+        },
+        "elapsed_seconds": {
+          "maximum": 172800,
+          "minimum": 86400,
+          "type": "number"
+        },
+        "evidence_since": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "healthy": {
+          "const": true
+        },
+        "jobs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/soakJob"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "alpha-canary-observation.schema.json#/$defs/identifier"
+          },
+          "type": "object"
+        },
+        "minimum_seconds": {
+          "const": 86400
+        },
+        "name": {
+          "$ref": "alpha-canary-observation.schema.json#/$defs/identifier"
+        },
+        "projection_backlog": {
+          "const": 0
+        },
+        "remaining_seconds": {
+          "const": 0
+        },
+        "schema_version": {
+          "const": 1
+        },
+        "state": {
+          "const": "passed"
+        }
+      },
+      "required": [
+        "schema_version",
+        "name",
+        "state",
+        "healthy",
+        "contract_event_id",
+        "contract_kind",
+        "evidence_since",
+        "checked_at",
+        "minimum_seconds",
+        "elapsed_seconds",
+        "remaining_seconds",
+        "anchor_run_id",
+        "projection_backlog",
+        "jobs",
+        "blockers"
+      ],
+      "type": "object"
+    }
+  }
+}

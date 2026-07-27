@@ -17,7 +17,9 @@ concurrency:
 
 jobs:
   deploy:
-    if: vars.PUBLIC_SITE_APPROVED == 'true'
+    if: >-
+      vars.PUBLIC_SITE_APPROVED == 'true' &&
+      vars.PUBLIC_RELEASE_APPROVED == 'true'
     permissions:
       contents: read
       pages: write
@@ -28,6 +30,51 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Download the exact Alpha package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: v0.1.0-alpha.1
+        run: |
+          set -euo pipefail
+          release_dir="$RUNNER_TEMP/opswitness-release"
+          mkdir -p "$release_dir"
+          gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json tagName,isPrerelease > "$release_dir/release.json"
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$release_dir" \
+            --pattern SHA256SUMS \
+            --pattern 'OpsWitness-0.1.0-alpha.1-macos-arm64.dmg'
+      - name: Verify the ad-hoc Alpha package
+        env:
+          RELEASE_TAG: v0.1.0-alpha.1
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          release = Path(os.environ["RUNNER_TEMP"]) / "opswitness-release"
+          release_identity = json.loads((release / "release.json").read_text())
+          if release_identity != {
+              "isPrerelease": True,
+              "tagName": os.environ["RELEASE_TAG"],
+          }:
+              raise SystemExit("the website requires the exact inspected prerelease")
+
+          sums = {}
+          for line in (release / "SHA256SUMS").read_text().splitlines():
+              digest, name = line.split(maxsplit=1)
+              sums[name.strip().lstrip("*")] = digest
+          name = "OpsWitness-0.1.0-alpha.1-macos-arm64.dmg"
+          if name not in sums:
+              raise SystemExit("the Alpha DMG is missing from SHA256SUMS")
+          actual = hashlib.sha256((release / name).read_bytes()).hexdigest()
+          if actual != sums[name]:
+              raise SystemExit("release checksum mismatch for the Alpha DMG")
+          PY
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:

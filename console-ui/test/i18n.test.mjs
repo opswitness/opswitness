@@ -47,11 +47,22 @@ test('translations interpolate values without changing authored task content', (
     '3 agents · 2 reporting levels · 1 loops',
   );
   assert.equal(translateUi('en', '用户原始任务正文'), '用户原始任务正文');
+  assert.equal(translateUi('en', '生成客户回复'), 'Generate customer reply');
 });
 
 test('every directly localized Chinese UI literal has an English translation', () => {
   const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
-  const sources = [...appSource.matchAll(/\bt\('([^'\n]*[\u3400-\u9fff][^'\n]*)'/g)]
+  const onboardingSource = readFileSync(
+    new URL('../src/onboarding.tsx', import.meta.url),
+    'utf8',
+  );
+  const agentStudioSource = readFileSync(
+    new URL('../src/agent-graph-editor.tsx', import.meta.url),
+    'utf8',
+  );
+  const sources = [...`${appSource}\n${onboardingSource}\n${agentStudioSource}`.matchAll(
+    /\bt\('([^'\n]*[\u3400-\u9fff][^'\n]*)'/g,
+  )]
     .map((match) => match[1]);
   const missing = [...new Set(sources)].filter((source) => translateUi('en', source) === source);
   assert.deepEqual(missing, []);

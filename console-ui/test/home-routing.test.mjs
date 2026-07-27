@@ -46,9 +46,9 @@ test('top-level navigation preserves Workspace, merges tasks and teams, and keep
   const overview = appSource.match(/\{tab === 'overview'[\s\S]*?\{tab === 'history'/);
   assert.ok(overview);
   assert.match(overview[0], /work-overview-team/);
-  assert.match(overview[0], /<OrganizationChart/);
+  assert.match(overview[0], /<AgentGraphEditor/);
   assert.match(overview[0], /<TaskAdjustmentChat/);
-  assert.match(overview[0], /<RuntimeAssignments/);
+  assert.match(overview[0], /onAgentGraphSave/);
   assert.match(appSource, /tab === 'history'/);
   assert.match(appSource, /<SystemAutomationHistory runs=\{data\.recent_runs\} \/>/);
 });
@@ -75,14 +75,17 @@ test('approval-waiting work resolves its exact task-bound decision inline', () =
   assert.match(appSource, /function ApprovalsView/);
 });
 
-test('new confirmations default to uninterrupted Auto with manual approval opt-in', () => {
+test('new confirmations preserve bounded Auto and keep manual approval opt-in', () => {
   const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
   const apiSource = readFileSync(new URL('../src/api.ts', import.meta.url), 'utf8');
   const typeSource = readFileSync(new URL('../src/types.ts', import.meta.url), 'utf8');
   assert.match(typeSource, /'automatic' \| 'automatic_safe' \| 'manual_all'/);
   assert.match(apiSource, /approvalMode: ApprovalMode = 'automatic'/);
   assert.match(appSource, /useState<ApprovalMode>\('automatic'\)/);
-  assert.match(appSource, /event\.target\.checked \? 'manual_all' : 'automatic'/);
+  assert.match(appSource, /setApprovalMode\(record\?\.approval_mode \?\? 'automatic'\)/);
+  assert.match(appSource, /event\.target\.checked \? 'manual_all' : automaticMode/);
+  assert.match(appSource, /record\.approval_mode === 'automatic_safe'/);
+  assert.match(appSource, /本地写入仍会暂停等待你的决定/);
   assert.match(appSource, /任务确认后，执行工具会自动单次放行并保留完整审计记录/);
 });
 

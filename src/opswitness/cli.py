@@ -1294,8 +1294,10 @@ def mcp(
 ) -> None:
     """Serve the OpsWitness MCP console over stdio (for AionUi or any MCP client)."""
     try:
+        from opswitness.desktop_runtime import apply_desktop_mcp_credentials
         from opswitness.mcp_server import build_server
 
+        apply_desktop_mcp_credentials()
         build_server(profile).run()
     except ImportError:
         typer.echo(

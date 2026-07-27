@@ -2,7 +2,11 @@ This distribution is Copyright 2026 Tianyu Zhou.
 
 Licensed under the Apache License, Version 2.0. See LICENSE.
 
-The software interoperates with Paperclip but contains no copied Paperclip source code and
-is not affiliated with or endorsed by the Paperclip project. Release artifacts include an
-SBOM for the packaged distribution. Runtime dependencies remain governed by their own
-licenses and package metadata.
+The Python wheel and source distribution interoperate with Paperclip but do not include
+Paperclip. The macOS application distribution includes pinned third-party runtime binaries
+and packages needed for the local desktop experience. Those components remain governed by
+their own licenses and notices, which are reproduced in THIRD_PARTY_NOTICES.txt and recorded
+in the release SBOM and vendor lock.
+
+OpsWitness is not affiliated with or endorsed by the Paperclip, AionUi, Node.js, PostgreSQL,
+or OpenAI projects.
