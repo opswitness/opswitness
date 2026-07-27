@@ -31,16 +31,22 @@ def _local_path(reference: str) -> Path | None:
 
 def test_public_site_identity_and_boundaries() -> None:
     body = (SITE / "index.html").read_text(encoding="utf-8")
-    visible_text = " ".join(body.split())
-    assert "OpsWitness" in visible_text
-    assert "Repeatable AI work for a one-person company" in visible_text
-    assert "not a hosted SaaS" in visible_text
-    assert "Community Alpha" in visible_text
+    assert "OpsWitness" in body
+    assert "Repeatable AI work for a one-person company" in body
+    assert "not a hosted SaaS" in body
+    assert "Community Alpha" in body
+    assert "fictional customer inquiry" in body
+    assert "My First Evidence Work" not in body
     assert "security/advisories/new" in body
-    assert "Release candidate validation in progress" in body
-    assert "/releases/download/" not in body
-    assert "/releases/tag/" not in body
-    assert (ROOT / "docs" / "QUICKSTART.md").is_file()
+    assert "v0.1.0-alpha.1" in body
+    assert body.count("Download Alpha") == 2
+    assert ("releases/download/v0.1.0-alpha.1/OpsWitness-0.1.0-alpha.1-macos-arm64.dmg") in body
+    assert "Ad-hoc signed" in body
+    assert "not notarized" in body
+    assert "sign in to Codex" in body
+    assert "Anthropic API Key" not in body
+    assert "Install Python" not in body
+    assert "uv tool install" not in body
     assert "PUBLIC_SITE_APPROVED" in (SITE / "README.md").read_text(encoding="utf-8")
     assert (SITE / "CNAME").read_text(encoding="utf-8").strip() == "opswitness.com"
 
