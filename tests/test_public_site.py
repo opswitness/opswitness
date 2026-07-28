@@ -37,6 +37,19 @@ def test_public_site_identity_and_boundaries() -> None:
     assert "Community Alpha" in body
     assert "fictional customer inquiry" in body
     assert "My First Evidence Work" not in body
+    assert 'id="capabilities"' in body
+    assert "The operating layer around your AI." in body
+    assert body.count("Current Alpha") == 6
+    assert "Plan before execution" in body
+    assert "One Work, one visible team" in body
+    assert "Human control while it runs" in body
+    assert "Readable results with evidence" in body
+    assert "Reuse without silent drift" in body
+    assert "Local-first by default" in body
+    assert "Agent Contract v2" in body
+    assert "Knowledge Hub" in body
+    assert "not yet in the current public DMG" in body
+    assert "fresh canary" in body
     assert "security/advisories/new" in body
     assert "v0.1.0-alpha.1" in body
     assert body.count("Download Alpha") == 2
