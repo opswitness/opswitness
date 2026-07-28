@@ -38,18 +38,23 @@ def test_public_site_identity_and_boundaries() -> None:
     assert "fictional customer inquiry" in body
     assert "My First Evidence Work" not in body
     assert 'id="capabilities"' in body
-    assert "The operating layer around your AI." in body
-    assert body.count("Current Alpha") == 6
-    assert "Plan before execution" in body
-    assert "One Work, one visible team" in body
-    assert "Human control while it runs" in body
-    assert "Readable results with evidence" in body
-    assert "Reuse without silent drift" in body
-    assert "Local-first by default" in body
-    assert "Agent Contract v2" in body
-    assert "Knowledge Hub" in body
-    assert "not yet in the current public DMG" in body
-    assert "fresh canary" in body
+    assert "Run a small AI team without losing control." in body
+    assert body.count("Available now") == 6
+    assert "Turn a goal into a clear plan" in body
+    assert "Give every AI assistant a job" in body
+    assert "Stay in charge while it works" in body
+    assert "Find the answer and what produced it" in body
+    assert "Use good work again" in body
+    assert "Keep your business workspace on your Mac" in body
+    assert "Edit your AI team" in body
+    assert "Build a business knowledge library" in body
+    assert "not in today's download" in body
+    assert "tested from a clean installation" in body
+    assert "The operating layer around your AI." not in body
+    assert "Agent Contract v2" not in body
+    assert "source-complete" not in body
+    assert "control planes" not in body
+    assert "ledger, and CAS" not in body
     assert "security/advisories/new" in body
     assert "v0.1.0-alpha.1" in body
     assert body.count("Download Alpha") == 2
