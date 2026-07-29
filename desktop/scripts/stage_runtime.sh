@@ -46,6 +46,11 @@ ditto "$OPSWITNESS_CODEX_BIN" "$RUNTIME_DIR/codex/codex"
   --vendor-lock "$DESKTOP_DIR/vendor-lock.json" \
   --receipt "$RUNTIME_DIR/staging-exclusions.json"
 
+"$PYTHON_BIN" "$SCRIPT_DIR/stage_codex_only_paperclip.py" \
+  --runtime "$RUNTIME_DIR" \
+  --vendor-lock "$DESKTOP_DIR/vendor-lock.json" \
+  --receipt "$RUNTIME_DIR/paperclip-staging-exclusions.json"
+
 chmod 0755 \
   "$RUNTIME_DIR/backend/opswitness-backend" \
   "$RUNTIME_DIR/node/node" \

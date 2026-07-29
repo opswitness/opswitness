@@ -416,6 +416,7 @@ impl Supervisor {
             )
             .env("PAPERCLIP_TELEMETRY_DISABLED", "1")
             .env("PAPERCLIP_NO_BROWSER", "1")
+            .env("HEARTBEAT_SCHEDULER_ENABLED", "false")
             .env("PAPERCLIP_HOME", &data_dir);
         self.spawn_owned("paperclip", node, port, command, log)
     }
@@ -644,11 +645,15 @@ impl Supervisor {
                 &client,
                 &format!("{base}/api/companies/{}/agents", credentials.company_id),
             )?;
-            if array_contains_id(&companies, &credentials.company_id)
-                && array_contains_id(&agents, &credentials.agent_id)
-                && service_token_is_valid(&client, &base, &credentials)
-            {
-                return Ok(credentials);
+            if array_contains_id(&companies, &credentials.company_id) {
+                if let Some(agent) =
+                    select_unique_id(&agents, &credentials.agent_id, "service agent")?
+                {
+                    require_managed_paperclip_service_agent(agent)?;
+                    if service_token_is_valid(&client, &base, &credentials) {
+                        return Ok(credentials);
+                    }
+                }
             }
             bail!(
                 "the existing Paperclip service credential could not be reconciled; \
@@ -695,6 +700,7 @@ impl Supervisor {
                     }
                 }),
             )?);
+        require_managed_paperclip_service_agent(&agent)?;
         let agent_id = required_string(&agent, "id", "Paperclip service agent")?;
         let existing_keys = api_get(&client, &format!("{base}/api/agents/{agent_id}/keys"))?;
         if select_unique_named(&existing_keys, PAPERCLIP_TOKEN_NAME, "service token")?.is_some() {
@@ -1316,6 +1322,24 @@ fn select_unique_named<'a>(
     }
 }
 
+fn select_unique_id<'a>(
+    value: &'a Value,
+    expected_id: &str,
+    kind: &str,
+) -> Result<Option<&'a Value>> {
+    let items =
+        values_array(value).ok_or_else(|| anyhow!("Paperclip {kind} list was not an array"))?;
+    let matches: Vec<_> = items
+        .iter()
+        .filter(|item| item.get("id").and_then(Value::as_str) == Some(expected_id))
+        .collect();
+    match matches.as_slice() {
+        [] => Ok(None),
+        [found] => Ok(Some(*found)),
+        _ => bail!("multiple Paperclip {kind} records use id {expected_id:?}"),
+    }
+}
+
 fn select_managed_agent(value: &Value) -> Result<Option<&Value>> {
     let items =
         values_array(value).ok_or_else(|| anyhow!("Paperclip agent list was not an array"))?;
@@ -1332,6 +1356,29 @@ fn select_managed_agent(value: &Value) -> Result<Option<&Value>> {
         [found] => Ok(Some(*found)),
         _ => bail!("multiple Paperclip agents carry the OpsWitness managed marker"),
     }
+}
+
+fn require_managed_paperclip_service_agent(value: &Value) -> Result<()> {
+    if value
+        .pointer("/metadata/opswitnessManaged")
+        .and_then(Value::as_bool)
+        != Some(true)
+        || value
+            .pointer("/metadata/opswitnessPurpose")
+            .and_then(Value::as_str)
+            != Some("desktop-service")
+        || value.get("adapterType").and_then(Value::as_str) != Some("process")
+        || value
+            .get("adapterConfig")
+            .and_then(Value::as_object)
+            .is_none_or(|config| !config.is_empty())
+    {
+        bail!(
+            "the App-managed Paperclip service agent is not the exact inert process adapter; \
+             refusing to use a provider runtime adapter"
+        );
+    }
+    Ok(())
 }
 
 fn required_string(value: &Value, key: &str, label: &str) -> Result<String> {
@@ -1612,8 +1659,9 @@ mod tests {
         canonical_executable_identity, executable_identities_match, expected_process_executable,
         load_optional_credentials, named_aion_mcp_servers, reconcile_previous_instance,
         require_aion_agent_enabled_state, require_managed_mcp_identity,
+        require_managed_paperclip_service_agent,
         require_mcp_toggle_state, require_opswitness_mcp_tools, select_managed_agent,
-        select_unique_named, stop_owned_process, InstanceRecord, OwnedProcess,
+        select_unique_id, select_unique_named, stop_owned_process, InstanceRecord, OwnedProcess,
         PaperclipCredentials, ProcessRecord, OPSWITNESS_MCP_NAME, OPSWITNESS_MCP_TOOLS,
     };
     use serde_json::json;
@@ -1653,13 +1701,43 @@ mod tests {
             {
                 "id": "agent-1",
                 "name": "Renamed Service",
-                "metadata": {"opswitnessManaged": true}
+                "adapterType": "process",
+                "adapterConfig": {},
+                "metadata": {
+                    "opswitnessManaged": true,
+                    "opswitnessPurpose": "desktop-service"
+                }
             }
         ]);
+        let managed = select_managed_agent(&agents).unwrap().unwrap();
+        assert_eq!(managed["id"], "agent-1");
         assert_eq!(
-            select_managed_agent(&agents).unwrap().unwrap()["id"],
+            select_unique_id(&agents, "agent-1", "service agent")
+                .unwrap()
+                .unwrap()["id"],
             "agent-1"
         );
+        require_managed_paperclip_service_agent(managed).unwrap();
+        let claude_adapter = json!({
+            "id": "agent-1",
+            "adapterType": "claude_local",
+            "adapterConfig": {},
+            "metadata": {
+                "opswitnessManaged": true,
+                "opswitnessPurpose": "desktop-service"
+            }
+        });
+        assert!(require_managed_paperclip_service_agent(&claude_adapter).is_err());
+        let acpx_adapter = json!({
+            "id": "agent-1",
+            "adapterType": "acpx_local",
+            "adapterConfig": {"agent": "claude"},
+            "metadata": {
+                "opswitnessManaged": true,
+                "opswitnessPurpose": "desktop-service"
+            }
+        });
+        assert!(require_managed_paperclip_service_agent(&acpx_adapter).is_err());
         let keys = json!([{"id": "key-1", "name": "opswitness-desktop"}]);
         assert_eq!(
             select_unique_named(&keys, "opswitness-desktop", "service token")

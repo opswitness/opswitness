@@ -12,6 +12,68 @@ import stat
 from pathlib import Path
 
 
+PAPERCLIP_STAGING_EXCLUSIONS = [
+    "paperclip/node_modules/@agentclientprotocol/claude-agent-acp",
+    "paperclip/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64",
+]
+PAPERCLIP_ENTRYPOINT_SHA256 = (
+    "070df2f71906daac276da1c90404fd11463c4992f78f5d43fee69d6036d61252"
+)
+PAPERCLIP_STAGING_TREES = {
+    PAPERCLIP_STAGING_EXCLUSIONS[0]: {
+        "sha256": "804a73195127da096a64a3a607890e92d3180d7e79f92c8b8438cc2786909c44",
+        "file_count": 757,
+        "symlink_count": 0,
+        "total_bytes": 8_526_606,
+    },
+    PAPERCLIP_STAGING_EXCLUSIONS[1]: {
+        "sha256": "65910ea7797a768278c01ded9c16369ba0f7f06050cf96bfa0d3f09d2a018b88",
+        "file_count": 4,
+        "symlink_count": 0,
+        "total_bytes": 219_856_632,
+    },
+}
+PAPERCLIP_STAGING_MARKERS = {
+    PAPERCLIP_STAGING_EXCLUSIONS[0]: [
+        {
+            "path": f"{PAPERCLIP_STAGING_EXCLUSIONS[0]}/package.json",
+            "sha256": "f3f714ec0caf56a571662fdc0d9b653c98be34ad4ea0ab09f0f67c22bd421d6c",
+            "size": 2_194,
+        },
+        {
+            "path": f"{PAPERCLIP_STAGING_EXCLUSIONS[0]}/dist/index.js",
+            "sha256": "5d946f0d74a75ce418796b5c232a844b96a6c6c902c45dfc73027634d48ee273",
+            "size": 2_972,
+        },
+        {
+            "path": (
+                f"{PAPERCLIP_STAGING_EXCLUSIONS[0]}/node_modules/"
+                "@anthropic-ai/claude-agent-sdk/package.json"
+            ),
+            "sha256": "1c5d0b2ca32a2fe1349543120d21fe64eb82e340305381be37dfc88d5964bb62",
+            "size": 2_380,
+        },
+    ],
+    PAPERCLIP_STAGING_EXCLUSIONS[1]: [
+        {
+            "path": f"{PAPERCLIP_STAGING_EXCLUSIONS[1]}/package.json",
+            "sha256": "f9e2f053b8ed6e31d7cfe3076fc7add848d0a6bb0e24bb3ace0935a0143a87de",
+            "size": 274,
+        },
+        {
+            "path": f"{PAPERCLIP_STAGING_EXCLUSIONS[1]}/LICENSE.md",
+            "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a",
+            "size": 147,
+        },
+        {
+            "path": f"{PAPERCLIP_STAGING_EXCLUSIONS[1]}/claude",
+            "sha256": "252307a7413de6e151ef91168903a4f5bf1159296b0e71d1cb7ae2e74ff18e9a",
+            "size": 219_856_048,
+        },
+    ],
+}
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -190,26 +252,18 @@ def _valid_sha256(value: object) -> bool:
     )
 
 
-def validate_staging_filter(
-    vendor: dict,
+def _validate_aioncore_staging_filter(
+    component: dict,
     runtime: Path,
     files: list[dict[str, object]],
     discovered: set[str],
-) -> dict[str, object] | None:
-    """Bind the vendor-locked Codex-only transform to the final inventory."""
+) -> dict[str, object]:
+    """Bind the AionCore Codex-only transform to the final inventory."""
 
-    configured = [
-        component
-        for component in vendor["components"]
-        if isinstance(component.get("staging_filter"), dict)
-    ]
-    if not configured:
-        return None
-    if len(configured) != 1 or configured[0].get("id") != "aioncore":
-        raise SystemExit("only the AionCore Codex-only staging filter is supported")
-    policy = configured[0]["staging_filter"]
+    policy = component["staging_filter"]
     if (
-        configured[0].get("version") != "0.1.45"
+        component.get("id") != "aioncore"
+        or component.get("version") != "0.1.45"
         or policy.get("profile") != "codex-only"
         or policy.get("applies_to_version") != "0.1.45"
     ):
@@ -371,6 +425,170 @@ def validate_staging_filter(
         "source_exclusions": exclusions,
         "compatibility_shim_root": shim_root,
         "upstream_source_tree_removed": True,
+    }
+
+
+def _validate_paperclip_staging_filter(
+    component: dict,
+    runtime: Path,
+    files: list[dict[str, object]],
+    discovered: set[str],
+) -> dict[str, object]:
+    """Bind Paperclip's exact proprietary-runtime removal receipt."""
+
+    policy = component["staging_filter"]
+    expected_exclusions = PAPERCLIP_STAGING_EXCLUSIONS
+    if (
+        component.get("id") != "paperclip"
+        or component.get("version") != "2026.707.0"
+        or policy.get("profile") != "codex-only"
+        or policy.get("applies_to_version") != "2026.707.0"
+        or policy.get("source_exclusions") != expected_exclusions
+        or policy.get("compatibility_shim_root") is not None
+        or policy.get("receipt") != "paperclip-staging-exclusions.json"
+    ):
+        raise SystemExit("unsupported Paperclip staging filter profile")
+
+    by_path = {
+        entry["path"]: entry
+        for entry in files
+        if isinstance(entry.get("path"), str)
+    }
+    receipt_path = policy["receipt"]
+    receipt_entry = by_path.get(receipt_path)
+    if receipt_entry is None or receipt_entry.get("kind") != "file":
+        raise SystemExit("missing Paperclip Codex-only staging exclusion receipt")
+    try:
+        receipt = json.loads((runtime / receipt_path).read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(
+            "invalid Paperclip Codex-only staging exclusion receipt"
+        ) from exc
+    if (
+        receipt.get("schema_version") != 1
+        or receipt.get("profile") != "codex-only"
+        or receipt.get("component") != "paperclip"
+        or receipt.get("reason")
+        != "upstream_anthropic_redistribution_not_approved"
+        or receipt.get("locked_paperclip_entrypoint")
+        != {
+            "path": "paperclip/dist/index.js",
+            "sha256": PAPERCLIP_ENTRYPOINT_SHA256,
+        }
+        or by_path.get("paperclip/dist/index.js", {}).get("sha256")
+        != PAPERCLIP_ENTRYPOINT_SHA256
+        or receipt.get("policy")
+        != {
+            "profile": "codex-only",
+            "applies_to_version": "2026.707.0",
+            "source_exclusions": expected_exclusions,
+            "receipt": receipt_path,
+        }
+    ):
+        raise SystemExit("invalid Paperclip Codex-only staging exclusion receipt")
+
+    source_entries = receipt.get("source_exclusions")
+    if (
+        not isinstance(source_entries, list)
+        or len(source_entries) != len(expected_exclusions)
+        or [entry.get("path") for entry in source_entries if isinstance(entry, dict)]
+        != expected_exclusions
+    ):
+        raise SystemExit(
+            "Paperclip source exclusion receipt does not match vendor policy"
+        )
+    for entry in source_entries:
+        path = entry.get("path") if isinstance(entry, dict) else None
+        if (
+            not isinstance(entry, dict)
+            or path not in PAPERCLIP_STAGING_TREES
+            or entry.get("original_source_tree_removed") is not True
+            or entry.get("original_tree") != PAPERCLIP_STAGING_TREES[path]
+            or entry.get("original_markers") != PAPERCLIP_STAGING_MARKERS[path]
+        ):
+            raise SystemExit("invalid locked Paperclip source exclusion receipt")
+
+    if receipt.get("removed_companion_links") != [
+        {
+            "path": "paperclip/node_modules/.bin/claude-agent-acp",
+            "target": "../@agentclientprotocol/claude-agent-acp/dist/index.js",
+        }
+    ]:
+        raise SystemExit("invalid Paperclip Claude ACP companion-link receipt")
+    if receipt.get("proprietary_path_scan") != {"forbidden_matches": []}:
+        raise SystemExit("invalid Paperclip proprietary-path scan")
+    for path in discovered:
+        if (
+            "claude-agent-sdk" in path
+            or "@agentclientprotocol/claude-agent-acp" in path
+            or path == "paperclip/node_modules/.bin/claude-agent-acp"
+        ):
+            raise SystemExit(f"unfiltered Paperclip Anthropic payload remains: {path}")
+
+    after = receipt.get(
+        "paperclip_after_filter_before_architecture_normalization"
+    )
+    if (
+        not isinstance(after, dict)
+        or not _valid_sha256(after.get("sha256"))
+        or not isinstance(after.get("file_count"), int)
+        or after["file_count"] <= 0
+        or not isinstance(after.get("symlink_count"), int)
+        or after["symlink_count"] < 0
+        or not isinstance(after.get("total_bytes"), int)
+        or after["total_bytes"] <= 0
+    ):
+        raise SystemExit("invalid post-filter Paperclip digest in staging receipt")
+    return {
+        "profile": "codex-only",
+        "receipt": {
+            "path": receipt_path,
+            "sha256": receipt_entry["sha256"],
+        },
+        "source_exclusions": expected_exclusions,
+        "removed_companion_links": [
+            "paperclip/node_modules/.bin/claude-agent-acp"
+        ],
+        "upstream_source_tree_removed": True,
+    }
+
+
+def validate_staging_filter(
+    vendor: dict,
+    runtime: Path,
+    files: list[dict[str, object]],
+    discovered: set[str],
+) -> dict[str, object] | None:
+    """Bind every vendor-locked Codex-only transform to the final inventory."""
+
+    configured = [
+        component
+        for component in vendor["components"]
+        if isinstance(component.get("staging_filter"), dict)
+    ]
+    if not configured:
+        return None
+    by_identifier = {component.get("id"): component for component in configured}
+    if len(by_identifier) != len(configured) or not set(by_identifier).issubset(
+        {"aioncore", "paperclip"}
+    ):
+        raise SystemExit("unsupported or duplicate Codex-only staging filter")
+
+    summaries: dict[str, dict[str, object]] = {}
+    if "aioncore" in by_identifier:
+        summaries["aioncore"] = _validate_aioncore_staging_filter(
+            by_identifier["aioncore"], runtime, files, discovered
+        )
+    if "paperclip" in by_identifier:
+        summaries["paperclip"] = _validate_paperclip_staging_filter(
+            by_identifier["paperclip"], runtime, files, discovered
+        )
+    if len(summaries) == 1:
+        return next(iter(summaries.values()))
+    return {
+        "profile": "codex-only",
+        "components": summaries,
+        "upstream_proprietary_payloads_removed": True,
     }
 
 

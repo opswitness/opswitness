@@ -49,9 +49,23 @@ no-build-machine-path validator even though its archive digest matches the lock.
 creation remains blocked until the vendor supplies a clean payload or an explicit product decision
 changes both the artifact and its reviewed evidence; the validator must not waive this finding.
 
-Do not trim Paperclip's production dependency tree or AionCore managed resources for the first
-Alpha. A later release may reduce the bundle only after a clean-machine Work and license/SBOM
-comparison prove that the smaller package is equivalent.
+Alpha.2 has exactly two redistribution-driven, vendor-locked staging exceptions:
+
+- AionCore's exact Claude Agent ACP `0.58.1` managed-resource subtree is removed and replaced by
+  the recorded first-party fail-closed compatibility shim required for AionCore startup.
+- Paperclip's exact Claude Agent ACP `0.52.0` subtree, its nested proprietary Claude Agent SDK
+  `0.3.191`, the separate native arm64 SDK package, and the companion `.bin` symlink are removed.
+  Paperclip's MIT adapter packages and MIT `@anthropic-ai/sdk` remain because the server imports or
+  declares them in its production tree. The App disables Paperclip's heartbeat scheduler, creates
+  and reconciles only its exact inert `process` service Agent, and does not expose Claude. Payload
+  removal is still not described as a global sandbox against arbitrary external clients, imported
+  Paperclip data, or a host-installed provider runtime.
+
+Both transforms run only after the complete pinned source payload is copied, reject any version,
+tree, marker, link, or native-binary digest drift, and write separate receipts that the final
+resource manifest integrity-locks. No other production dependency or managed resource may be
+trimmed without its own vendor-lock policy, clean-machine Work, and license/SBOM comparison.
+Redistribution review therefore remains blocked.
 
 ## arm64 architecture normalization
 
@@ -67,11 +81,11 @@ pre/post architectures, pre/post SHA-256, and explicit exclusion action for ever
 resource manifest integrity-locks that provenance file, records its digest explicitly, and rejects
 a provenance exclusion that still exists in the payload.
 
-This is architecture normalization only, not a dependency or resource-tree reduction. It preserves
-package/dependency directories, all arm64/universal resources, Paperclip's production tree, and
-AionCore managed resources. Only the explicit non-arm vendor-prebuild Mach-O leaf exception above
-is removed, with provenance; it does not use `codesign --deep` as a substitute for the explicit
-signing inventory.
+Architecture normalization is separate from the two earlier Codex-only staging filters. After
+those filters have produced their integrity-bound receipts, normalization preserves all remaining
+package/dependency directories, arm64/universal resources, and AionCore managed resources. Only
+the explicit non-arm vendor-prebuild Mach-O leaf exception above is removed at this stage, with
+provenance; it does not use `codesign --deep` as a substitute for the explicit signing inventory.
 
 ## Update discipline
 

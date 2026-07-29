@@ -179,12 +179,12 @@ blueprints, and approved Workspace memory.
   never mutable config that can erase a known job from coverage.
 - **Elapsed gates are evidence.** `opswitness soak` freezes cadence at start/reset; changing grace or
   running once cannot manufacture a continuous canary or seven-day soak.
-- **Your credentials stay yours.** OpsWitness never handles Claude subscription tokens; it talks to
-  the `claude` CLI *you* installed and authenticated. The connection view offers both the operator's
-  local Claude subscription and Anthropic Console API billing. It also offers an explicit Anthropic
-  API Key path: the key is validated with the read-only Models API, sent to macOS Keychain through
-  stdin, and exposed to Claude only through its official `apiKeyHelper`; it never enters YAML,
-  argv, logs, page responses, or the ledger. The optional OpenAI API Key connection remains a
+- **Your credentials stay yours.** The alpha.2 App exposes Codex connection only. Its Claude and
+  Anthropic connection entry is hidden, it bundles no Claude Agent SDK/runtime, and it does not
+  advertise Claude execution. Developer-source compatibility paths can still talk to a separately
+  installed and authenticated `claude` CLI or validate an explicitly supplied Anthropic API Key,
+  but those paths are not an alpha.2 App capability and are not a redistribution shortcut. The
+  optional OpenAI API Key connection remains a
   one-time local stdin handoff to the installed Codex CLI. DeepSeek and xAI API Keys are validated
   against each provider's fixed Models endpoint and stored in separate macOS Keychain items; they
   are never copied into AionUi. Grok account login, when the official Grok Build CLI is installed,

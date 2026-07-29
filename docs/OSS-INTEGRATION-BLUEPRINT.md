@@ -75,9 +75,12 @@ tokens + detached Ed25519 signature + a standalone verify script} + optional sig
 - elkjs — EPL-2.0 OR GPL-3.0-or-later
 - fswatch — GPL-3.0
 - immudb server (current) — BUSL-1.1
-- claude-agent-sdk-typescript — Anthropic Commercial Terms, not OSS. The Codex-only
-  Alpha removes the upstream payload during deterministic staging and retains only an
-  exact first-party fail-closed compatibility shim required by AionCore startup.
+- claude-agent-sdk-typescript — Anthropic Commercial Terms, not OSS. The Codex-only Alpha removes
+  both AionCore's exact upstream payload and Paperclip's exact nested/native SDK payloads during
+  deterministic staging. It retains only the exact first-party fail-closed compatibility shim
+  required by AionCore startup. Paperclip receives no shim, but its retained MIT adapters and a
+  host-installed provider still require a separate dispatch boundary; payload removal is not
+  described as global runtime enforcement.
 - PyPI package named `minisign` — MPL-2.0, unaudited, distinct from `py-minisign` (MIT)
 
 ## What remains custom — deliberately

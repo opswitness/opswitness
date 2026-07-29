@@ -74,7 +74,6 @@
               "profile",
               "applies_to_version",
               "source_exclusions",
-              "compatibility_shim_root",
               "receipt"
             ],
             "properties": {

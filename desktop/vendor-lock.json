@@ -65,11 +65,20 @@
       "version": "2026.707.0",
       "source_url": "https://github.com/paperclipai/paperclip",
       "upstream_sha256": null,
-      "license": "MIT",
-      "notice": "Includes the complete production dependency tree and embedded PostgreSQL darwin-arm64.",
+      "license": "MIT (Paperclip); Apache-2.0 (Claude ACP wrapper excluded from staged App); LicenseRef-Anthropic-Commercial-Terms (nested Claude Agent SDK payloads excluded from staged App)",
+      "notice": "The inspected current dependency tree contains Claude Agent ACP 0.52.0, nested proprietary Anthropic Claude Agent SDK 0.3.191, and its 219856048-byte native arm64 executable. Codex-only staging must remove the two exact vendor-locked source subtrees and companion bin symlink, then bind the exclusion receipt into the final runtime inventory. The MIT Paperclip adapters and MIT @anthropic-ai/sdk remain because Paperclip imports or declares them in its production tree; the alpha.2 App hides Claude, disables Paperclip's heartbeat scheduler, and accepts only its exact inert process-type managed service agent. Removing bundled proprietary bytes is not evidence that arbitrary external clients, imported Paperclip data, or host-installed provider runtimes are globally sandboxed. Redistribution remains blocked pending review of Paperclip, PostgreSQL, every remaining dependency, and all required notices.",
       "redistribution_review": "blocked",
       "entrypoints": ["paperclip/dist/index.js"],
       "required_prefixes": ["paperclip/node_modules/"],
+      "staging_filter": {
+        "profile": "codex-only",
+        "applies_to_version": "2026.707.0",
+        "source_exclusions": [
+          "paperclip/node_modules/@agentclientprotocol/claude-agent-acp",
+          "paperclip/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64"
+        ],
+        "receipt": "paperclip-staging-exclusions.json"
+      },
       "provision": null
     },
     {
