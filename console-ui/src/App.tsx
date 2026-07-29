@@ -52,7 +52,7 @@ import {
   Zap,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   archiveTaskTemplate,
   archiveTeamBlueprint,
@@ -83,6 +83,7 @@ import {
   getProviderConnection,
   getRuntimeInputArtifact,
   getRuntimeInputArtifacts,
+  getWorkspaceConversationEntries,
   getWorkspaceMemories,
   getTelegramStatus,
   forkPlan,
@@ -95,6 +96,7 @@ import {
   requestMailAuthorization,
   requestMailSummary,
   requestPlan,
+  retryFailedPlanning,
   revokeWorkspaceMemory,
   revokePairedDevice,
   revisePlan,
@@ -218,6 +220,10 @@ function isLocalProvider(provider: AIProviderName): provider is LocalProviderNam
 function defaultWorkTab(record: PlanRecord | null | undefined): WorkTab {
   if (!record) return 'overview';
   return ['planning', 'ready'].includes(record.status) ? 'overview' : 'history';
+}
+
+function planParentId(record: PlanRecord | null | undefined): string | null {
+  return record?.parent_plan_id || record?.planning_retry_source_plan_id || null;
 }
 
 function defaultHistoryTab(status?: PlanRecord['status'] | TaskRunHistory['status']): HistoryTab {
@@ -482,9 +488,10 @@ function App() {
   );
 
   const activeParentPlan = useMemo(() => {
-    if (!activePlan?.parent_plan_id || !bootstrap) return null;
-    return bootstrap.plans.find((row) => row.plan_id === activePlan.parent_plan_id)?.plan || null;
-  }, [activePlan?.parent_plan_id, bootstrap]);
+    const parentId = planParentId(activePlan);
+    if (!parentId || !bootstrap) return null;
+    return bootstrap.plans.find((row) => row.plan_id === parentId)?.plan || null;
+  }, [activePlan?.parent_plan_id, activePlan?.planning_retry_source_plan_id, bootstrap]);
 
   useEffect(() => {
     if (!activePlan) return;
@@ -699,6 +706,9 @@ function App() {
                   onPlan={async (body) => {
                     mergePlan(await requestPlan(body));
                   }}
+                  onRetryFailedPlanning={async (record, objective) => {
+                    mergePlan(await retryFailedPlanning(record.plan_id, objective));
+                  }}
                   onRevise={async (record, instruction) => {
                     mergePlan(await revisePlan(record.plan_id, instruction));
                   }}
@@ -714,6 +724,7 @@ function App() {
                   }}
                   taskTemplates={bootstrap.task_templates}
                   workspaceConversations={bootstrap.workspace_conversations || []}
+                  onLoadWorkspaceConversationEntries={getWorkspaceConversationEntries}
                   onOpenWorkspaceConversation={async (conversation) => {
                     reviewWork(await getPlan(conversation.current_plan_id));
                   }}
@@ -1007,7 +1018,7 @@ function App() {
           if (!record.plan_sha256) throw new Error(t('方案哈希缺失'));
           await eraseRun(record.plan_id, record.plan_sha256);
           if (workFocusPlanId === record.plan_id) {
-            setWorkFocusPlanId(record.parent_plan_id || '');
+            setWorkFocusPlanId(planParentId(record) || '');
           }
           setEraseRunTarget(null);
           await refresh(true);
@@ -1670,11 +1681,81 @@ function TeamBlueprintDialog({
   );
 }
 
+function WorkspaceConversationHistoryEntry({ entry }: { entry: PlanRecord }) {
+  const { language, t } = useLanguage();
+  const assistantSummary = entry.error
+    ? t(entry.error)
+    : entry.plan?.summary
+      || (entry.status === 'planning'
+        ? t('这个版本当时仍在规划。')
+        : t('此版本没有可显示的方案摘要。'));
+
+  return (
+    <li className="workspace-history-entry">
+      <div className="workspace-history-version">
+        <span>{t('第 {version} 版', { version: entry.revision_number })}</span>
+        <span>{formatTime(entry.updated_at, language)}</span>
+        <span>{t('只读历史')}</span>
+      </div>
+      <div className="chat-message user-message">
+        <div className="chat-user-bubble">
+          {entry.objective}
+          {entry.revision_instruction && (
+            <small>{t('修改要求：')}{entry.revision_instruction}</small>
+          )}
+          {(entry.attachments?.length ?? 0) > 0 && (
+            <div className="chat-bound-materials">
+              <span>
+                <FileUp size={14} />
+                {t('已绑定 {count} 份规划材料', { count: entry.attachments?.length ?? 0 })}
+              </span>
+              <ul>
+                {(entry.attachments ?? []).map((attachment) => (
+                  <li key={attachment.attachment_id}>
+                    <span>{attachment.name}</span>
+                    <small>
+                      {formatPlanningAttachmentSize(attachment.size_bytes)}
+                      {' · SHA-256 '}
+                      {attachment.sha256.slice(0, 10)}…
+                    </small>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+        <div className="chat-avatar user-avatar">{t('你')}</div>
+      </div>
+      <div className="chat-message assistant-message workspace-history-assistant">
+        <div className="chat-avatar assistant-avatar"><Bot size={17} /></div>
+        <div className="chat-assistant-content">
+          <div className="chat-assistant-heading">
+            <strong>OpsWitness</strong>
+            <StatusBadge status={entry.status} />
+          </div>
+          <div className="workspace-history-summary">
+            {entry.plan?.title && <strong>{entry.plan.title}</strong>}
+            <p>{assistantSummary}</p>
+            <small>
+              {t('方案版本')} {entry.revision_number}
+              {' · '}
+              {entry.plan_sha256
+                ? `SHA-256 ${shortId(entry.plan_sha256)}`
+                : t('未生成方案哈希')}
+            </small>
+          </div>
+        </div>
+      </div>
+    </li>
+  );
+}
+
 function WorkspaceView({
   record,
   initialObjective,
   previousPlan,
   onPlan,
+  onRetryFailedPlanning,
   onRevise,
   onOrganizationSave,
   runtimeCapabilities,
@@ -1682,6 +1763,7 @@ function WorkspaceView({
   onProfileSave,
   taskTemplates,
   workspaceConversations,
+  onLoadWorkspaceConversationEntries,
   onOpenWorkspaceConversation,
   onSaveConversationTemplate,
   onSaveTaskTemplate,
@@ -1720,6 +1802,7 @@ function WorkspaceView({
     blueprint_id?: string | null;
     attachments?: PlanningAttachmentUpload[];
   }) => Promise<void>;
+  onRetryFailedPlanning: (record: PlanRecord, objective: string) => Promise<void>;
   onRevise: (record: PlanRecord, instruction: string) => Promise<void>;
   onOrganizationSave: (
     record: PlanRecord,
@@ -1737,6 +1820,7 @@ function WorkspaceView({
   ) => Promise<void>;
   taskTemplates: TaskTemplate[];
   workspaceConversations: WorkspaceConversation[];
+  onLoadWorkspaceConversationEntries: (planId: string) => Promise<PlanRecord[]>;
   onOpenWorkspaceConversation: (conversation: WorkspaceConversation) => Promise<void>;
   onSaveConversationTemplate: (
     conversation: WorkspaceConversation,
@@ -1814,20 +1898,107 @@ function WorkspaceView({
   const [repeatableBusy, setRepeatableBusy] = useState('');
   const [planningAttachments, setPlanningAttachments] = useState<File[]>([]);
   const [error, setError] = useState('');
+  const [conversationEntries, setConversationEntries] = useState<PlanRecord[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const threadRef = useRef<HTMLDivElement | null>(null);
+  const followingTailRef = useRef(true);
+  const previousActivePlanIdRef = useRef<string | null>(null);
+  const failedPlanning = Boolean(
+    record
+    && record.status === 'failed'
+    && !record.plan
+    && !record.plan_sha256
+    && !record.execution,
+  );
+  const historicalEntries = useMemo(
+    () => conversationEntries
+      .filter((entry) => entry.plan_id !== record?.plan_id)
+      .sort((left, right) => (
+        left.revision_number - right.revision_number
+        || left.created_at.localeCompare(right.created_at)
+        || left.plan_id.localeCompare(right.plan_id)
+      )),
+    [conversationEntries, record?.plan_id],
+  );
 
   useEffect(() => {
     setConfirmed(false);
     setApprovalMode(record?.approval_mode ?? 'automatic');
     setRevisionOpen(false);
     setError('');
-  }, [record?.plan_id, record?.status]);
+    if (failedPlanning && record) {
+      setDraft(record.objective);
+      setPlanningAttachments([]);
+    }
+  }, [failedPlanning, record?.plan_id, record?.status]);
 
-  const locked = Boolean(
-    record && !['failed', 'cancelled', 'completed_unverified'].includes(record.status),
-  );
+  useEffect(() => {
+    if (!record) {
+      setConversationEntries([]);
+      setHistoryLoading(false);
+      setHistoryError('');
+      return undefined;
+    }
+    let cancelled = false;
+    setHistoryLoading(true);
+    setHistoryError('');
+    void onLoadWorkspaceConversationEntries(record.plan_id)
+      .then((entries) => {
+        if (!cancelled) setConversationEntries(entries);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setHistoryError(
+            err instanceof Error ? err.message : t('较早的对话历史暂时无法读取'),
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [onLoadWorkspaceConversationEntries, record?.plan_id, t]);
+
+  useEffect(() => {
+    const previousPlanId = previousActivePlanIdRef.current;
+    if (!record) {
+      previousActivePlanIdRef.current = null;
+      followingTailRef.current = true;
+      return;
+    }
+    if (
+      previousPlanId === null
+      || (
+        record.plan_id !== previousPlanId
+        && record.parent_plan_id !== previousPlanId
+        && record.planning_retry_source_plan_id !== previousPlanId
+      )
+    ) {
+      followingTailRef.current = true;
+    }
+    previousActivePlanIdRef.current = record.plan_id;
+  }, [
+    record?.parent_plan_id,
+    record?.plan_id,
+    record?.planning_retry_source_plan_id,
+  ]);
+
+  useEffect(() => {
+    const thread = threadRef.current;
+    if (!thread || !followingTailRef.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (followingTailRef.current) thread.scrollTop = thread.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [historicalEntries.length, record?.plan_id]);
+
+  const locked = Boolean(record && !failedPlanning);
 
   const planObjective = async (objective: string) => {
-    if (objective.length < 3 || submitting || locked) return;
+    if (record || objective.length < 3 || submitting || locked) return;
     setSubmitting(true);
     setError('');
     try {
@@ -1852,7 +2023,22 @@ function WorkspaceView({
   };
 
   const submit = async () => {
-    await planObjective(draft.trim());
+    const objective = draft.trim();
+    if (failedPlanning && record) {
+      if (objective.length < 3 || submitting) return;
+      setSubmitting(true);
+      setError('');
+      try {
+        await onRetryFailedPlanning(record, objective);
+        setDraft('');
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t('当前对话重试失败'));
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+    await planObjective(objective);
   };
 
   const startFeaturedTemplate = async (template: FeaturedWorkTemplate) => {
@@ -1894,7 +2080,7 @@ function WorkspaceView({
   };
 
   const selectPlanningAttachments = (incoming: FileList | null) => {
-    if (!incoming || incoming.length === 0 || submitting || locked) return;
+    if (record || !incoming || incoming.length === 0 || submitting || locked) return;
     setError('');
     const next = [...planningAttachments];
     const known = new Set(next.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
@@ -1973,7 +2159,18 @@ function WorkspaceView({
 
   return (
     <section className="workspace-shell" aria-label={t('AI 工作台')}>
-      <div className="chat-thread" aria-live="polite">
+      <div
+        className="chat-thread"
+        ref={threadRef}
+        aria-label={t('当前对话与历史')}
+        onScroll={(event) => {
+          const thread = event.currentTarget;
+          const distanceFromBottom = (
+            thread.scrollHeight - thread.scrollTop - thread.clientHeight
+          );
+          followingTailRef.current = distanceFromBottom < 96;
+        }}
+      >
         {!record ? (
           <div className="chat-empty">
             <div className="chat-empty-mark"><Sparkles size={24} /></div>
@@ -2146,6 +2343,40 @@ function WorkspaceView({
           </div>
         ) : (
           <>
+            {(historicalEntries.length > 0 || historyLoading || historyError) && (
+              <section className="workspace-conversation-history" aria-label={t('完整对话历史')}>
+                <div className="workspace-history-heading">
+                  <span><HistoryIcon size={15} />{t('完整对话历史')}</span>
+                  <small>
+                    {t('{count} 个较早版本 · 向上滚动查看', {
+                      count: historicalEntries.length,
+                    })}
+                  </small>
+                </div>
+                {historyLoading && historicalEntries.length === 0 && (
+                  <div className="workspace-history-loading" role="status">
+                    <LoaderCircle size={15} className="spin" />
+                    {t('正在读取较早的版本…')}
+                  </div>
+                )}
+                {historyError && (
+                  <div className="workspace-history-error" role="status">
+                    <AlertTriangle size={15} />
+                    <span>{historyError}</span>
+                  </div>
+                )}
+                {historicalEntries.length > 0 && (
+                  <ol className="workspace-history-list">
+                    {historicalEntries.map((entry) => (
+                      <WorkspaceConversationHistoryEntry
+                        key={entry.plan_id}
+                        entry={entry}
+                      />
+                    ))}
+                  </ol>
+                )}
+              </section>
+            )}
             <div className="chat-message user-message">
               <div className="chat-user-bubble">
                 {record.objective}
@@ -2179,7 +2410,7 @@ function WorkspaceView({
             </div>
             <div className="chat-message assistant-message">
               <div className="chat-avatar assistant-avatar"><Bot size={17} /></div>
-              <div className="chat-assistant-content">
+              <div className="chat-assistant-content" aria-live="polite">
                 <div className="chat-assistant-heading">
                   <strong>OpsWitness</strong>
                   <StatusBadge status={record.status} />
@@ -2274,6 +2505,22 @@ function WorkspaceView({
             void submit();
           }}
         >
+          {failedPlanning && record && (
+            <div className="failed-planning-retry-note" role="status">
+              <RotateCcw size={15} />
+              <span>
+                <strong>{t('直接修改上一次任务')}</strong>
+                <small>
+                  {t('重试会保留失败记录，并在当前对话创建新的不可变版本。')}
+                  {(record.attachments?.length ?? 0) > 0
+                    ? ` ${t('会沿用上一次绑定的 {count} 份材料。', {
+                      count: record.attachments?.length ?? 0,
+                    })}`
+                    : ''}
+                </small>
+              </span>
+            </div>
+          )}
           {planningAttachments.length > 0 && (
             <div className="planning-attachment-list" aria-label={t('已选择的规划材料')}>
               {planningAttachments.map((file, index) => (
@@ -2303,7 +2550,11 @@ function WorkspaceView({
             rows={3}
             maxLength={2000}
             disabled={locked || submitting}
-            placeholder={locked ? t('当前任务等待完成或确认') : t('描述你想完成的任务…')}
+            placeholder={failedPlanning
+              ? t('修改任务描述，然后在当前对话重试…')
+              : locked
+                ? t('当前对话正在进行；如需其他任务，请新建对话')
+                : t('描述你想完成的任务…')}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -2315,7 +2566,7 @@ function WorkspaceView({
           <div className="chat-composer-actions">
             <div className="chat-composer-context">
               <label
-                className={`planning-attachment-button${submitting || locked ? ' disabled' : ''}`}
+                className={`planning-attachment-button${submitting || Boolean(record) ? ' disabled' : ''}`}
                 title={t('附加规划材料')}
               >
                 <FileUp size={15} />
@@ -2324,20 +2575,23 @@ function WorkspaceView({
                   type="file"
                   multiple
                   accept={PLANNING_ATTACHMENT_ACCEPT}
-                  disabled={submitting || locked}
+                  disabled={submitting || Boolean(record)}
                   onChange={(event) => {
                     selectPlanningAttachments(event.currentTarget.files);
                     event.currentTarget.value = '';
                   }}
                 />
               </label>
-              <span className="chat-planning-boundary"><ShieldCheck size={14} />{t('先规划，确认后运行')}</span>
+              <span className="chat-planning-boundary">
+                <ShieldCheck size={14} />
+                {t(failedPlanning ? '当前对话内创建新版本，确认后运行' : '先规划，确认后运行')}
+              </span>
             </div>
             <button
               className="chat-send-button"
               type="submit"
-              title={t('发送任务描述')}
-              aria-label={t('发送任务描述')}
+              title={t(failedPlanning ? '修改后在当前对话重试' : '发送任务描述')}
+              aria-label={t(failedPlanning ? '修改后在当前对话重试' : '发送任务描述')}
               disabled={draft.trim().length < 3 || submitting || locked}
             >
               {submitting ? <LoaderCircle size={18} className="spin" /> : <Send size={18} />}
@@ -3606,7 +3860,7 @@ function TeamView({
   const { t } = useLanguage();
   const teams = useMemo(
     () => plans.filter(
-      (record) => record.plan && !plans.some((child) => child.parent_plan_id === record.plan_id),
+      (record) => record.plan && !plans.some((child) => planParentId(child) === record.plan_id),
     ),
     [plans],
   );
@@ -3801,7 +4055,7 @@ function PlanTable({
 }
 
 function planDeleteBlockReason(record: PlanRecord, plans: PlanRecord[]): string {
-  if (plans.some((row) => row.parent_plan_id === record.plan_id)) {
+  if (plans.some((row) => planParentId(row) === record.plan_id)) {
     return '请先删除这个任务的较新修改版';
   }
   if (!['ready', 'failed', 'cancelled', 'completed_unverified'].includes(record.status)) {

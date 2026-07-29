@@ -34,6 +34,7 @@ import {
 } from './api';
 import {
   formatExecutionElapsed,
+  onboardingApprovalOrder,
   onboardingRunProgress,
 } from './execution-progress.js';
 import { OnboardingHelp } from './docs-center';
@@ -73,6 +74,7 @@ const ACTIVE_PLAN_STATES = new Set([
 const CUSTOMER_REPLY_PLAN_TITLE = 'Reply to Your First Customer';
 const LEGACY_FIRST_WORK_TITLE = 'My First Evidence Work';
 const PROVIDER_WAIT_LIMIT_MS = 7 * 60 * 1000;
+const RUN_POLL_INTERVAL_MS = 1500;
 
 type OnboardingProvider = 'openai' | 'anthropic';
 
@@ -119,7 +121,7 @@ export function OnboardingFlow({
   const [artifactsLoaded, setArtifactsLoaded] = useState(false);
   const [providerJob, setProviderJob] = useState<ProviderConnectionJob | null>(null);
   const [providerSelection, setProviderSelection] = useState<OnboardingProvider | null>(
-    status.provider_choice,
+    status.provider_choice ?? 'openai',
   );
   const [providerWaitExpired, setProviderWaitExpired] = useState(false);
   const [anthropicApiKey, setAnthropicApiKey] = useState('');
@@ -132,6 +134,9 @@ export function OnboardingFlow({
   const [pollFailures, setPollFailures] = useState(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const approvalRef = useRef<HTMLDivElement | null>(null);
+  const pendingApproval = bootstrap.approvals.find(
+    (approval) => approval.plan_id === plan?.plan_id && approval.status === 'pending',
+  );
 
   useEffect(() => {
     if (initialPlan) setPlan(initialPlan);
@@ -191,7 +196,10 @@ export function OnboardingFlow({
         setPollFailures(0);
         if (
           ['awaiting_approval', 'awaiting_input'].includes(next.status)
-          && next.status !== plan.status
+          && (
+            next.status !== plan.status
+            || (next.status === 'awaiting_approval' && !pendingApproval)
+          )
         ) {
           await onRefresh();
         }
@@ -204,13 +212,13 @@ export function OnboardingFlow({
         if (!cancelled) setPollFailures((count) => count + 1);
       }
     };
-    const timer = window.setInterval(() => void poll(), 2500);
+    const timer = window.setInterval(() => void poll(), RUN_POLL_INTERVAL_MS);
     void poll();
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [onRefresh, plan?.plan_id, plan?.status]);
+  }, [onRefresh, pendingApproval?.approval_id, plan?.plan_id, plan?.status]);
 
   useEffect(() => {
     if (!plan || !ACTIVE_PLAN_STATES.has(plan.status)) return;
@@ -352,10 +360,6 @@ export function OnboardingFlow({
     await onRefresh();
   });
 
-  const pendingApproval = bootstrap.approvals.find(
-    (approval) => approval.plan_id === plan?.plan_id && approval.status === 'pending',
-  );
-
   useEffect(() => {
     if (!pendingApproval) return;
     approvalRef.current?.focus();
@@ -404,6 +408,7 @@ export function OnboardingFlow({
   const legacyFirstWork = plan?.plan?.title === LEGACY_FIRST_WORK_TITLE;
   const terminalFailure = plan?.status === 'failed' || plan?.status === 'cancelled';
   const evidenceReady = plan?.status === 'completed_unverified' || status.state === 'evidence_review';
+  const pendingApprovalOrder = onboardingApprovalOrder(pendingApproval);
   const runProgress = useMemo(() => onboardingRunProgress({
     workStatus: plan?.status || 'confirmed',
     plannedStages: plan?.plan?.stages.map((stage) => ({
@@ -435,6 +440,9 @@ export function OnboardingFlow({
     return order === 1 ? t('创建演示文件') : order === 2 ? t('核验演示文件') : t('计划步骤 {step}', { step: order });
   };
   const runStageStatus = (stage: (typeof runProgress.stages)[number]) => {
+    if (plan?.status === 'awaiting_approval' && pendingApprovalOrder === stage.order) {
+      return t('等待你的确认');
+    }
     if (stage.status === 'completed') return t('助手已完成 · 待最终核验');
     if (stage.status === 'running') {
       return t(plan?.status === 'awaiting_approval' ? '等待你的确认' : '正在进行');
@@ -489,6 +497,40 @@ export function OnboardingFlow({
         : '正在独立核对文件摘要和登记状态。'),
     };
   })();
+  const runProgressHeadline = pendingApproval && pendingApprovalOrder
+    ? t('本地保存审批 {current} / {total}', {
+      current: pendingApprovalOrder,
+      total: 2,
+    })
+    : plan?.status === 'awaiting_approval'
+      ? t('正在准备本地保存审批')
+      : runProgress.observed && activeRunStage
+        ? t('第 {current} / {total} 步 · {label}', {
+          current: activeRunStage.order,
+          total: runProgress.total,
+          label: runStageLabel(activeRunStage.order),
+        })
+        : t('正在启动本地助手');
+  const runProgressSummary = pendingApproval && pendingApprovalOrder
+    ? t('请审核第 {current} 次本地保存；共预计 {total} 次。', {
+      current: pendingApprovalOrder,
+      total: 2,
+    })
+    : runProgress.observed
+      ? t('助手已上报完成 {completed} / {total}', {
+        completed: runProgress.completed,
+        total: runProgress.total,
+      })
+      : t('Work 已启动；步骤状态会自动更新，不需要手动刷新。');
+  const runStageTone = (stage: (typeof runProgress.stages)[number]) => (
+    plan?.status === 'awaiting_approval' && pendingApprovalOrder === stage.order
+      ? 'attention'
+      : stage.observed ? stage.tone : 'neutral'
+  );
+  const runStageObserved = (stage: (typeof runProgress.stages)[number]) => (
+    stage.observed
+    || (plan?.status === 'awaiting_approval' && pendingApprovalOrder === stage.order)
+  );
   const recoverableMigrationFailure = Boolean(
     status.failure?.retryable !== false
     && status.migration_required
@@ -1131,19 +1173,8 @@ export function OnboardingFlow({
               <div className="onboarding-run-overview">
                 <div className="onboarding-run-head">
                   <div role="status" aria-live="polite" aria-atomic="true">
-                    <strong>
-                      {runProgress.observed && activeRunStage
-                        ? t('第 {current} / {total} 步 · {label}', {
-                          current: activeRunStage.order,
-                          total: runProgress.total,
-                          label: runStageLabel(activeRunStage.order),
-                        })
-                        : t('正在连接本地运行状态')}
-                    </strong>
-                    <span>{t('助手已上报完成 {completed} / {total}', {
-                      completed: runProgress.completed,
-                      total: runProgress.total,
-                    })}</span>
+                    <strong>{runProgressHeadline}</strong>
+                    <span>{runProgressSummary}</span>
                   </div>
                   <div className="onboarding-run-timing">
                     <Clock3 size={15} />
@@ -1163,21 +1194,26 @@ export function OnboardingFlow({
                 <div
                   className="onboarding-run-track"
                   role="img"
-                  aria-label={t('助手已上报完成 {completed} / {total}', {
-                    completed: runProgress.completed,
-                    total: runProgress.total,
-                  })}
+                  aria-label={runProgressSummary}
                 >
                   {runProgress.stages.map((stage) => (
-                    <span className={stage.observed ? stage.tone : 'neutral'} key={stage.order} />
+                    <span
+                      className={runStageTone(stage)}
+                      key={stage.order}
+                    />
                   ))}
                 </div>
 
                 <div className="onboarding-run-stages">
                   {runProgress.stages.map((stage) => (
-                    <div className={`${stage.tone} ${stage.observed ? 'observed' : ''}`} key={stage.order}>
+                    <div
+                      className={`${runStageTone(stage)} ${runStageObserved(stage) ? 'observed' : ''}`}
+                      key={stage.order}
+                    >
                       <span className="onboarding-run-stage-icon">
-                        {stage.status === 'completed' ? <CheckCircle2 size={18} />
+                        {plan?.status === 'awaiting_approval' && pendingApprovalOrder === stage.order
+                          ? <ShieldCheck size={18} />
+                          : stage.status === 'completed' ? <CheckCircle2 size={18} />
                           : stage.status === 'running' ? <LoaderCircle className="spin" size={18} />
                             : stage.status === 'failed' || stage.status === 'unknown' ? <AlertTriangle size={18} />
                               : stage.status === 'blocked' ? <Clock3 size={18} />

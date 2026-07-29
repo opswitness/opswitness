@@ -43,6 +43,7 @@ from opswitness.console.schemas import (
     ExecutionProgress,
     ExecutionControlRequest,
     ExecutionState,
+    FailedPlanningRetryRequest,
     ForkPlanRequest,
     MailAuthorizationRequest,
     MailOAuthClientRequest,
@@ -2547,6 +2548,101 @@ def test_terminal_run_erasure_removes_private_content_and_is_idempotent(console_
     )
 
 
+def test_planning_retry_erasure_binds_request_lineage_and_rejects_tampered_shell(
+    console_env,
+    monkeypatch,
+):
+    _, service, aion, _ = console_env
+    requested = service.request_plan(PlanRequest(objective="整理失败规划的客户反馈"))
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            aion,
+            "generate_plan",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                AionUiError("private provider failure")
+            ),
+        )
+        failed = service.draft_plan(requested.plan_id)
+
+    retry = service.retry_failed_planning(
+        failed.plan_id,
+        FailedPlanningRetryRequest(
+            objective="重新整理客户反馈并标明优先级",
+            confirmed=True,
+        ),
+    )
+    ready = service.draft_plan(retry.plan_id)
+    assert ready.status == "ready"
+    assert ready.request_sha256 is not None
+    assert ready.planning_retry_source_plan_id == failed.plan_id
+    assert (
+        ready.planning_retry_source_request_sha256
+        == failed.request_sha256
+    )
+    service.confirm_plan(
+        ready.plan_id,
+        ConfirmRequest(plan_sha256=str(ready.plan_sha256), confirmed=True),
+    )
+    service.dispatch_plan(ready.plan_id)
+    finished = service.refresh_execution(ready.plan_id)
+    assert finished.status == "completed_unverified"
+    assert finished.plan_sha256 is not None
+
+    service.erase_run_data(
+        finished.plan_id,
+        EraseRunRequest(
+            expected_plan_sha256=finished.plan_sha256,
+            confirmed=True,
+        ),
+    )
+    events = service.ledger.read_all()
+    intent = next(
+        event
+        for event in events
+        if event["kind"] == "task_run_erasure_started"
+        and event["run_id"] == finished.plan_id
+    )
+    receipt = next(
+        event
+        for event in events
+        if event["kind"] == "task_run_erased"
+        and event["run_id"] == finished.plan_id
+    )
+    lineage = {
+        "request_sha256": finished.request_sha256,
+        "planning_retry_source_plan_id": (
+            finished.planning_retry_source_plan_id
+        ),
+        "planning_retry_source_request_sha256": (
+            finished.planning_retry_source_request_sha256
+        ),
+    }
+    assert {key: intent["payload"][key] for key in lineage} == lineage
+    assert {key: receipt["payload"][key] for key in lineage} == lineage
+    assert receipt["payload"]["intent_event_id"] == intent["event_id"]
+
+    tampered_hash = (
+        "0" * 64
+        if finished.planning_retry_source_request_sha256 != "0" * 64
+        else "f" * 64
+    )
+
+    def tamper_retry_lineage(current: PlanRecord) -> PlanRecord:
+        current.planning_retry_source_request_sha256 = tampered_hash
+        return current
+
+    service.store.mutate(finished.plan_id, tamper_retry_lineage)
+    assert service.acquire_instance_lease() is True
+    try:
+        with pytest.raises(
+            ConsoleUnavailable,
+            match="erasure intent does not match its Work",
+        ):
+            service.recover_startup()
+    finally:
+        service.release_instance_lease()
+
+
 def test_run_erasure_retains_cas_blob_referenced_by_another_run(console_env):
     settings, service, _, _ = console_env
     ended = service.refresh_execution(_running_aion_plan(service).plan_id)
@@ -4018,6 +4114,268 @@ def test_planning_failure_never_persists_or_returns_third_party_error_text(
     encoded = json.dumps(service.ledger.read_all(), ensure_ascii=False)
     assert hostile not in encoded
     assert f'"reason": "{PLAN_GENERATION_FAILED}"' in encoded
+
+
+def test_failed_planning_retry_is_immutable_idempotent_and_stays_in_one_conversation(
+    monkeypatch,
+    console_env,
+):
+    _, service, aion, paperclip = console_env
+    original_objective = "整理客户投诉并提出三个改进建议"
+    edited_objective = "整理客户投诉，按严重程度分组，并提出三个改进建议"
+    requested = service.request_plan(PlanRequest(objective=original_objective))
+
+    monkeypatch.setattr(
+        aion,
+        "generate_plan",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AionUiError("private provider detail")),
+    )
+    failed = service.draft_plan(requested.plan_id)
+    failed_path = service.store.plans_dir / f"{failed.plan_id}.json"
+    failed_bytes = failed_path.read_bytes()
+    dispatched_before = aion.dispatched
+    issues_before = paperclip.created
+
+    retried = service.retry_failed_planning(
+        failed.plan_id,
+        FailedPlanningRetryRequest(objective=f"  {edited_objective}  ", confirmed=True),
+    )
+
+    assert retried.status == "planning"
+    assert retried.objective == edited_objective
+    assert retried.revision_number == failed.revision_number + 1
+    assert retried.planning_retry_source_plan_id == failed.plan_id
+    assert retried.planning_retry_source_request_sha256 == failed.request_sha256
+    assert retried.request_sha256
+    assert retried.parent_plan_id is None
+    assert retried.parent_plan_sha256 is None
+    assert retried.plan is None
+    assert retried.execution is None
+    assert failed_path.read_bytes() == failed_bytes
+    assert service.store.get(failed.plan_id) == failed
+    assert aion.dispatched == dispatched_before
+    assert paperclip.created == issues_before
+
+    duplicate = service.retry_failed_planning(
+        failed.plan_id,
+        FailedPlanningRetryRequest(objective=edited_objective, confirmed=True),
+    )
+    assert duplicate.plan_id == retried.plan_id
+    with pytest.raises(ConsoleConflict, match="newer edited retry"):
+        service.retry_failed_planning(
+            failed.plan_id,
+            FailedPlanningRetryRequest(
+                objective="再次改变任务目标但不得另开同级分支",
+                confirmed=True,
+            ),
+        )
+    with pytest.raises(ConsoleConflict, match="newer plan revisions"):
+        service.delete_plan(failed.plan_id, DeletePlanRequest(confirmed=True))
+
+    conversation = next(
+        row
+        for row in service.list_workspace_conversations()
+        if row.conversation_id == failed.plan_id
+    )
+    assert conversation.current_plan_id == retried.plan_id
+    assert conversation.version_count == 2
+    assert conversation.objective == edited_objective
+    events = service.ledger.read_all()
+    retry_events = [event for event in events if event["kind"] == "task_planning_retry_requested"]
+    assert len(retry_events) == 1
+    assert retry_events[0]["run_id"] == retried.plan_id
+    assert retry_events[0]["payload"]["source_plan_id"] == failed.plan_id
+    assert (
+        retry_events[0]["payload"]["source_request_sha256"]
+        == failed.request_sha256
+    )
+    encoded = json.dumps(events, ensure_ascii=False)
+    assert original_objective not in encoded
+    assert edited_objective not in encoded
+    assert "private provider detail" not in encoded
+
+
+def test_workspace_conversation_entries_are_complete_ordered_and_filter_private_shells(
+    monkeypatch,
+    console_env,
+):
+    _, service, aion, _ = console_env
+    requested = service.request_plan(PlanRequest(objective="第一版失败规划"))
+
+    monkeypatch.setattr(
+        aion,
+        "generate_plan",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AionUiError("private failure")),
+    )
+    first = service.draft_plan(requested.plan_id)
+    second = service.retry_failed_planning(
+        first.plan_id,
+        FailedPlanningRetryRequest(objective="第二版失败规划", confirmed=True),
+    )
+
+    second = service.draft_plan(second.plan_id)
+    third = service.retry_failed_planning(
+        second.plan_id,
+        FailedPlanningRetryRequest(objective="第三版失败规划", confirmed=True),
+    )
+    third = service.draft_plan(third.plan_id)
+
+    entries = service.list_workspace_conversation_entries(third.plan_id)
+    assert [row.plan_id for row in entries] == [
+        first.plan_id,
+        second.plan_id,
+        third.plan_id,
+    ]
+    assert [row.revision_number for row in entries] == [1, 2, 3]
+
+    service.delete_plan(third.plan_id, DeletePlanRequest(confirmed=True))
+
+    def erase_middle(current):
+        current.erased_at = "2026-07-29T07:00:00+00:00"
+        return current
+
+    service.store.mutate(second.plan_id, erase_middle)
+    filtered = service.list_workspace_conversation_entries(first.plan_id)
+    assert [row.plan_id for row in filtered] == [first.plan_id]
+
+
+def test_failed_planning_retry_rejects_changed_source_request_fields(
+    console_env,
+):
+    _, service, _, _ = console_env
+    requested = service.request_plan(
+        PlanRequest(
+            objective="只读整理客户反馈",
+            constraints="不得修改原始资料",
+        )
+    )
+
+    def tamper_failed_source(current):
+        current.status = "failed"
+        current.error = PLAN_GENERATION_FAILED_DETAIL
+        current.constraints = "允许修改原始资料"
+        return current
+
+    service.store.mutate(requested.plan_id, tamper_failed_source)
+    with pytest.raises(ConsoleConflict, match=r"request.*changed"):
+        service.retry_failed_planning(
+            requested.plan_id,
+            FailedPlanningRetryRequest(
+                objective="编辑后再次整理客户反馈",
+                confirmed=True,
+            ),
+        )
+    assert not any(
+        event["kind"] == "task_planning_retry_requested"
+        for event in service.ledger.read_all()
+    )
+
+
+def test_deleted_failed_planning_retry_does_not_reuse_its_revision_number(
+    monkeypatch,
+    console_env,
+):
+    _, service, aion, _ = console_env
+    requested = service.request_plan(PlanRequest(objective="第一版规划失败"))
+    monkeypatch.setattr(
+        aion,
+        "generate_plan",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AionUiError("private failure")),
+    )
+    failed = service.draft_plan(requested.plan_id)
+    second = service.retry_failed_planning(
+        failed.plan_id,
+        FailedPlanningRetryRequest(objective="第二版规划失败", confirmed=True),
+    )
+    second = service.draft_plan(second.plan_id)
+    service.delete_plan(second.plan_id, DeletePlanRequest(confirmed=True))
+
+    third = service.retry_failed_planning(
+        failed.plan_id,
+        FailedPlanningRetryRequest(objective="第三版重新规划", confirmed=True),
+    )
+    assert third.revision_number == 3
+    assert third.plan_id != second.plan_id
+    assert third.planning_retry_source_plan_id == failed.plan_id
+
+
+def test_plan_record_rejects_self_or_conflicting_planning_retry_provenance():
+    plan_id = new_ulid()
+    source_plan_id = new_ulid()
+    base = {
+        "plan_id": plan_id,
+        "status": "failed",
+        "objective": "重新规划失败任务",
+        "request_sha256": "1" * 64,
+        "planning_retry_source_plan_id": source_plan_id,
+        "planning_retry_source_request_sha256": "2" * 64,
+        "revision_number": 2,
+    }
+
+    with pytest.raises(ValueError, match="cannot reference itself"):
+        PlanRecord(**{**base, "planning_retry_source_plan_id": plan_id})
+
+    with pytest.raises(ValueError, match="cannot also carry"):
+        PlanRecord(
+            **base,
+            recovery_source_plan_id=new_ulid(),
+            recovery_source_plan_sha256="3" * 64,
+            recovery_proposal_sha256="4" * 64,
+        )
+
+
+def test_failed_planning_retry_and_conversation_entries_http_routes(
+    monkeypatch,
+    console_env,
+):
+    settings, service, aion, _ = console_env
+    requested = service.request_plan(PlanRequest(objective="HTTP 失败规划"))
+    monkeypatch.setattr(
+        aion,
+        "generate_plan",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AionUiError("private failure")),
+    )
+    failed = service.draft_plan(requested.plan_id)
+    monkeypatch.setattr(service, "acquire_instance_lease", lambda: True)
+    monkeypatch.setattr(service, "recover_startup", lambda: {})
+    monkeypatch.setattr(service, "release_instance_lease", lambda: None)
+    app = create_app(settings, service=service)
+    csrf = app.state.csrf_token
+    retry_path = f"/api/v1/plans/{failed.plan_id}/planning-retries"
+
+    with TestClient(app, base_url="http://127.0.0.1:8765") as client:
+        denied = client.post(
+            retry_path,
+            json={"objective": "修改后的 HTTP 规划", "confirmed": True},
+        )
+        unconfirmed = client.post(
+            retry_path,
+            json={"objective": "修改后的 HTTP 规划", "confirmed": False},
+            headers={"X-QD-CSRF": csrf},
+        )
+        accepted = client.post(
+            retry_path,
+            json={"objective": "  修改后的 HTTP 规划  ", "confirmed": True},
+            headers={"X-QD-CSRF": csrf},
+        )
+        entries = client.get(
+            f"/api/v1/workspace-conversations/{accepted.json()['plan_id']}/entries"
+        )
+        missing = client.get(
+            f"/api/v1/workspace-conversations/{new_ulid()}/entries"
+        )
+
+    assert denied.status_code == 403
+    assert unconfirmed.status_code == 422
+    assert accepted.status_code == 202
+    assert accepted.json()["objective"] == "修改后的 HTTP 规划"
+    assert accepted.json()["planning_retry_source_plan_id"] == failed.plan_id
+    assert entries.status_code == 200
+    assert [row["plan_id"] for row in entries.json()] == [
+        failed.plan_id,
+        accepted.json()["plan_id"],
+    ]
+    assert missing.status_code == 404
 
 
 def test_dispatch_failure_never_persists_or_returns_third_party_error_text(
@@ -8714,10 +9072,11 @@ def test_startup_recovers_scrub_before_erasure_receipt_and_purges_experience(
         "schema_version": 1,
         "source": "local_console",
         "status": finished.status,
-        "plan_sha256": finished.plan_sha256,
-        "parent_plan_id": finished.parent_plan_id,
-        "revision_number": finished.revision_number,
-    }
+            "plan_sha256": finished.plan_sha256,
+            "parent_plan_id": finished.parent_plan_id,
+            "revision_number": finished.revision_number,
+            "request_sha256": finished.request_sha256,
+        }
     assert candidate.content not in json.dumps(intents[0], ensure_ascii=False)
 
     restarted = ConsoleService(

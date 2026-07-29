@@ -296,7 +296,7 @@ def test_wheel_must_match_distribution_and_tauri_version(tmp_path):
 
     assert (
         backend_inputs._expected_wheel_version(ROOT / "desktop" / "src-tauri" / "tauri.conf.json")
-        == "0.1.0a1"
+        == "0.1.0a2"
     )
 
 

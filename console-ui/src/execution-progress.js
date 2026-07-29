@@ -117,6 +117,14 @@ export function formatExecutionElapsed(seconds, language = 'en') {
     : `${hours}h ${remainder}m`;
 }
 
+export function onboardingApprovalOrder(approval) {
+  if (!approval) return null;
+  const boundedCopy = `${approval.title || ''}\n${approval.summary || ''}`.toLocaleLowerCase();
+  if (boundedCopy.includes('verification.json')) return 2;
+  if (boundedCopy.includes('first-work.json')) return 1;
+  return null;
+}
+
 export function onboardingRunProgress({
   workStatus,
   plannedStages = [],

@@ -728,6 +728,9 @@ export type PlanRecord = {
   } | null;
   plan?: TaskPlan | null;
   plan_sha256?: string | null;
+  request_sha256?: string | null;
+  planning_retry_source_plan_id?: string | null;
+  planning_retry_source_request_sha256?: string | null;
   parent_plan_id?: string | null;
   parent_plan_sha256?: string | null;
   forked_from_plan_id?: string | null;

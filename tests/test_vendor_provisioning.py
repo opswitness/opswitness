@@ -85,7 +85,7 @@ def _complete_lock(tmp_path: Path) -> tuple[Path, dict[str, Path]]:
     components = [
         {
             "id": "opswitness-backend",
-            "version": "0.1.0-alpha.1",
+            "version": "0.1.0-alpha.2",
             "source_url": "https://github.com/opswitness/opswitness",
             "upstream_sha256": None,
             "license": "Apache-2.0",

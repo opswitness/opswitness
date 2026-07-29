@@ -13,8 +13,8 @@ from pathlib import Path
 
 PRODUCT_NAME = "OpsWitness"
 DISTRIBUTION_NAME = "opswitness"
-PYTHON_VERSION = "0.1.0a1"
-PUBLIC_VERSION = "0.1.0-alpha.1"
+PYTHON_VERSION = "0.1.0a2"
+PUBLIC_VERSION = "0.1.0-alpha.2"
 RELEASE_TAG = f"v{PUBLIC_VERSION}"
 REPOSITORY_URL = "https://github.com/opswitness/opswitness"
 
@@ -66,6 +66,24 @@ def identity_errors(root: Path, *, tag: str) -> list[str]:
         (root / "console-ui" / "public" / "manifest.webmanifest").read_text()
     )
     editable_lock = _editable_lock_package(root / "uv.lock")
+    with (root / "desktop" / "src-tauri" / "Cargo.toml").open("rb") as source:
+        desktop_package = tomllib.load(source)["package"]
+    with (root / "desktop" / "src-tauri" / "Cargo.lock").open("rb") as source:
+        desktop_lock_packages = tomllib.load(source).get("package", [])
+    desktop_lock_package = [
+        package
+        for package in desktop_lock_packages
+        if package.get("name") == "opswitness-desktop"
+    ]
+    tauri = json.loads(
+        (root / "desktop" / "src-tauri" / "tauri.conf.json").read_text()
+    )
+    vendor_lock = json.loads((root / "desktop" / "vendor-lock.json").read_text())
+    first_party_components = [
+        component
+        for component in vendor_lock.get("components", [])
+        if component.get("id") == "opswitness-backend"
+    ]
 
     def expect(label: str, actual: object, expected: object) -> None:
         if actual != expected:
@@ -111,6 +129,30 @@ def identity_errors(root: Path, *, tag: str) -> list[str]:
     expect(
         "frontend display version",
         _frontend_constant(root / "console-ui" / "src" / "version.ts"),
+        PUBLIC_VERSION,
+    )
+    expect("desktop package version", desktop_package.get("version"), PUBLIC_VERSION)
+    expect(
+        "desktop lock package count",
+        len(desktop_lock_package),
+        1,
+    )
+    expect(
+        "desktop lock package version",
+        desktop_lock_package[0].get("version") if len(desktop_lock_package) == 1 else None,
+        PUBLIC_VERSION,
+    )
+    expect("Tauri version", tauri.get("version"), PUBLIC_VERSION)
+    expect(
+        "first-party vendor component count",
+        len(first_party_components),
+        1,
+    )
+    expect(
+        "first-party vendor version",
+        first_party_components[0].get("version")
+        if len(first_party_components) == 1
+        else None,
         PUBLIC_VERSION,
     )
     expect("PWA name", manifest.get("name"), PRODUCT_NAME)

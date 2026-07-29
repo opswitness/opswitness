@@ -182,6 +182,198 @@ def validate_architecture_provenance(
             raise SystemExit("invalid macOS architecture normalization provenance")
 
 
+def _valid_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def validate_staging_filter(
+    vendor: dict,
+    runtime: Path,
+    files: list[dict[str, object]],
+    discovered: set[str],
+) -> dict[str, object] | None:
+    """Bind the vendor-locked Codex-only transform to the final inventory."""
+
+    configured = [
+        component
+        for component in vendor["components"]
+        if isinstance(component.get("staging_filter"), dict)
+    ]
+    if not configured:
+        return None
+    if len(configured) != 1 or configured[0].get("id") != "aioncore":
+        raise SystemExit("only the AionCore Codex-only staging filter is supported")
+    policy = configured[0]["staging_filter"]
+    if (
+        configured[0].get("version") != "0.1.45"
+        or policy.get("profile") != "codex-only"
+        or policy.get("applies_to_version") != "0.1.45"
+    ):
+        raise SystemExit("unsupported AionCore staging filter profile")
+    exclusions = policy.get("source_exclusions")
+    shim_root = policy.get("compatibility_shim_root")
+    receipt_path = policy.get("receipt")
+    if (
+        not isinstance(exclusions, list)
+        or not exclusions
+        or not all(isinstance(path, str) and path for path in exclusions)
+        or not isinstance(shim_root, str)
+        or not shim_root
+        or not isinstance(receipt_path, str)
+        or not receipt_path
+    ):
+        raise SystemExit("invalid AionCore staging filter policy")
+
+    by_path = {
+        entry["path"]: entry
+        for entry in files
+        if isinstance(entry.get("path"), str)
+    }
+    receipt_entry = by_path.get(receipt_path)
+    if receipt_entry is None or receipt_entry.get("kind") != "file":
+        raise SystemExit("missing Codex-only staging exclusion receipt")
+    try:
+        receipt = json.loads((runtime / receipt_path).read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit("invalid Codex-only staging exclusion receipt") from exc
+    if (
+        receipt.get("schema_version") != 1
+        or receipt.get("profile") != "codex-only"
+        or receipt.get("component") != "aioncore"
+        or receipt.get("policy", {}).get("profile") != "codex-only"
+        or receipt.get("policy", {}).get("applies_to_version") != "0.1.45"
+        or receipt.get("policy", {}).get("receipt") != receipt_path
+    ):
+        raise SystemExit("invalid Codex-only staging exclusion receipt")
+    source_entries = receipt.get("source_exclusions")
+    if (
+        not isinstance(source_entries, list)
+        or [entry.get("path") for entry in source_entries if isinstance(entry, dict)]
+        != exclusions
+        or not all(
+            isinstance(entry, dict)
+            and entry.get("original_source_tree_removed") is True
+            and isinstance(entry.get("original_tree"), dict)
+            and _valid_sha256(entry["original_tree"].get("sha256"))
+            and isinstance(entry["original_tree"].get("file_count"), int)
+            and entry["original_tree"]["file_count"] > 0
+            and isinstance(entry.get("original_markers"), list)
+            and len(entry["original_markers"]) >= 3
+            and all(
+                isinstance(marker, dict)
+                and isinstance(marker.get("path"), str)
+                and marker["path"].startswith(f"{entry['path']}/")
+                and _valid_sha256(marker.get("sha256"))
+                and isinstance(marker.get("size"), int)
+                and marker["size"] > 0
+                for marker in entry["original_markers"]
+            )
+            for entry in source_entries
+        )
+    ):
+        raise SystemExit("Codex-only source exclusion receipt does not match vendor policy")
+
+    shim = receipt.get("generated_compatibility_shim")
+    generated = shim.get("files") if isinstance(shim, dict) else None
+    if (
+        not isinstance(shim, dict)
+        or shim.get("root") != shim_root
+        or not isinstance(generated, list)
+        or not generated
+    ):
+        raise SystemExit("invalid Codex-only compatibility shim receipt")
+    generated_paths: set[str] = set()
+    for expected in generated:
+        if not isinstance(expected, dict):
+            raise SystemExit("invalid Codex-only compatibility shim receipt")
+        path = expected.get("path")
+        if (
+            not isinstance(path, str)
+            or not path.startswith(f"{shim_root}/")
+            or path in generated_paths
+            or not _valid_sha256(expected.get("sha256"))
+            or not isinstance(expected.get("size"), int)
+            or expected["size"] < 0
+            or not isinstance(expected.get("executable"), bool)
+        ):
+            raise SystemExit("invalid Codex-only compatibility shim receipt")
+        generated_paths.add(path)
+        observed = by_path.get(path)
+        if (
+            observed is None
+            or observed.get("kind") != "file"
+            or observed.get("sha256") != expected["sha256"]
+            or observed.get("size") != expected["size"]
+            or observed.get("executable") != expected["executable"]
+        ):
+            raise SystemExit(f"Codex-only compatibility shim mismatch: {path}")
+    observed_shim_paths = {
+        path for path in discovered if path.startswith(f"{shim_root}/")
+    }
+    if observed_shim_paths != generated_paths:
+        raise SystemExit("Codex-only compatibility shim contains unrecorded files")
+
+    scan = receipt.get("proprietary_path_scan")
+    if (
+        not isinstance(scan, dict)
+        or scan.get("forbidden_matches") != []
+        or scan.get("allowed_first_party_shim_path") not in generated_paths
+        or not _valid_sha256(scan.get("allowed_first_party_shim_sha256"))
+        or by_path[scan["allowed_first_party_shim_path"]].get("sha256")
+        != scan["allowed_first_party_shim_sha256"]
+    ):
+        raise SystemExit("invalid proprietary-path scan in staging receipt")
+    for path in discovered:
+        if not path.startswith("aioncore/managed-resources/"):
+            continue
+        parts = Path(path).parts
+        names_anthropic_payload = (
+            "@anthropic-ai" in parts
+            or "claude-agent-acp" in parts
+            or Path(path).name in {"anthropic-ai-sdk", "claude-agent-acp"}
+        )
+        if (
+            names_anthropic_payload
+            and path != scan["allowed_first_party_shim_path"]
+            and not path.startswith(f"{shim_root}/")
+        ):
+            raise SystemExit(f"unfiltered Anthropic managed-resource path remains: {path}")
+
+    audit = receipt.get("aioncore_manifest_audit")
+    if (
+        not isinstance(audit, dict)
+        or audit.get("path") != "aioncore/manifest.json"
+        or audit.get("rewrite_required") is not False
+        or not _valid_sha256(audit.get("sha256"))
+        or by_path.get("aioncore/manifest.json", {}).get("sha256") != audit["sha256"]
+    ):
+        raise SystemExit("invalid AionCore manifest audit in staging receipt")
+    after = receipt.get(
+        "managed_resources_after_filter_before_architecture_normalization"
+    )
+    if (
+        not isinstance(after, dict)
+        or not _valid_sha256(after.get("sha256"))
+        or not isinstance(after.get("file_count"), int)
+        or after["file_count"] <= 0
+    ):
+        raise SystemExit("invalid post-filter managed-resource digest in staging receipt")
+    return {
+        "profile": "codex-only",
+        "receipt": {
+            "path": receipt_path,
+            "sha256": receipt_entry["sha256"],
+        },
+        "source_exclusions": exclusions,
+        "compatibility_shim_root": shim_root,
+        "upstream_source_tree_removed": True,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--runtime", required=True, type=Path)
@@ -238,6 +430,12 @@ def main() -> None:
     except (OSError, json.JSONDecodeError) as exc:
         raise SystemExit("invalid macOS architecture normalization provenance") from exc
     validate_architecture_provenance(provenance, discovered)
+    staging_filter = validate_staging_filter(
+        vendor,
+        args.runtime,
+        files,
+        discovered,
+    )
 
     missing = expected_entrypoints - discovered
     if missing:
@@ -268,6 +466,8 @@ def main() -> None:
         },
         "files": files,
     }
+    if staging_filter is not None:
+        manifest["staging_filter"] = staging_filter
     if args.post_sign:
         manifest["pre_sign_manifest_sha256"] = pre_sign_manifest_sha256
     destination = args.runtime / "resource-manifest.json"

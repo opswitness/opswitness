@@ -1,17 +1,19 @@
 # OpsWitness
 
-Website source: [`site/`](site/) · Community Alpha prerelease: **not published yet** ·
+Website: [opswitness.com](https://opswitness.com/) ·
+[Community Alpha prerelease](https://github.com/opswitness/opswitness/releases/tag/v0.1.0-alpha.1) ·
 [Quickstart](docs/QUICKSTART.md) · [Support matrix](docs/SUPPORT-MATRIX.md)
 
-The reserved `opswitness.com` domain is not deployed yet, and no GitHub Release exists. When the
-release gates pass, the website will become the public product, download, installation, and feedback
-surface. The complete OpsWitness console will continue to run locally on the operator's own Mac; it
-will not be presented as a hosted SaaS.
+The public alpha.1 DMG is available only for a small, informed friend test. It is ad-hoc signed,
+not notarized, and older than the current development source. The complete OpsWitness console runs
+locally on the operator's own Mac; the website is a download, product-information and feedback
+surface, not a hosted SaaS.
 
-> **Community Alpha release candidate.** This source repository is public for review and feedback,
-> but no packaged release has been approved yet. OpsWitness is the public product identity. The
-> former Quarterdeck name remains only for compatibility with existing local installations and for
-> immutable historical evidence.
+> **Community Alpha boundary.** Do not use the public alpha.1 build for secrets, critical work or
+> irreversible actions. New source-complete behavior still requires an exact rebuilt App,
+> clean-install and first-Work acceptance, recovery validation and a fresh executable canary.
+> OpsWitness is the public product identity. The former Quarterdeck name remains only for
+> compatibility with existing local installations and immutable historical evidence.
 
 **Turn one-off AI work into repeatable company operations.**
 
@@ -53,7 +55,11 @@ Plan revision chains. Selecting an earlier conversation restores its latest inta
 review; it does not create, confirm, or run anything. The operator may save that exact reviewed
 source as an objective-only task template. The template records the source Plan id and hash for
 provenance, while team structure, runtime state, approvals, replies, artifacts, and evidence remain
-outside the template.
+outside the template. In the development source, a planning failure stays in that same
+conversation: the failed attempt remains visible, its objective returns to the composer for
+editing, and retry creates a new immutable child that reuses only the exact prior attachment
+manifest. Earlier attempts remain above the current turn, and background refresh does not pull a
+user away from history they are reading. This recovery behavior is not in the public alpha.1 DMG.
 
 Before planning, the operator may attach up to five explicitly selected local materials (5 MiB each,
 15 MiB total). Text, Markdown, CSV, JSON, and PDF receive bounded planning excerpts; Word, Excel,
@@ -92,15 +98,17 @@ that requires strict isolation is rejected before execution rather than silently
 
 ## Current release status
 
-OpsWitness source is public, but the product is **not released yet**:
+OpsWitness source and the bounded alpha.1 friend-test download are public:
 
-- this repository is public for source review, issue reports, and release preparation;
-- the Community Alpha candidate is under review in
-  [Draft PR #1](https://github.com/opswitness/opswitness/pull/1);
-- no `v0.1.0-alpha.1` GitHub Release exists;
-- `opswitness.com` is reserved but not deployed;
-- runtime durability, a fresh 24-hour canary, professional confusing-similarity review, and final
-  release-asset validation remain open.
+- `opswitness.com` is live and links to the exact
+  [`v0.1.0-alpha.1`](https://github.com/opswitness/opswitness/releases/tag/v0.1.0-alpha.1)
+  GitHub Prerelease;
+- the Apple Silicon DMG is ad-hoc signed and not notarized, so macOS displays an Apple verification
+  warning; it is not an approved broad launch;
+- the public alpha.1 binary predates the current onboarding, Agent Contract, Knowledge Hub and
+  failed-planning recovery source;
+- vendored-runtime redistribution review, an exact rebuilt App, clean installation, complete first
+  Work, recovery validation and a new executable canary remain open for alpha.2;
 - Agent Contract v2 is source-complete but has not passed a rebuilt Mac App, clean-machine first
   Work, recovery drill, or new executable canary; the strict runtime adapter remains unavailable.
 - Knowledge Hub source is implemented but is not part of an approved public binary. Its exact
@@ -114,8 +122,9 @@ Commercial packaging and its open-core boundary are recorded in
 
 ## Community Alpha quickstart
 
-The supported Alpha host is macOS 14+ with Python 3.12. Install the wheel from the GitHub
-Release once it exists; PyPI publishing is intentionally not configured.
+For the bounded friend test, use the Apple Silicon Mac App described in
+[Quickstart](docs/QUICKSTART.md). The wheel remains a developer/existing-user channel and requires
+Python 3.12; PyPI publishing is intentionally not configured.
 
 ```bash
 uv tool install --with mcp \

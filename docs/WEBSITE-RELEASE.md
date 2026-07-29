@@ -9,15 +9,29 @@ local application as a multi-user SaaS. A future browser demo may use synthetic 
 - Static source: `site/`
 - Custom domain: `opswitness.com`
 - Deployment: GitHub Pages from the pinned `public site` workflow
-- Deployment gate: repository variable `PUBLIC_SITE_APPROVED=true`
+- Deployment gates: repository variables `PUBLIC_SITE_APPROVED=true` and
+  `PUBLIC_RELEASE_APPROVED=true`
 
-The deployment job is intentionally skipped while the repository remains private or the final
-Alpha Release is unavailable. Do not set the approval variable until all of the following are true:
+### Current bounded friend-test exception
+
+The site is live and currently points to `v0.1.0-alpha.1`, an ad-hoc signed, not-notarized DMG for
+small informed friend testing. The visible warning is mandatory. This 2026-07-27 exception does not
+mean the signed/notarized promotion contract below passed, and it must not be cited as broad-release
+evidence. The exact public status and digest are recorded in
+[CURRENT-PROGRESS.md](CURRENT-PROGRESS.md).
+
+Never replace the download in place. A changed executable requires a new tag, file name, checksum,
+release notes and executable evidence. The existing alpha.1 asset is immutable.
+
+### Target promoted-release gate
+
+For a promoted Alpha, do not set the approval variables or switch the site until all of the
+following are true:
 
 1. the professional confusing-similarity review is complete;
 2. the repository is public and Private Vulnerability Reporting is enabled;
-3. `v0.1.0-alpha.1` exists as an inspected GitHub prerelease containing the signed and notarized
-   `OpsWitness-0.1.0-alpha.1-macos-arm64.dmg`;
+3. the exact new tag exists as an inspected GitHub prerelease containing its Developer ID signed
+   and notarized Apple Silicon DMG;
 4. the exact mounted DMG passes the final clean-machine first-Work smoke;
 5. the DNS records for the Pages host are configured and verified.
 
@@ -97,14 +111,16 @@ part of the identity.
 
 ## Public links
 
-The website exposes only these public actions:
+The current website exposes only these public actions:
 
 - download the exact Apple Silicon DMG with a **Download Alpha** action;
-- open the GitHub prerelease, checksums, SBOM, manifest, attestation, and Quickstart;
-- serve the signed Tauri Alpha feed at `/updates/alpha/latest.json`;
+- open the GitHub prerelease, checksum, Quickstart and public support material;
 - read the support matrix, known limitations, and security policy;
 - submit Alpha experience, feature, and bug reports as GitHub issues;
 - open GitHub Private Vulnerability Reporting for security reports.
+
+SBOM, manifest, attestation and the signed Tauri feed are promoted-release targets. Do not show
+their links until the exact assets exist and pass their corresponding workflow checks.
 
 Do not add API-key collection, hosted planning, login, analytics containing customer content, or a
 remote console proxy to this site. The ordinary product continues to bind to the operator's own Mac.
@@ -121,12 +137,13 @@ Verify desktop and 390px mobile layouts, keyboard access, local assets, HTTPS-on
 the exact DMG download, and all feedback routes. The repository tests also validate identity,
 the **Download Alpha** wording, local asset presence, image alt text, and HTTPS external links.
 
-The direct DMG URL may exist in `site/` because the Pages deployment itself is fail-closed on
-`PUBLIC_SITE_APPROVED=true`. Never set that variable merely because a workflow or ad-hoc build is
-green; the inspected GitHub asset, its canary, and every external gate must already be complete.
+The direct DMG URL may exist in `site/` only when it names the exact inspected prerelease asset.
+Never set either approval variable or change the URL merely because a source test or ad-hoc build
+is green; the exact asset, its required smoke/recovery evidence and every applicable external gate
+must already be complete.
 
-The update feed is not committed with a placeholder signature. During the gated Pages job, the
-workflow downloads `updates-alpha-latest.json`, its updater signature, `SHA256SUMS`, and the
-schema-3 manifest from the exact `v0.1.0-alpha.1` prerelease. It verifies their hashes, Developer ID
-and notarization evidence, exact archive URL, and signature equality before staging the file at
-`site/updates/alpha/latest.json`. Missing or inconsistent release evidence stops deployment.
+The update feed is not committed with a placeholder signature. A future promoted-release Pages job
+may stage `updates-alpha-latest.json` only after verifying its updater signature, `SHA256SUMS`,
+schema-3 manifest, Developer ID/notarization evidence and exact archive URL. Missing or
+inconsistent evidence must stop deployment. The current ad-hoc friend-test site has no updater
+feed.

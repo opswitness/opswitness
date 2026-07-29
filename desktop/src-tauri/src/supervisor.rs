@@ -25,11 +25,13 @@ use uuid::Uuid;
 const PAPERCLIP_HEALTH: &str = "/api/health";
 const AIONCORE_HEALTH: &str = "/api/system/info";
 const AIONCORE_ASSISTANTS: &str = "/api/assistants";
+const AIONCORE_AGENT_ENABLED: &str = "/api/agents";
 const AIONCORE_MCP_SERVERS: &str = "/api/mcp/servers";
 const AIONCORE_MCP_TEST: &str = "/api/mcp/test-connection";
 const BACKEND_HEALTH: &str = "/api/v1/bootstrap";
 const BACKEND_DRAIN: &str = "/api/v1/desktop/drain";
 const CODEX_ASSISTANT_ID: &str = "bare:8e1acf31";
+const CLAUDE_AGENT_ID: &str = "2d23ff1c";
 const OPSWITNESS_MCP_NAME: &str = "OpsWitness (App-managed)";
 const OPSWITNESS_MCP_TOOLS: &[&str] = &[
     "qd_fleet_status",
@@ -118,7 +120,6 @@ struct PaperclipCredentials {
 
 pub struct Supervisor {
     resource_payload: PathBuf,
-    claude_executable: PathBuf,
     data_root: PathBuf,
     log_root: PathBuf,
     instance_id: String,
@@ -140,7 +141,6 @@ impl Supervisor {
             &data_root.join("runtime-cache/tmp"),
             &data_root.join("workspaces"),
             &data_root.join("config/codex"),
-            &data_root.join("config/claude"),
             &log_root,
         ] {
             fs::create_dir_all(directory)
@@ -169,11 +169,8 @@ impl Supervisor {
             .map_err(|_| anyhow!("another OpsWitness desktop instance is already running"))?;
         let instance_file = data_root.join("runtime-cache/instance.json");
         reconcile_previous_instance(&instance_file, &resource_payload)?;
-        let claude_executable = resolve_bundled_claude_executable(&resource_payload)?;
-
         Ok(Self {
             resource_payload,
-            claude_executable,
             data_root: data_root.clone(),
             log_root,
             instance_id: Uuid::new_v4().to_string(),
@@ -214,6 +211,7 @@ impl Supervisor {
             |supervisor, port| supervisor.spawn_aioncore(port),
         )?;
         wait_for_aioncore_assistant(aion_port, CODEX_ASSISTANT_ID, Duration::from_secs(30))?;
+        self.disable_aioncore_claude_agent(aion_port)?;
         self.bootstrap_aioncore_mcp(aion_port, paperclip_port)?;
 
         status(RuntimeStatus {
@@ -491,7 +489,6 @@ impl Supervisor {
                 "OPSWITNESS_LEDGER_DIR": self.data_root.join("state/ledger"),
                 "OPSWITNESS_CONSOLE__AIONUI_BASE": base,
                 "OPSWITNESS_CONSOLE__CODEX_BIN": self.resource_payload.join("codex/codex"),
-                "OPSWITNESS_GATE__CLAUDE_BIN": &self.claude_executable,
                 "OPSWITNESS_PAPERCLIP__API_BASE":
                     format!("http://127.0.0.1:{paperclip_port}"),
                 "OPSWITNESS_SERVICES__LOG_DIR": self.log_root,
@@ -568,6 +565,19 @@ impl Supervisor {
         Ok(())
     }
 
+    fn disable_aioncore_claude_agent(&self, aion_port: u16) -> Result<()> {
+        let base = format!("http://127.0.0.1:{aion_port}");
+        let client = Client::builder().timeout(Duration::from_secs(10)).build()?;
+        let response = aion_send(
+            &client,
+            reqwest::Method::PATCH,
+            &format!("{base}{AIONCORE_AGENT_ENABLED}/{CLAUDE_AGENT_ID}/enabled"),
+            &serde_json::json!({"enabled": false}),
+        )?;
+        require_aion_agent_enabled_state(&response, CLAUDE_AGENT_ID, false)
+            .context("AionCore did not persist the Codex-only Claude disable state")
+    }
+
     fn spawn_backend(
         &mut self,
         port: u16,
@@ -595,7 +605,6 @@ impl Supervisor {
                 format!("http://127.0.0.1:{aion_port}"),
             )
             .env("OPSWITNESS_CONSOLE__CODEX_BIN", codex)
-            .env("OPSWITNESS_GATE__CLAUDE_BIN", &self.claude_executable)
             .env(
                 "OPSWITNESS_PAPERCLIP__API_BASE",
                 format!("http://127.0.0.1:{paperclip_port}"),
@@ -613,7 +622,6 @@ impl Supervisor {
             .env_clear()
             .env("HOME", &self.data_root)
             .env("CODEX_HOME", self.data_root.join("config/codex"))
-            .env("CLAUDE_CONFIG_DIR", self.data_root.join("config/claude"))
             .env("TMPDIR", self.data_root.join("runtime-cache/tmp"))
             .env("XDG_CACHE_HOME", self.data_root.join("runtime-cache"))
             .env("XDG_CONFIG_HOME", self.data_root.join("config"))
@@ -812,65 +820,6 @@ impl RuntimeSupervisor for Supervisor {
 impl Drop for Supervisor {
     fn drop(&mut self) {
         let _ = self.stop_all();
-    }
-}
-
-fn resolve_bundled_claude_executable(resource_root: &Path) -> Result<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let versions_root = resource_root.join("aioncore/managed-resources/acp/claude-agent-acp");
-    let root_metadata = fs::symlink_metadata(&versions_root).with_context(|| {
-        format!(
-            "bundled Claude Agent versions are unavailable: {}",
-            versions_root.display()
-        )
-    })?;
-    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
-        bail!("bundled Claude Agent versions must be a real directory");
-    }
-    let canonical_root = fs::canonicalize(&versions_root)
-        .context("cannot resolve the bundled Claude Agent versions directory")?;
-    let mut matches = Vec::new();
-    for entry in
-        fs::read_dir(&versions_root).context("cannot inspect bundled Claude Agent versions")?
-    {
-        let entry = entry.context("cannot inspect a bundled Claude Agent version")?;
-        let candidate = entry
-            .path()
-            .join("darwin-arm64/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude");
-        let metadata = match fs::symlink_metadata(&candidate) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                return Err(error).with_context(|| {
-                    format!(
-                        "cannot inspect bundled Claude executable {}",
-                        candidate.display()
-                    )
-                })
-            }
-        };
-        if metadata.file_type().is_symlink() || !metadata.is_file() {
-            bail!("bundled Claude executable must be one regular file");
-        }
-        if metadata.permissions().mode() & 0o111 == 0 {
-            bail!("bundled Claude executable is not executable");
-        }
-        let resolved = fs::canonicalize(&candidate).with_context(|| {
-            format!(
-                "cannot resolve bundled Claude executable {}",
-                candidate.display()
-            )
-        })?;
-        if !resolved.starts_with(&canonical_root) {
-            bail!("bundled Claude executable resolves outside managed resources");
-        }
-        matches.push(resolved);
-    }
-    match matches.as_slice() {
-        [only] => Ok(only.clone()),
-        [] => bail!("exactly one bundled arm64 Claude Agent executable is required; found none"),
-        _ => bail!("exactly one bundled arm64 Claude Agent executable is required; found multiple"),
     }
 }
 
@@ -1215,6 +1164,23 @@ fn require_mcp_toggle_state<'a>(
         );
     }
     Ok(data)
+}
+
+fn require_aion_agent_enabled_state(
+    payload: &Value,
+    agent_id: &str,
+    enabled: bool,
+) -> Result<()> {
+    let data = aion_data(payload, "agent enabled-state update")?;
+    if data.get("id").and_then(Value::as_str) != Some(agent_id)
+        || data.get("enabled").and_then(Value::as_bool) != Some(enabled)
+    {
+        bail!(
+            "AionCore agent {agent_id} did not remain {}",
+            if enabled { "enabled" } else { "disabled" }
+        );
+    }
+    Ok(())
 }
 
 fn require_opswitness_mcp_tools(payload: &Value) -> Result<()> {
@@ -1645,10 +1611,10 @@ mod tests {
     use super::{
         canonical_executable_identity, executable_identities_match, expected_process_executable,
         load_optional_credentials, named_aion_mcp_servers, reconcile_previous_instance,
-        require_managed_mcp_identity, require_mcp_toggle_state, require_opswitness_mcp_tools,
-        resolve_bundled_claude_executable, select_managed_agent, select_unique_named,
-        stop_owned_process, InstanceRecord, OwnedProcess, PaperclipCredentials, ProcessRecord,
-        OPSWITNESS_MCP_NAME, OPSWITNESS_MCP_TOOLS,
+        require_aion_agent_enabled_state, require_managed_mcp_identity,
+        require_mcp_toggle_state, require_opswitness_mcp_tools, select_managed_agent,
+        select_unique_named, stop_owned_process, InstanceRecord, OwnedProcess,
+        PaperclipCredentials, ProcessRecord, OPSWITNESS_MCP_NAME, OPSWITNESS_MCP_TOOLS,
     };
     use serde_json::json;
     use std::{
@@ -1740,48 +1706,27 @@ mod tests {
     }
 
     #[test]
-    fn bundled_claude_resolution_is_exact_executable_and_not_a_symlink() {
-        let root =
-            std::env::temp_dir().join(format!("opswitness-claude-runtime-{}", Uuid::new_v4()));
-        let candidate = root.join(
-            "aioncore/managed-resources/acp/claude-agent-acp/0.58.1/darwin-arm64/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude",
+    fn codex_only_agent_disable_requires_exact_readback() {
+        let disabled = json!({
+            "success": true,
+            "data": {"id": "2d23ff1c", "enabled": false}
+        });
+        require_aion_agent_enabled_state(&disabled, "2d23ff1c", false).unwrap();
+
+        let still_enabled = json!({
+            "success": true,
+            "data": {"id": "2d23ff1c", "enabled": true}
+        });
+        assert!(
+            require_aion_agent_enabled_state(&still_enabled, "2d23ff1c", false).is_err()
         );
-        fs::create_dir_all(candidate.parent().unwrap()).unwrap();
-        fs::write(&candidate, b"arm64-placeholder").unwrap();
-        fs::set_permissions(&candidate, fs::Permissions::from_mode(0o700)).unwrap();
-
-        assert_eq!(
-            resolve_bundled_claude_executable(&root).unwrap(),
-            fs::canonicalize(&candidate).unwrap()
+        let wrong_agent = json!({
+            "success": true,
+            "data": {"id": "8e1acf31", "enabled": false}
+        });
+        assert!(
+            require_aion_agent_enabled_state(&wrong_agent, "2d23ff1c", false).is_err()
         );
-
-        fs::remove_file(&candidate).unwrap();
-        let outside = root.join("outside-claude");
-        fs::write(&outside, b"outside").unwrap();
-        fs::set_permissions(&outside, fs::Permissions::from_mode(0o700)).unwrap();
-        symlink(&outside, &candidate).unwrap();
-        assert!(resolve_bundled_claude_executable(&root).is_err());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn bundled_claude_resolution_rejects_ambiguous_versions() {
-        let root =
-            std::env::temp_dir().join(format!("opswitness-claude-ambiguous-{}", Uuid::new_v4()));
-        for version in ["0.58.1", "0.59.0"] {
-            let candidate = root.join(format!(
-                "aioncore/managed-resources/acp/claude-agent-acp/{version}/darwin-arm64/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude"
-            ));
-            fs::create_dir_all(candidate.parent().unwrap()).unwrap();
-            fs::write(&candidate, b"arm64-placeholder").unwrap();
-            fs::set_permissions(&candidate, fs::Permissions::from_mode(0o700)).unwrap();
-        }
-
-        assert!(resolve_bundled_claude_executable(&root)
-            .unwrap_err()
-            .to_string()
-            .contains("found multiple"));
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -103,6 +103,7 @@ from opswitness.console.schemas import (
     ExecutionControlRequest,
     ExecutionProfile,
     ExecutionProfileRevisionRequest,
+    FailedPlanningRetryRequest,
     ExecutionProgress,
     ExecutionState,
     ForkPlanRequest,
@@ -333,7 +334,10 @@ _SYNTHETIC_REVIEW_CHECKS: dict[str, bool] = {
 }
 TELEGRAM_TEST_FAILED = "Telegram test delivery failed; inspect local diagnostics."
 PLAN_GENERATION_FAILED = "plan_generation_failed"
-PLAN_GENERATION_FAILED_DETAIL = "Planning failed; check the AI connection and create a new plan."
+PLAN_GENERATION_FAILED_DETAIL = (
+    "Planning failed; check the AI connection, edit the task, "
+    "and retry in this conversation."
+)
 EXECUTION_PLAN_INVALID = "execution_plan_invalid"
 EXECUTION_PLAN_INVALID_DETAIL = "Confirmed plan integrity failed; replan before dispatch."
 EXECUTION_DISPATCH_FAILED = "execution_dispatch_failed"
@@ -908,12 +912,37 @@ def _parse_event_time(value: str) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
+def _request_lineage_erasure_payload(record: PlanRecord) -> dict[str, Any]:
+    """Preserve only hash-bound request lineage in a content-free erasure receipt."""
+    payload: dict[str, Any] = {}
+    if record.request_sha256 is not None:
+        payload["request_sha256"] = record.request_sha256
+    retry_source = (
+        record.planning_retry_source_plan_id,
+        record.planning_retry_source_request_sha256,
+    )
+    if any(value is not None for value in retry_source):
+        if any(value is None for value in retry_source) or record.request_sha256 is None:
+            raise ConsoleUnavailable("planning retry erasure provenance is incomplete")
+        payload.update(
+            {
+                "planning_retry_source_plan_id": (
+                    record.planning_retry_source_plan_id
+                ),
+                "planning_retry_source_request_sha256": (
+                    record.planning_retry_source_request_sha256
+                ),
+            }
+        )
+    return payload
+
+
 def _run_erasure_intent_events(
     events: list[dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
     """Return one valid pre-destruction intent per Work; ambiguity fails closed."""
     intents: dict[str, dict[str, Any]] = {}
-    payload_keys = {
+    base_payload_keys = {
         "schema_version",
         "source",
         "status",
@@ -921,18 +950,39 @@ def _run_erasure_intent_events(
         "parent_plan_id",
         "revision_number",
     }
+    request_key = {"request_sha256"}
+    retry_keys = {
+        "planning_retry_source_plan_id",
+        "planning_retry_source_request_sha256",
+    }
+    allowed_payload_keys = {
+        frozenset(base_payload_keys),
+        frozenset(base_payload_keys | request_key),
+        frozenset(base_payload_keys | request_key | retry_keys),
+    }
     for event in events:
         if event.get("kind") != "task_run_erasure_started":
             continue
         payload = event.get("payload")
         plan_id = event.get("run_id")
         parent_plan_id = payload.get("parent_plan_id") if isinstance(payload, dict) else None
+        request_sha256 = payload.get("request_sha256") if isinstance(payload, dict) else None
+        retry_source_plan_id = (
+            payload.get("planning_retry_source_plan_id")
+            if isinstance(payload, dict)
+            else None
+        )
+        retry_source_request_sha256 = (
+            payload.get("planning_retry_source_request_sha256")
+            if isinstance(payload, dict)
+            else None
+        )
         revision_number = (
             payload.get("revision_number") if isinstance(payload, dict) else None
         )
         if (
             not isinstance(payload, dict)
-            or set(payload) != payload_keys
+            or frozenset(payload) not in allowed_payload_keys
             or payload.get("schema_version") != 1
             or payload.get("source") != "local_console"
             or payload.get("status")
@@ -951,6 +1001,38 @@ def _run_erasure_intent_events(
                     not isinstance(parent_plan_id, str)
                     or re.fullmatch(r"[0-9A-HJKMNP-TV-Z]{26}", parent_plan_id)
                     is None
+                )
+            )
+            or (
+                request_sha256 is not None
+                and (
+                    not isinstance(request_sha256, str)
+                    or re.fullmatch(r"[0-9a-f]{64}", request_sha256) is None
+                )
+            )
+            or (
+                any(
+                    value is not None
+                    for value in (
+                        retry_source_plan_id,
+                        retry_source_request_sha256,
+                    )
+                )
+                and (
+                    not isinstance(retry_source_plan_id, str)
+                    or re.fullmatch(
+                        r"[0-9A-HJKMNP-TV-Z]{26}",
+                        retry_source_plan_id,
+                    )
+                    is None
+                    or retry_source_plan_id == plan_id
+                    or not isinstance(retry_source_request_sha256, str)
+                    or re.fullmatch(
+                        r"[0-9a-f]{64}",
+                        retry_source_request_sha256,
+                    )
+                    is None
+                    or request_sha256 is None
                 )
             )
             or not isinstance(revision_number, int)
@@ -1284,6 +1366,58 @@ def _fleet_health(
     }
 
 
+def _planning_request_identity_payload(
+    *,
+    objective: str,
+    constraints: str,
+    workspace: str,
+    preferred_cadence: str,
+    blueprint_id: str | None,
+    attachments: list[PlanningAttachment],
+) -> dict[str, Any]:
+    """Build the single canonical identity for a normal planning request."""
+    payload: dict[str, Any] = {
+        "objective": objective,
+        "constraints": constraints,
+        "workspace": workspace,
+        "preferred_cadence": preferred_cadence,
+        "blueprint_id": blueprint_id,
+    }
+    if attachments:
+        payload["attachments"] = [
+            attachment.model_dump(mode="json") for attachment in attachments
+        ]
+    return payload
+
+
+def _planning_retry_requested_payload(record: PlanRecord) -> dict[str, Any]:
+    """Bind one retry event to its immutable request and local context snapshot."""
+    if (
+        record.planning_retry_source_plan_id is None
+        or record.planning_retry_source_request_sha256 is None
+        or record.request_sha256 is None
+    ):
+        raise ConsoleConflict("planning retry provenance is incomplete")
+    attachment_manifest_sha256 = (
+        _canonical_sha256(
+            [item.model_dump(mode="json") for item in record.attachments]
+        )
+        if record.attachments
+        else None
+    )
+    return {
+        "schema_version": 1,
+        "source_plan_id": record.planning_retry_source_plan_id,
+        "source_request_sha256": record.planning_retry_source_request_sha256,
+        "request_sha256": record.request_sha256,
+        "revision_number": record.revision_number,
+        "memory_snapshot_sha256": record.memory_snapshot_sha256,
+        "memory_version_count": len(record.memory_version_ids),
+        "attachment_count": len(record.attachments),
+        "attachment_manifest_sha256": attachment_manifest_sha256,
+    }
+
+
 def _execution_plan_sha(
     record: PlanRecord,
     plan: TaskPlanDocument | None = None,
@@ -1312,6 +1446,22 @@ def _execution_plan_sha(
             "parent_plan_sha256": record.parent_plan_sha256,
             "revision_number": record.revision_number,
             "instruction": record.revision_instruction,
+        }
+    planning_retry_source = (
+        record.planning_retry_source_plan_id,
+        record.planning_retry_source_request_sha256,
+    )
+    if any(value is not None for value in planning_retry_source):
+        if (
+            any(value is None for value in planning_retry_source)
+            or record.request_sha256 is None
+        ):
+            raise ConsoleConflict("planning retry provenance is incomplete")
+        envelope["planning_retry"] = {
+            "source_plan_id": record.planning_retry_source_plan_id,
+            "source_request_sha256": record.planning_retry_source_request_sha256,
+            "request_sha256": record.request_sha256,
+            "revision_number": record.revision_number,
         }
     if record.forked_from_plan_id is not None or record.forked_from_plan_sha256 is not None:
         if record.forked_from_plan_id is None or record.forked_from_plan_sha256 is None:
@@ -1465,18 +1615,24 @@ def _repeatable_works(records: list[PlanRecord]) -> list[RepeatableWork]:
     """Project latest ended revisions into full reusable Work Blueprints."""
     by_id = {record.plan_id: record for record in records}
     retained = [record for record in records if record.erased_at is None]
-    parents = {record.parent_plan_id for record in retained if record.parent_plan_id}
+    parents = {
+        parent_id
+        for record in retained
+        if (parent_id := _conversation_parent_id(record)) is not None
+    }
     latest = [record for record in retained if record.plan_id not in parents]
 
     def root_id(record: PlanRecord) -> str:
         seen: set[str] = set()
         current = record
-        while current.parent_plan_id and current.parent_plan_id not in seen:
+        parent_id = _conversation_parent_id(current)
+        while parent_id and parent_id not in seen:
             seen.add(current.plan_id)
-            parent = by_id.get(current.parent_plan_id)
+            parent = by_id.get(parent_id)
             if parent is None:
                 break
             current = parent
+            parent_id = _conversation_parent_id(current)
         return current.plan_id
 
     rows: list[RepeatableWork] = []
@@ -1510,26 +1666,39 @@ def _repeatable_works(records: list[PlanRecord]) -> list[RepeatableWork]:
     return rows
 
 
+def _conversation_parent_id(record: PlanRecord) -> str | None:
+    """Return the immutable predecessor used only for conversation projection."""
+    return record.parent_plan_id or record.planning_retry_source_plan_id
+
+
+def _conversation_root(
+    record: PlanRecord,
+    by_id: dict[str, PlanRecord],
+) -> PlanRecord:
+    seen: set[str] = {record.plan_id}
+    current = record
+    parent_id = _conversation_parent_id(current)
+    while parent_id:
+        if parent_id in seen:
+            raise ConsoleConflict("conversation version history contains a cycle")
+        parent = by_id.get(parent_id)
+        if parent is None:
+            break
+        seen.add(parent.plan_id)
+        current = parent
+        parent_id = _conversation_parent_id(current)
+    return current
+
+
 def _workspace_conversations(records: list[PlanRecord]) -> list[WorkspaceConversation]:
     """Project immutable plan chains into selectable Workspace conversations."""
     by_id = {record.plan_id: record for record in records}
     retained = [record for record in records if record.erased_at is None]
 
-    def root(record: PlanRecord) -> PlanRecord:
-        seen: set[str] = set()
-        current = record
-        while current.parent_plan_id and current.parent_plan_id not in seen:
-            seen.add(current.plan_id)
-            parent = by_id.get(current.parent_plan_id)
-            if parent is None:
-                break
-            current = parent
-        return current
-
     grouped: dict[str, list[PlanRecord]] = {}
     roots: dict[str, PlanRecord] = {}
     for record in retained:
-        root_record = root(record)
+        root_record = _conversation_root(record, by_id)
         roots[root_record.plan_id] = root_record
         grouped.setdefault(root_record.plan_id, []).append(record)
 
@@ -3622,11 +3791,14 @@ class ConsoleService:
                 raise ValueError("selected team blueprint is archived")
         plan_id = new_ulid()
         attachments = self._store_plan_attachments(plan_id, request.attachments)
-        request_payload = request.model_dump(mode="json", exclude={"attachments"})
-        if attachments:
-            request_payload["attachments"] = [
-                attachment.model_dump(mode="json") for attachment in attachments
-            ]
+        request_payload = _planning_request_identity_payload(
+            objective=request.objective,
+            constraints=request.constraints,
+            workspace=request.workspace,
+            preferred_cadence=request.preferred_cadence,
+            blueprint_id=request.blueprint_id,
+            attachments=attachments,
+        )
         if recovery_source_plan_id is not None:
             request_payload["recovery_repair"] = {
                 "source_plan_id": recovery_source_plan_id,
@@ -3690,8 +3862,213 @@ class ConsoleService:
                 expected_seconds=expected_seconds,
                 timeout_seconds=timeout_seconds,
             ),
+            request_sha256=request_hash,
         )
         self.store.create(record)
+        self._submit(self.draft_plan, plan_id)
+        return record
+
+    def retry_failed_planning(
+        self,
+        failed_plan_id: str,
+        request: FailedPlanningRetryRequest,
+    ) -> PlanRecord:
+        """Create one immutable edited attempt in the same planning conversation."""
+        with self._plan_transition_lock:
+            events = self.ledger.read_all()
+            deleted = _deleted_plan_events(events)
+            if failed_plan_id in deleted:
+                raise PlanNotFound(f"unknown plan: {failed_plan_id}")
+            source = self.store.get(failed_plan_id)
+            if (
+                source.status != "failed"
+                or source.plan is not None
+                or source.plan_sha256 is not None
+                or source.execution is not None
+                or source.erased_at is not None
+            ):
+                raise ConsoleConflict("only a failed planning attempt can be edited and retried")
+            unsupported_source_provenance = (
+                source.parent_plan_id,
+                source.parent_plan_sha256,
+                source.forked_from_plan_id,
+                source.forked_from_plan_sha256,
+                source.continued_from_plan_id,
+                source.continued_from_plan_sha256,
+                source.continuation_message_sha256,
+                source.recovery_source_plan_id,
+                source.recovery_source_plan_sha256,
+                source.recovery_proposal_sha256,
+                source.revision_instruction_sha256,
+            )
+            if (
+                any(value is not None for value in unsupported_source_provenance)
+                or source.revision_instruction
+                or source.library_input_binding is not None
+            ):
+                raise ConsoleConflict(
+                    "this planning source requires its dedicated revision or recovery flow"
+                )
+
+            source_request_events = [
+                event
+                for event in events
+                if event.get("run_id") == source.plan_id
+                and event.get("kind")
+                in {"task_plan_requested", "task_planning_retry_requested"}
+            ]
+            expected_request_kind = (
+                "task_planning_retry_requested"
+                if source.planning_retry_source_plan_id is not None
+                else "task_plan_requested"
+            )
+            if (
+                len(source_request_events) != 1
+                or source_request_events[0].get("kind") != expected_request_kind
+                or not isinstance(source_request_events[0].get("payload"), dict)
+                or source_request_events[0]["payload"].get("schema_version") != 1
+                or not isinstance(
+                    source_request_events[0]["payload"].get("request_sha256"),
+                    str,
+                )
+                or re.fullmatch(
+                    r"[0-9a-f]{64}",
+                    str(source_request_events[0]["payload"]["request_sha256"]),
+                )
+                is None
+            ):
+                raise ConsoleConflict("failed planning request identity is unavailable")
+            source_request_sha256 = str(
+                source_request_events[0]["payload"]["request_sha256"]
+            )
+            if (
+                source.request_sha256 is not None
+                and source.request_sha256 != source_request_sha256
+            ):
+                raise ConsoleConflict("failed planning request identity changed")
+            source_payload = _planning_request_identity_payload(
+                objective=source.objective,
+                constraints=source.constraints,
+                workspace=source.workspace,
+                preferred_cadence=source.preferred_cadence,
+                blueprint_id=source.source_blueprint_id,
+                attachments=source.attachments,
+            )
+            if _canonical_sha256(source_payload) != source_request_sha256:
+                raise ConsoleConflict("failed planning request identity changed")
+            if source.planning_retry_source_plan_id is not None and (
+                source_request_events[0].get("kind") != "task_planning_retry_requested"
+                or source_request_events[0].get("payload")
+                != _planning_retry_requested_payload(source)
+            ):
+                raise ConsoleConflict("failed planning retry evidence changed")
+            failure_events = [
+                event
+                for event in events
+                if event.get("run_id") == source.plan_id
+                and event.get("kind") == "task_plan_failed"
+            ]
+            if (
+                len(failure_events) != 1
+                or failure_events[0].get("payload")
+                != {
+                    "schema_version": 1,
+                    "reason": PLAN_GENERATION_FAILED,
+                }
+            ):
+                raise ConsoleConflict("failed planning evidence is unavailable")
+
+            _, memory_version_ids, memory_snapshot_sha256 = (
+                self._approved_workspace_memory_snapshot(source.workspace)
+            )
+            attachments = [item.model_copy(deep=True) for item in source.attachments]
+            request_payload = _planning_request_identity_payload(
+                objective=request.objective,
+                constraints=source.constraints,
+                workspace=source.workspace,
+                preferred_cadence=source.preferred_cadence,
+                blueprint_id=source.source_blueprint_id,
+                attachments=attachments,
+            )
+            request_sha256 = _canonical_sha256(request_payload)
+            all_records = list(self.store.list_all())
+            stored_ids = {record.plan_id for record in all_records}
+            if any(
+                event.get("kind") == "task_planning_retry_requested"
+                and isinstance(event.get("payload"), dict)
+                and event["payload"].get("source_plan_id") == source.plan_id
+                and event.get("run_id") not in stored_ids
+                for event in events
+            ):
+                raise ConsoleConflict(
+                    "a previous planning retry is incomplete; recover before retrying"
+                )
+            all_children = [
+                child
+                for child in all_records
+                if child.planning_retry_source_plan_id == source.plan_id
+            ]
+            active_children = [
+                child
+                for child in all_children
+                if child.plan_id not in deleted and child.erased_at is None
+            ]
+            for child in active_children:
+                if child.request_sha256 == request_sha256:
+                    return child
+            if active_children or any(
+                child.plan_id not in deleted and child.erased_at is not None
+                for child in all_children
+            ):
+                raise ConsoleConflict("this planning attempt has a newer edited retry")
+
+            revision_number = (
+                max(
+                    [
+                        source.revision_number,
+                        *(child.revision_number for child in all_children),
+                    ]
+                )
+                + 1
+            )
+            if revision_number > 100:
+                raise ConsoleConflict("plan revision limit reached; create a new conversation")
+            plan_id = new_ulid()
+            started_at = utc_now()
+            expected_seconds, timeout_seconds = self._planning_time_budget()
+            record = PlanRecord(
+                plan_id=plan_id,
+                status="planning",
+                approval_mode=source.approval_mode or ApprovalMode.AUTOMATIC,
+                objective=request.objective,
+                constraints=source.constraints,
+                workspace=source.workspace,
+                preferred_cadence=source.preferred_cadence,
+                attachments=attachments,
+                source_blueprint_id=source.source_blueprint_id,
+                source_blueprint_sha256=source.source_blueprint_sha256,
+                memory_snapshot_sha256=memory_snapshot_sha256,
+                memory_version_ids=memory_version_ids,
+                request_sha256=request_sha256,
+                planning_retry_source_plan_id=source.plan_id,
+                planning_retry_source_request_sha256=source_request_sha256,
+                revision_number=revision_number,
+                created_at=started_at,
+                updated_at=started_at,
+                planning_progress=PlanningProgress(
+                    phase="queued",
+                    percent=5,
+                    started_at=started_at,
+                    expected_seconds=expected_seconds,
+                    timeout_seconds=timeout_seconds,
+                ),
+            )
+            self._append(
+                "task_planning_retry_requested",
+                plan_id,
+                _planning_retry_requested_payload(record),
+            )
+            self.store.create(record)
         self._submit(self.draft_plan, plan_id)
         return record
 
@@ -3934,33 +4311,39 @@ class ConsoleService:
 
             seen: set[str] = set()
             cursor = source
-            while cursor.parent_plan_id is not None:
+            cursor_parent_id = _conversation_parent_id(cursor)
+            while cursor_parent_id is not None:
                 if cursor.plan_id in seen:
                     raise ConsoleConflict("work version history contains a cycle")
                 seen.add(cursor.plan_id)
-                parent = records.get(cursor.parent_plan_id)
+                parent = records.get(cursor_parent_id)
                 if parent is None:
                     raise ConsoleConflict("work version history is incomplete")
                 cursor = parent
+                cursor_parent_id = _conversation_parent_id(cursor)
             root_plan_id = cursor.plan_id
 
             def belongs_to_work(record: PlanRecord) -> bool:
                 visited: set[str] = set()
                 current = record
-                while current.parent_plan_id is not None:
+                current_parent_id = _conversation_parent_id(current)
+                while current_parent_id is not None:
                     if current.plan_id in visited:
                         return False
                     visited.add(current.plan_id)
-                    parent = records.get(current.parent_plan_id)
+                    parent = records.get(current_parent_id)
                     if parent is None:
                         return False
                     current = parent
+                    current_parent_id = _conversation_parent_id(current)
                 return current.plan_id == root_plan_id
 
             family = [row for row in records.values() if belongs_to_work(row)]
             family_ids = {row.plan_id for row in family}
             child_parent_ids = {
-                row.parent_plan_id for row in family if row.parent_plan_id in family_ids
+                parent_id
+                for row in family
+                if (parent_id := _conversation_parent_id(row)) in family_ids
             }
             leaves = [row for row in family if row.plan_id not in child_parent_ids]
             if len(leaves) != 1:
@@ -5000,11 +5383,13 @@ class ConsoleService:
     ) -> str:
         cursor = record
         seen: set[str] = set()
-        while cursor.parent_plan_id is not None and cursor.parent_plan_id in records:
+        parent_id = _conversation_parent_id(cursor)
+        while parent_id is not None and parent_id in records:
             if cursor.plan_id in seen:
                 raise ConsoleUnavailable("plan version lineage contains a cycle")
             seen.add(cursor.plan_id)
-            cursor = records[cursor.parent_plan_id]
+            cursor = records[parent_id]
+            parent_id = _conversation_parent_id(cursor)
         return cursor.plan_id
 
     def list_agent_contract_versions(self, plan_id: str) -> list[dict[str, Any]]:
@@ -8148,6 +8533,120 @@ class ConsoleService:
                         "the legacy AI revision path cannot replace their contracts"
                     )
                 previous_plan = parent.plan
+            elif record.planning_retry_source_plan_id is not None:
+                source = self.store.get(record.planning_retry_source_plan_id)
+                unsupported_source_provenance = (
+                    source.parent_plan_id,
+                    source.parent_plan_sha256,
+                    source.forked_from_plan_id,
+                    source.forked_from_plan_sha256,
+                    source.continued_from_plan_id,
+                    source.continued_from_plan_sha256,
+                    source.continuation_message_sha256,
+                    source.recovery_source_plan_id,
+                    source.recovery_source_plan_sha256,
+                    source.recovery_proposal_sha256,
+                    source.revision_instruction_sha256,
+                )
+                if (
+                    source.status != "failed"
+                    or source.plan is not None
+                    or source.plan_sha256 is not None
+                    or source.execution is not None
+                    or source.erased_at is not None
+                    or record.parent_plan_sha256 is not None
+                    or record.revision_instruction
+                    or record.planning_retry_source_request_sha256 is None
+                    or record.request_sha256 is None
+                    or any(
+                        value is not None
+                        for value in unsupported_source_provenance
+                    )
+                    or source.revision_instruction
+                    or source.library_input_binding is not None
+                ):
+                    raise ConsoleConflict("failed planning retry source is unavailable or changed")
+                planning_events = self.ledger.read_all()
+                source_request_events = [
+                    event
+                    for event in planning_events
+                    if event.get("run_id") == source.plan_id
+                    and event.get("kind")
+                    in {"task_plan_requested", "task_planning_retry_requested"}
+                ]
+                expected_source_kind = (
+                    "task_planning_retry_requested"
+                    if source.planning_retry_source_plan_id is not None
+                    else "task_plan_requested"
+                )
+                if (
+                    len(source_request_events) != 1
+                    or source_request_events[0].get("kind") != expected_source_kind
+                    or not isinstance(source_request_events[0].get("payload"), dict)
+                    or source_request_events[0]["payload"].get("request_sha256")
+                    != record.planning_retry_source_request_sha256
+                    or (
+                        source.request_sha256 is not None
+                        and source.request_sha256
+                        != record.planning_retry_source_request_sha256
+                    )
+                    or (
+                        source.planning_retry_source_plan_id is not None
+                        and source_request_events[0].get("payload")
+                        != _planning_retry_requested_payload(source)
+                    )
+                ):
+                    raise ConsoleConflict("failed planning retry source identity changed")
+                source_request_payload = _planning_request_identity_payload(
+                    objective=source.objective,
+                    constraints=source.constraints,
+                    workspace=source.workspace,
+                    preferred_cadence=source.preferred_cadence,
+                    blueprint_id=source.source_blueprint_id,
+                    attachments=source.attachments,
+                )
+                if (
+                    _canonical_sha256(source_request_payload)
+                    != record.planning_retry_source_request_sha256
+                ):
+                    raise ConsoleConflict("failed planning retry source identity changed")
+                source_failure_events = [
+                    event
+                    for event in planning_events
+                    if event.get("run_id") == source.plan_id
+                    and event.get("kind") == "task_plan_failed"
+                ]
+                if (
+                    len(source_failure_events) != 1
+                    or source_failure_events[0].get("payload")
+                    != {
+                        "schema_version": 1,
+                        "reason": PLAN_GENERATION_FAILED,
+                    }
+                ):
+                    raise ConsoleConflict("failed planning retry evidence is unavailable")
+                current_retry_events = [
+                    event
+                    for event in planning_events
+                    if event.get("run_id") == record.plan_id
+                    and event.get("kind") == "task_planning_retry_requested"
+                ]
+                if (
+                    len(current_retry_events) != 1
+                    or current_retry_events[0].get("payload")
+                    != _planning_retry_requested_payload(record)
+                ):
+                    raise ConsoleConflict("planning retry request evidence changed")
+                retry_request_payload = _planning_request_identity_payload(
+                    objective=record.objective,
+                    constraints=record.constraints,
+                    workspace=record.workspace,
+                    preferred_cadence=record.preferred_cadence,
+                    blueprint_id=record.source_blueprint_id,
+                    attachments=record.attachments,
+                )
+                if _canonical_sha256(retry_request_payload) != record.request_sha256:
+                    raise ConsoleConflict("failed planning retry request changed")
             repair_binding: tuple[RuntimeName, str] | None = None
             if record.recovery_source_plan_id is not None:
                 repair_source = self._recovery_repair_source(record)
@@ -8804,14 +9303,16 @@ class ConsoleService:
         def root_work_id(record: PlanRecord) -> str | None:
             seen: set[str] = set()
             cursor = record
-            while cursor.parent_plan_id is not None:
+            parent_id = _conversation_parent_id(cursor)
+            while parent_id is not None:
                 if cursor.plan_id in seen:
                     return None
                 seen.add(cursor.plan_id)
-                parent = all_records.get(cursor.parent_plan_id)
+                parent = all_records.get(parent_id)
                 if parent is None:
                     return None
                 cursor = parent
+                parent_id = _conversation_parent_id(cursor)
             return cursor.plan_id
 
         rows: list[dict[str, Any]] = []
@@ -10647,7 +11148,8 @@ class ConsoleService:
             if record.status not in DELETABLE_PLAN_STATUSES:
                 raise ConsoleConflict("active plans cannot be deleted")
             if any(
-                child.plan_id not in deleted and child.parent_plan_id == plan_id
+                child.plan_id not in deleted
+                and _conversation_parent_id(child) == plan_id
                 for child in self.store.list_all()
             ):
                 raise ConsoleConflict("delete newer plan revisions first")
@@ -10709,6 +11211,7 @@ class ConsoleService:
             "plan_sha256": record.plan_sha256,
             "parent_plan_id": record.parent_plan_id,
             "revision_number": record.revision_number,
+            **_request_lineage_erasure_payload(record),
         }
 
     @classmethod
@@ -10750,6 +11253,26 @@ class ConsoleService:
         }
         if not isinstance(intent_payload, dict) or not isinstance(receipt_payload, dict):
             raise ConsoleUnavailable("run erasure receipt evidence is invalid")
+        request_lineage_keys = {
+            key
+            for key in (
+                "request_sha256",
+                "planning_retry_source_plan_id",
+                "planning_retry_source_request_sha256",
+            )
+            if key in intent_payload
+        }
+        if request_lineage_keys not in (
+            set(),
+            {"request_sha256"},
+            {
+                "request_sha256",
+                "planning_retry_source_plan_id",
+                "planning_retry_source_request_sha256",
+            },
+        ):
+            raise ConsoleUnavailable("run erasure receipt request lineage is invalid")
+        common_keys |= request_lineage_keys
         receipt_source = receipt_payload.get("source")
         expected_keys = (
             common_keys | {"recovered_receipt"}
@@ -10779,6 +11302,10 @@ class ConsoleService:
             != intent_payload.get("parent_plan_id")
             or receipt_payload.get("revision_number")
             != intent_payload.get("revision_number")
+            or any(
+                receipt_payload.get(key) != intent_payload.get(key)
+                for key in request_lineage_keys
+            )
             or receipt_payload.get("intent_event_id") != intent.get("event_id")
             or any(
                 not isinstance(value, int) or isinstance(value, bool) or value < 0
@@ -10902,6 +11429,7 @@ class ConsoleService:
                         "plan_sha256": record.plan_sha256,
                         "parent_plan_id": record.parent_plan_id,
                         "revision_number": record.revision_number,
+                        **_request_lineage_erasure_payload(record),
                         "intent_event_id": intent["event_id"],
                         "local_workspace_removed": False,
                         "exclusive_aion_team_removed": False,
@@ -11072,6 +11600,7 @@ class ConsoleService:
                     "plan_sha256": record.plan_sha256,
                     "parent_plan_id": record.parent_plan_id,
                     "revision_number": record.revision_number,
+                    **_request_lineage_erasure_payload(record),
                     "intent_event_id": intent["event_id"],
                     "local_workspace_removed": local_workspace_removed,
                     "exclusive_aion_team_removed": exclusive_aion_team_removed,
@@ -11470,6 +11999,18 @@ class ConsoleService:
                 and re.fullmatch(r"[0-9A-HJKMNP-TV-Z]{26}", record.parent_plan_id)
                 is None
             )
+            or (
+                record.planning_retry_source_plan_id is not None
+                and (
+                    record.planning_retry_source_plan_id == record.plan_id
+                    or record.planning_retry_source_request_sha256 is None
+                    or record.request_sha256 is None
+                )
+            )
+            or (
+                record.planning_retry_source_plan_id is None
+                and record.planning_retry_source_request_sha256 is not None
+            )
             or record.objective != "Run content erased"
             or record.constraints
             or record.workspace
@@ -11556,6 +12097,7 @@ class ConsoleService:
                             "plan_sha256": snapshot.plan_sha256,
                             "parent_plan_id": snapshot.parent_plan_id,
                             "revision_number": snapshot.revision_number,
+                            **_request_lineage_erasure_payload(snapshot),
                             "intent_event_id": intent["event_id"],
                             "local_workspace_removed": False,
                             "exclusive_aion_team_removed": False,
@@ -13477,6 +14019,37 @@ class ConsoleService:
         return _workspace_conversations(
             [record for record in self.store.list_all() if record.plan_id not in deleted]
         )
+
+    def list_workspace_conversation_entries(self, plan_id: str) -> list[PlanRecord]:
+        """Return the complete retained history for the selected conversation."""
+        events = self.ledger.read_all()
+        deleted = set(_deleted_plan_events(events))
+        records = list(self.store.list_all())
+        by_id = {record.plan_id: record for record in records}
+        selected = by_id.get(plan_id)
+        if (
+            selected is None
+            or selected.plan_id in deleted
+            or selected.erased_at is not None
+        ):
+            raise PlanNotFound(f"unknown plan: {plan_id}")
+
+        root_id = _conversation_root(selected, by_id).plan_id
+        entries = [
+            record
+            for record in records
+            if record.plan_id not in deleted
+            and record.erased_at is None
+            and _conversation_root(record, by_id).plan_id == root_id
+        ]
+        entries.sort(
+            key=lambda record: (
+                record.revision_number,
+                record.created_at,
+                record.plan_id,
+            )
+        )
+        return entries
 
     def _reconcile_terminal_aion_records(self, records: list[PlanRecord]) -> bool:
         reconciled = False

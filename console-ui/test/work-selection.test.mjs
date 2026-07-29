@@ -29,6 +29,34 @@ test('a fork remains an independent Work instead of collapsing into its source',
   assert.equal(currentWorkItem([parent, revision, other, fork], 'fork'), fork);
 });
 
+test('an edited planning retry remains the latest version of the failed Work', () => {
+  const failedPlanning = {
+    plan_id: 'failed-planning',
+    parent_plan_id: null,
+    status: 'failed',
+  };
+  const editedRetry = {
+    plan_id: 'edited-retry',
+    parent_plan_id: null,
+    planning_retry_source_plan_id: failedPlanning.plan_id,
+    status: 'planning',
+  };
+  assert.deepEqual(
+    latestWorkItems([failedPlanning, editedRetry, other]),
+    [editedRetry, other],
+  );
+  assert.equal(
+    currentWorkItem([failedPlanning, editedRetry, other], failedPlanning.plan_id),
+    editedRetry,
+  );
+
+  const taskRuns = [
+    { plan_id: failedPlanning.plan_id, parent_plan_id: null, revision_number: 1 },
+    { plan_id: editedRetry.plan_id, parent_plan_id: null, revision_number: 2 },
+  ];
+  assert.deepEqual(workRunHistory(editedRetry, taskRuns), [taskRuns[1], taskRuns[0]]);
+});
+
 test('only active work in the Work view receives a detail poll', () => {
   assert.equal(shouldPollWork('work', revision), true);
   assert.equal(

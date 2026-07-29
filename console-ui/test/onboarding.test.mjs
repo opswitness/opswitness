@@ -101,6 +101,8 @@ test('running onboarding shows trustworthy stages, elapsed time, and no invented
   assert.match(onboardingSource, /onboardingRunProgress\(\{/);
   assert.match(onboardingSource, /plan\?\.execution\?\.dispatched_at \|\| plan\?\.confirmed_at/);
   assert.match(onboardingSource, /助手已上报完成 \{completed\} \/ \{total\}/);
+  assert.match(onboardingSource, /Work 已启动；步骤状态会自动更新，不需要手动刷新。/);
+  assert.match(onboardingSource, /本地保存审批 \{current\} \/ \{total\}/);
   assert.match(onboardingSource, /起草客户回复/);
   assert.match(onboardingSource, /检查承诺风险/);
   assert.match(onboardingSource, /runProgress\.stages\.map/);
@@ -114,9 +116,10 @@ test('run polling exposes reconnect state and refreshes approvals immediately', 
   assert.match(onboardingSource, /setPollFailures\(\(count\) => count \+ 1\)/);
   assert.match(onboardingSource, /pollFailures >= 4/);
   assert.match(onboardingSource, /本地状态连接暂时中断，正在重连/);
+  assert.match(onboardingSource, /const RUN_POLL_INTERVAL_MS = 1500/);
   assert.match(
     onboardingSource,
-    /\['awaiting_approval', 'awaiting_input'\]\.includes\(next\.status\)[\s\S]*await onRefresh\(\)/,
+    /next\.status === 'awaiting_approval' && !pendingApproval[\s\S]*await onRefresh\(\)/,
   );
   assert.match(onboardingSource, /checkFirstWork/);
   assert.match(onboardingSource, /立即检查状态/);
@@ -154,8 +157,10 @@ test('public provider onboarding shows Codex while preserving legacy provider da
   assert.match(onboardingSource, /value="anthropic"/);
   assert.match(productBoundariesSource, /SHOW_ANTHROPIC_PROVIDER_UI = false/);
   assert.match(onboardingSource, /SHOW_ANTHROPIC_PROVIDER_UI && <section/);
-  assert.match(onboardingSource, /useState<OnboardingProvider \| null>\(\s*status\.provider_choice/);
-  assert.doesNotMatch(onboardingSource, /providerSelection[^;\n]*\|\|\s*['"]openai['"]/);
+  assert.match(
+    onboardingSource,
+    /useState<OnboardingProvider \| null>\(\s*status\.provider_choice \?\? 'openai'/,
+  );
 });
 
 test('Codex uses account sign-in while the hidden legacy Claude path remains API-key-only', () => {

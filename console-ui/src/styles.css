@@ -348,7 +348,8 @@ button:disabled {
 .workspace-shell {
   display: grid;
   height: calc(100vh - 71px);
-  min-height: 560px;
+  height: calc(100dvh - 71px);
+  min-height: 0;
   grid-template-rows: minmax(0, 1fr) auto;
   background: #f7f8f7;
 }
@@ -356,7 +357,9 @@ button:disabled {
 .chat-thread {
   min-width: 0;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   padding: 34px 24px 24px;
+  scrollbar-gutter: stable;
 }
 
 .chat-empty {
@@ -923,6 +926,122 @@ button:disabled {
   gap: 12px;
 }
 
+.workspace-conversation-history {
+  display: grid;
+  width: min(980px, 100%);
+  margin: 0 auto 22px;
+  gap: 14px;
+}
+
+.workspace-history-heading,
+.workspace-history-version,
+.workspace-history-loading,
+.workspace-history-error {
+  display: flex;
+  align-items: center;
+}
+
+.workspace-history-heading {
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding: 0 2px 10px;
+}
+
+.workspace-history-heading > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #45665e;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.workspace-history-heading small,
+.workspace-history-version {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.workspace-history-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace-history-entry {
+  display: grid;
+  min-width: 0;
+  border-bottom: 1px dashed #cbd4d0;
+  padding-bottom: 8px;
+}
+
+.workspace-history-version {
+  width: min(980px, 100%);
+  margin: 0 auto 9px;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.workspace-history-version span + span::before {
+  content: "·";
+  margin-right: 8px;
+  color: #a0aaa5;
+}
+
+.workspace-history-entry .chat-message {
+  margin-bottom: 12px;
+}
+
+.workspace-history-assistant .chat-assistant-content {
+  gap: 12px;
+  background: #fafbfa;
+  padding: 14px 16px;
+}
+
+.workspace-history-summary {
+  display: grid;
+  gap: 6px;
+}
+
+.workspace-history-summary > strong {
+  color: #34473f;
+  font-size: 12px;
+}
+
+.workspace-history-summary p {
+  margin: 0;
+  color: #58675f;
+  font-size: 11px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.workspace-history-summary small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.workspace-history-loading,
+.workspace-history-error {
+  justify-content: center;
+  gap: 7px;
+  min-height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #f5f7f6;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.workspace-history-error {
+  border-color: #e8c4bf;
+  background: var(--coral-soft);
+  color: #923e37;
+}
+
 .user-message {
   justify-content: flex-end;
 }
@@ -1078,6 +1197,38 @@ button:disabled {
   border-radius: 6px;
   background: var(--surface);
   box-shadow: 0 5px 18px rgba(29, 40, 34, 0.07);
+}
+
+.failed-planning-retry-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border-bottom: 1px solid #cbded9;
+  background: #edf6f3;
+  padding: 10px 14px;
+  color: #36564e;
+}
+
+.failed-planning-retry-note > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--teal);
+}
+
+.failed-planning-retry-note > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.failed-planning-retry-note strong {
+  font-size: 11px;
+}
+
+.failed-planning-retry-note small {
+  color: #5e7169;
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 .chat-composer:focus-within {
@@ -8851,11 +9002,23 @@ input::placeholder {
 
   .workspace-shell {
     height: calc(100vh - 126px);
-    min-height: 430px;
+    height: calc(100dvh - 126px);
+    min-height: 0;
   }
 
   .chat-thread {
     padding: 20px 12px 14px;
+    scrollbar-gutter: auto;
+  }
+
+  .workspace-history-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .workspace-history-version {
+    flex-wrap: wrap;
   }
 
   .chat-empty {

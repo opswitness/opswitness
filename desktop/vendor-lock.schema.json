@@ -67,6 +67,38 @@
               "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9._/+@-]+/$"
             }
           },
+          "staging_filter": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "profile",
+              "applies_to_version",
+              "source_exclusions",
+              "compatibility_shim_root",
+              "receipt"
+            ],
+            "properties": {
+              "profile": { "const": "codex-only" },
+              "applies_to_version": { "type": "string", "minLength": 1 },
+              "source_exclusions": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9._/+@-]+$"
+                }
+              },
+              "compatibility_shim_root": {
+                "type": "string",
+                "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9._/+@-]+$"
+              },
+              "receipt": {
+                "type": "string",
+                "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9._/+@-]+\\.json$"
+              }
+            }
+          },
           "provision": {
             "oneOf": [
               { "type": "null" },

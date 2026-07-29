@@ -41,6 +41,11 @@ ditto "$OPSWITNESS_PAPERCLIP_DIR" "$RUNTIME_DIR/paperclip"
 ditto "$OPSWITNESS_AIONCORE_DIR" "$RUNTIME_DIR/aioncore"
 ditto "$OPSWITNESS_CODEX_BIN" "$RUNTIME_DIR/codex/codex"
 
+"$PYTHON_BIN" "$SCRIPT_DIR/stage_codex_only_aioncore.py" \
+  --runtime "$RUNTIME_DIR" \
+  --vendor-lock "$DESKTOP_DIR/vendor-lock.json" \
+  --receipt "$RUNTIME_DIR/staging-exclusions.json"
+
 chmod 0755 \
   "$RUNTIME_DIR/backend/opswitness-backend" \
   "$RUNTIME_DIR/node/node" \

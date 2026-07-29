@@ -184,6 +184,13 @@ export function getPlan(planId: string): Promise<PlanRecord> {
   return api(`/api/v1/plans/${encodeURIComponent(planId)}`);
 }
 
+export function retryFailedPlanning(planId: string, objective: string): Promise<PlanRecord> {
+  return api(`/api/v1/plans/${encodeURIComponent(planId)}/planning-retries`, {
+    method: 'POST',
+    body: JSON.stringify({ objective, confirmed: true }),
+  });
+}
+
 export function getWorkRecovery(workId: string): Promise<RecoveryState> {
   return api(`/api/v1/works/${encodeURIComponent(workId)}/recovery`);
 }
@@ -438,6 +445,12 @@ export function saveTaskTemplateFromPlan(planId: string, name: string): Promise<
 
 export function getWorkspaceConversations(): Promise<WorkspaceConversation[]> {
   return api('/api/v1/workspace-conversations');
+}
+
+export function getWorkspaceConversationEntries(planId: string): Promise<PlanRecord[]> {
+  return api(
+    `/api/v1/workspace-conversations/${encodeURIComponent(planId)}/entries`,
+  );
 }
 
 export function archiveTaskTemplate(templateId: string): Promise<TaskTemplate> {

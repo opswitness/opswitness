@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "opswitness"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "A local-first AI workforce console with planning, approvals, evidence, and recoverable execution."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"

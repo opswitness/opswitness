@@ -1,4 +1,9 @@
-import type { ExecutionProgress, RuntimeActivity, StageProgress } from './types';
+import type {
+  ApprovalCard,
+  ExecutionProgress,
+  RuntimeActivity,
+  StageProgress,
+} from './types';
 
 export type ExecutionControlAction = 'pause' | 'resume' | 'terminate';
 export type ExecutionControlButton = {
@@ -38,6 +43,9 @@ export function stageProgressSummary(stages: StageProgress[]): {
   activeOrder: number | null;
 };
 export function formatExecutionElapsed(seconds: number, language?: 'en' | 'zh'): string;
+export function onboardingApprovalOrder(
+  approval: Pick<ApprovalCard, 'title' | 'summary'> | null | undefined,
+): 1 | 2 | null;
 
 export type OnboardingRunStage = {
   order: number;

@@ -32,13 +32,13 @@ def test_release_identity_reads_exactly_one_editable_lock_package(tmp_path):
     lock = tmp_path / "uv.lock"
     lock.write_text(
         'version = 1\nrequires-python = "==3.12.*"\n\n'
-        '[[package]]\nname = "opswitness"\nversion = "0.1.0a1"\n'
+        '[[package]]\nname = "opswitness"\nversion = "0.1.0a2"\n'
         'source = { editable = "." }\n'
     )
 
     assert _editable_lock_package(lock) == {
         "name": "opswitness",
-        "version": "0.1.0a1",
+        "version": "0.1.0a2",
         "source": {"editable": "."},
     }
 

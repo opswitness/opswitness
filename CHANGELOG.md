@@ -3,7 +3,25 @@
 All notable public changes are documented here. Versions follow Semantic Versioning for tags and
 PEP 440 for Python package metadata.
 
-## [0.1.0-alpha.1] - Unreleased
+## [0.1.0-alpha.2] - Unreleased
+
+### Added
+
+- planning failures remain in the same Workspace conversation: the failed attempt stays immutable,
+  the prior objective returns to the composer for editing, and an approved retry creates a child
+  request instead of a new root task;
+- retained planning attempts render above the current turn, with scroll position preserved while
+  the App refreshes in the background;
+- retry provenance binds the root conversation, parent request, prior Plan, request hash and
+  attachment manifest without rewriting the failed attempt or silently adding new files.
+
+### Release boundary
+
+- this behavior is verified in source tests but is not present in the public alpha.1 DMG;
+- alpha.2 remains unreleased until an exact rebuilt App passes the vendored-runtime redistribution
+  gate, clean installation, first-Work acceptance, recovery checks and a new executable canary.
+
+## [0.1.0-alpha.1] - 2026-07-27
 
 ### Added
 

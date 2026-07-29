@@ -13,3 +13,5 @@ secrets.yaml
 *.local.yaml
 .DS_Store
 .claude/
+/data/aionui-backend.db
+/data/aionui-backend.db.migrate.lock

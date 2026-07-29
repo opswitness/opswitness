@@ -5,7 +5,7 @@
   "components": [
     {
       "id": "opswitness-backend",
-      "version": "0.1.0-alpha.1",
+      "version": "0.1.0-alpha.2",
       "source_url": "https://github.com/opswitness/opswitness",
       "upstream_sha256": null,
       "license": "Apache-2.0",
@@ -33,11 +33,20 @@
       "version": "0.1.45",
       "source_url": "https://github.com/iOfficeAI/AionUi/releases/download/v2.1.33/aionui-web-2.1.33-darwin-arm64.tar.gz",
       "upstream_sha256": "cc23819878630e9961153bdd6bdf091384685f2ae3acf1d85cbe066d9038c7b6",
-      "license": "Apache-2.0 AND LicenseRef-Anthropic-Commercial-Terms",
-      "notice": "Stage aioncore together with all managed resources from the verified archive. The managed resources include Claude Agent SDK 0.58.1 and its proprietary native arm64 executable; public redistribution remains blocked pending an exact Anthropic commercial-terms and notice review.",
+      "license": "Apache-2.0 (staged AionCore); LicenseRef-Anthropic-Commercial-Terms (upstream archive subtree excluded from staged App)",
+      "notice": "The verified upstream archive contains Claude Agent ACP 0.58.1 and proprietary Anthropic runtime bytes. Codex-only staging must remove that exact upstream subtree, generate only the vendor-locked first-party fail-closed compatibility shim, and bind the removal receipt into the final runtime inventory. No upstream Anthropic package or native binary may remain in the staged App. Redistribution remains blocked pending review of every other bundled component and notice.",
       "redistribution_review": "blocked",
       "entrypoints": ["aioncore/aioncore"],
       "required_prefixes": ["aioncore/managed-resources/"],
+      "staging_filter": {
+        "profile": "codex-only",
+        "applies_to_version": "0.1.45",
+        "source_exclusions": [
+          "aioncore/managed-resources/acp/claude-agent-acp/0.58.1/darwin-arm64"
+        ],
+        "compatibility_shim_root": "aioncore/managed-resources/acp/claude-agent-acp/0.58.1/darwin-arm64",
+        "receipt": "staging-exclusions.json"
+      },
       "provision": null
     },
     {

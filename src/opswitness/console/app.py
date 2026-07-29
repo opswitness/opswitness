@@ -45,6 +45,7 @@ from opswitness.console.schemas import (
     ExecutionApprovalModeRequest,
     ExecutionControlRequest,
     ExecutionProfileRevisionRequest,
+    FailedPlanningRetryRequest,
     ForkPlanRequest,
     LibraryCardDecisionRequestV1,
     LibraryCardJobRequestV1,
@@ -973,6 +974,19 @@ def create_app(
         return record.model_dump(mode="json")
 
     @app.post(
+        "/api/v1/plans/{plan_id}/planning-retries",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def retry_failed_planning(
+        plan_id: str,
+        body: FailedPlanningRetryRequest,
+        x_qd_csrf: str = Header(alias="X-QD-CSRF"),
+    ) -> dict:
+        del x_qd_csrf
+        record = await run_in_threadpool(service.retry_failed_planning, plan_id, body)
+        return record.model_dump(mode="json")
+
+    @app.post(
         "/api/v1/plans/{plan_id}/organization",
         status_code=status.HTTP_201_CREATED,
     )
@@ -1296,6 +1310,14 @@ def create_app(
     @app.get("/api/v1/workspace-conversations")
     async def workspace_conversations() -> list[dict]:
         rows = await run_in_threadpool(service.list_workspace_conversations)
+        return [row.model_dump(mode="json") for row in rows]
+
+    @app.get("/api/v1/workspace-conversations/{plan_id}/entries")
+    async def workspace_conversation_entries(plan_id: str) -> list[dict]:
+        rows = await run_in_threadpool(
+            service.list_workspace_conversation_entries,
+            plan_id,
+        )
         return [row.model_dump(mode="json") for row in rows]
 
     @app.get("/api/v1/workspace-memory")

@@ -715,6 +715,22 @@ class PlanRequest(BaseModel):
     attachments: list[PlanningAttachmentUpload] = Field(default_factory=list, max_length=5)
 
 
+class FailedPlanningRetryRequest(BaseModel):
+    """An explicit edited retry of one terminal planning attempt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    objective: str = Field(min_length=3, max_length=2000)
+    confirmed: Literal[True]
+
+    @model_validator(mode="after")
+    def normalize_objective(self) -> "FailedPlanningRetryRequest":
+        self.objective = self.objective.strip()
+        if len(self.objective) < 3:
+            raise ValueError("edited objective must contain at least three characters")
+        return self
+
+
 class PlanningAttachment(BaseModel):
     """Immutable local material descriptor bound into a plan version hash."""
 
@@ -2129,8 +2145,17 @@ class PlanRecord(BaseModel):
     planning_progress: PlanningProgress | None = None
     plan: TaskPlanDocument | None = None
     plan_sha256: str | None = None
+    request_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     parent_plan_id: str | None = None
     parent_plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    planning_retry_source_plan_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$",
+    )
+    planning_retry_source_request_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
     forked_from_plan_id: str | None = Field(
         default=None,
         pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$",
@@ -2173,6 +2198,45 @@ class PlanRecord(BaseModel):
         default=None,
         pattern=r"^[0-9A-HJKMNP-TV-Z]{26}$",
     )
+
+    @model_validator(mode="after")
+    def validate_planning_retry_provenance(self) -> "PlanRecord":
+        retry = (
+            self.planning_retry_source_plan_id,
+            self.planning_retry_source_request_sha256,
+        )
+        if any(value is not None for value in retry):
+            if any(value is None for value in retry):
+                raise ValueError("planning retry provenance is incomplete")
+            if self.planning_retry_source_plan_id == self.plan_id:
+                raise ValueError("planning retry cannot reference itself")
+            conflicting_provenance = (
+                self.parent_plan_id,
+                self.parent_plan_sha256,
+                self.forked_from_plan_id,
+                self.forked_from_plan_sha256,
+                self.continued_from_plan_id,
+                self.continued_from_plan_sha256,
+                self.continuation_message_sha256,
+                self.recovery_source_plan_id,
+                self.recovery_source_plan_sha256,
+                self.recovery_proposal_sha256,
+                self.revision_instruction_sha256,
+            )
+            if (
+                any(value is not None for value in conflicting_provenance)
+                or self.revision_instruction
+                or self.library_input_binding is not None
+            ):
+                raise ValueError(
+                    "planning retry cannot also carry revision, fork, continuation, "
+                    "recovery, or library provenance"
+                )
+            if self.request_sha256 is None:
+                raise ValueError("planning retry request hash is required")
+            if self.revision_number < 2:
+                raise ValueError("planning retry revision number must be at least two")
+        return self
 
 
 class AgentSession(BaseModel):

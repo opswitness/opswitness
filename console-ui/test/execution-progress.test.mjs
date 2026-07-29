@@ -4,12 +4,29 @@ import test from 'node:test';
 import {
   executionControlPresentation,
   formatExecutionElapsed,
+  onboardingApprovalOrder,
   onboardingRunProgress,
   runtimeActivitySource,
   runtimeActivityTone,
   stageProgressPresentation,
   stageProgressSummary,
 } from '../src/execution-progress.js';
+
+test('onboarding maps only the two fixed local-save approvals to their visible order', () => {
+  assert.equal(onboardingApprovalOrder({
+    title: 'Allow one local save: artifacts/first-work.json',
+    summary: 'Bound to the reviewed digest.',
+  }), 1);
+  assert.equal(onboardingApprovalOrder({
+    title: 'Allow one local save',
+    summary: 'Exact path: artifacts/verification.json',
+  }), 2);
+  assert.equal(onboardingApprovalOrder({
+    title: 'Allow a network request',
+    summary: 'Unexpected operation',
+  }), null);
+  assert.equal(onboardingApprovalOrder(null), null);
+});
 
 test('runtime activity exposes tool identity without arguments or output', () => {
   const activity = {

@@ -1,25 +1,27 @@
 # Community Alpha Quickstart
 
-OpsWitness `v0.1.0-alpha.1` is a local-first, single-operator release candidate. Use synthetic or
-non-critical work first. Stable durability and an SLA are not included.
+OpsWitness `v0.1.0-alpha.2` is a local-first, single-operator friend-test candidate. It is ad-hoc
+signed and not notarized. Use synthetic or non-critical work only. Stable durability and an SLA
+are not included.
 
 ## Install the Mac app
 
-The supported first-user path is the signed and notarized Apple Silicon application:
+The bounded first-user path is the Apple Silicon application:
 
-1. Download `OpsWitness-0.1.0-alpha.1-macos-arm64.dmg` from the inspected GitHub prerelease.
+1. Download `OpsWitness-0.1.0-alpha.2-macos-arm64.dmg` from the inspected GitHub draft prerelease
+   only after its commit and checksum have been verified.
 2. Compare its SHA-256 with `SHA256SUMS`, then open the DMG.
-3. Drag **OpsWitness** into **Applications** and open it.
-4. Complete the local checks, then choose either Codex or Anthropic when prompted. Codex uses the
-   official ChatGPT sign-in flow; Anthropic requires your own API Key.
+3. Drag **OpsWitness** into **Applications**. Because this build is not notarized, macOS may show
+   “Apple could not verify” on first launch. Only continue if the checksum matches and you accept
+   that risk; use right-click **Open**, or **System Settings → Privacy & Security → Open Anyway**.
+4. Complete the local checks and connect Codex through the official ChatGPT sign-in flow.
 5. Review and run **Reply to Your First Customer**.
 
-The App contains its compatible Python, Node, Paperclip/PostgreSQL, AionCore, Codex CLI, and Claude
-Agent runtime components. A first-time user does not install those dependencies separately. An
-Anthropic API Key is validated and stored in this Mac's Keychain; its API usage is billed separately
-from Claude Pro/Max, whose subscription login is not routed by OpsWitness. The App needs macOS 14 or
-newer, Apple Silicon, at least 5 GB of free space during setup, and internet access for provider
-authentication.
+The App contains its compatible Python, Node, Paperclip/PostgreSQL, AionCore, Codex CLI, and managed
+runtime components. A first-time user does not install those dependencies separately. The public
+alpha.2 interface exposes Codex only; it does not offer Anthropic account or API-key setup. The App
+needs macOS 14 or newer, Apple Silicon, at least 5 GB of free space during setup, and internet
+access for provider authentication.
 
 The first Work uses a fixed, fictional website-maintenance inquiry and an App-managed empty
 workspace. A Business Assistant creates a careful local reply draft in `first-work.json`; a Review

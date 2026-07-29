@@ -6,9 +6,13 @@ the network.
 
 ## Start here
 
+- [Current progress](CURRENT-PROGRESS.md) — what is downloadable now, what exists only in source,
+  refreshed evidence, release blockers, and the next priority.
 - [Quickstart](QUICKSTART.md) — install or start OpsWitness and create the first Work.
 - [Naming standard](NAMING.md) — canonical product, CLI, compatibility, Work, file, and evidence
   terminology.
+- [Product experience spec](PRODUCT-EXPERIENCE-SPEC.md) — the simplicity contract: five
+  product nouns, trust levels, the approval card, silent evidence, and delivery slices.
 - [Known limitations](KNOWN-LIMITATIONS.md) — current Alpha boundaries and unsupported claims.
 - [Support matrix](SUPPORT-MATRIX.md) — supported systems and runtime combinations.
 - [Security policy](../SECURITY.md) — report vulnerabilities and understand the security boundary.
@@ -36,6 +40,9 @@ the same safety guidance offline.
 ## Architecture and operation
 
 - [Architecture](ARCHITECTURE.md)
+- [OSS integration blueprint](OSS-INTEGRATION-BLUEPRINT.md) — which permissive-license
+  components to adopt for approvals, evidence chain, topology view, and export; license
+  traps; what stays custom.
 - [Local console and AionCore adapter](aionui.md)
 - [Vendored runtimes](VENDORED-RUNTIMES.md)
 - [Private console access](private-console.md)

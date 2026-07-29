@@ -1,7 +1,8 @@
 # Community Alpha Support Matrix
 
-This matrix describes `v0.1.0-alpha.1`. “Supported” means it is part of the Community Alpha contract,
-not that Stable durability or an SLA is available.
+This matrix describes the `v0.1.0-alpha.2` candidate. “Supported” means it is part of the Community
+Alpha contract after the exact candidate passes its stated executable gate, not that Stable
+durability or an SLA is available.
 
 | Surface | Alpha status | Boundary |
 |---|---|---|
@@ -14,7 +15,7 @@ not that Stable durability or an SLA is available.
 | Agent Contract v2 editor and immutable versions | Source-complete; fresh RC required | Stable Agent IDs; 1–5 Agents; six-page editor; exact owned-envelope preview; field-level diff and restore-to-draft |
 | Per-Agent tool and Memory controls in Aion-compatible mode | Source-complete; fresh RC required | `deny` and `always_ask` override global Auto; unknown Agent/tool fails closed; non-lead private Memory is refused because exact private delivery cannot be proven |
 | Strict Agent Runtime | Adapter unavailable; execution refused | Coordinator, private-workspace and CAS-handoff primitives exist, but no current Aion adapter implements the strict protocol; no silent downgrade |
-| Workspace planning conversation history | Source-complete; fresh RC required | Immutable Plan-chain projection; restore and template save have no execution side effect |
+| Workspace planning conversation history and failed retry | Source-complete; fresh RC required | Immutable Plan-chain projection; a failure returns the prior objective for an edited child retry in the same conversation, retains the failed attempt and exact attachment manifest, and never confirms or executes as a retry side effect |
 | Workspace planning materials | Source-complete; fresh RC required | Up to 5 allowlisted files, 5 MiB each / 15 MiB total; hash-bound, private and read-only; bounded text/PDF excerpts, no Office parsing or OCR |
 | Built-in Work template catalog | Source-complete; fresh RC required | 31 bilingual starting points and 10 concrete recipes; professional evidence packs stop at licensed review |
 | Repeatable Work | Source-complete; fresh RC required | Latest ended reviewed Work prepares an unconfirmed child; never one-click dispatch |
@@ -30,7 +31,8 @@ not that Stable durability or an SLA is available.
 | Gmail metadata-only integration | Experimental, default off | Readonly metadata and explicit model consent only |
 | Telegram digest | Experimental, default off | Secrets remain local and must be configured explicitly |
 | Claude Code non-interactive approval gate | Narrowly supported | Only the documented non-interactive path |
-| Codex / Claude / local model connections | Connection dependent | Codex uses its official sign-in; Claude requires a user-supplied Anthropic API Key in macOS Keychain and does not use Claude Pro/Max login; a connection does not imply every execution adapter is ready |
+| Codex connection in the Mac App | Candidate; fresh RC required | The alpha.2 App exposes only bundled Codex and its official sign-in. It contains no upstream Anthropic runtime payload and does not show a Claude connection entry |
+| External Claude / local model integrations | Developer/existing-user channel only | Existing source and CLI adapters remain readable for compatibility, but are not packaged or advertised as alpha.2 App capabilities; a connection never implies every execution adapter is ready |
 | DeepSeek and Grok API connections | Connection only | No Alpha execution adapter promise |
 | OpenClaw runtime | Not included | Planned after Alpha |
 | Work calling another Work | Not included | Team-of-teams remains future work |

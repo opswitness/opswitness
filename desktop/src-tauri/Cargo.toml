@@ -1,6 +1,6 @@
 [package]
 name = "opswitness-desktop"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 description = "Native macOS shell and runtime supervisor for OpsWitness"
 authors = ["Tianyu Zhou"]
 edition = "2021"
