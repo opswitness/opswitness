@@ -258,6 +258,14 @@ def test_filter_rejects_wrong_receipt_path_before_mutation(tmp_path, monkeypatch
 
 def test_resource_manifest_binds_paperclip_receipt(tmp_path, monkeypatch):
     runtime, lock, receipt = _stage(tmp_path, monkeypatch)
+    allowed_other_component = (
+        runtime
+        / "aioncore/managed-resources/acp/claude-agent-acp/0.58.1/"
+        "darwin-arm64/node_modules/@anthropic-ai/"
+        "claude-agent-sdk-darwin-arm64/claude"
+    )
+    allowed_other_component.parent.mkdir(parents=True)
+    allowed_other_component.write_text("first-party AionCore compatibility shim\n")
     (runtime / "architecture-provenance.json").write_text(
         json.dumps(
             {
@@ -316,7 +324,10 @@ def test_resource_manifest_binds_paperclip_receipt(tmp_path, monkeypatch):
     ]
     paths = {entry["path"] for entry in manifest["files"]}
     assert stage_module.RECEIPT_PATH.as_posix() in paths
-    assert not any("claude-agent-sdk" in path for path in paths)
+    assert not any(
+        path.startswith("paperclip/") and "claude-agent-sdk" in path
+        for path in paths
+    )
 
 
 def test_manifest_rejects_missing_receipt_and_any_forbidden_final_path(

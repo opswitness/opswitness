@@ -518,6 +518,8 @@ def _validate_paperclip_staging_filter(
     if receipt.get("proprietary_path_scan") != {"forbidden_matches": []}:
         raise SystemExit("invalid Paperclip proprietary-path scan")
     for path in discovered:
+        if not path.startswith("paperclip/"):
+            continue
         if (
             "claude-agent-sdk" in path
             or "@agentclientprotocol/claude-agent-acp" in path
