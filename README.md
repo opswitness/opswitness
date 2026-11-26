@@ -1,50 +1,56 @@
 # OpsWitness
 
-> **Community Alpha release candidate.** This source repository is public for review and feedback,
-> but no packaged release has been approved yet. OpsWitness is the public product identity. The
-> former Quarterdeck name remains only for compatibility with existing local installations and for
-> immutable historical evidence.
+**Turn an AI task into reviewable, repeatable work.** Describe a goal, approve a plan,
+track execution, and inspect the result with its evidence. Local-first, single operator.
 
-**Turn one-off AI work into repeatable company operations.**
+[30-second demo](https://github.com/user-attachments/assets/c25a7297-7f43-49b3-a64b-29fb56cd83fa) · [Download alpha.1](https://github.com/opswitness/opswitness/releases/tag/v0.1.0-alpha.1) · [Website](https://opswitness.com) · [Synthetic verification example](examples/showcase/README.md)
 
-OpsWitness is a local-first AI workbench for a one-person company. Describe a goal, review the
-proposed Agent team and workflow, confirm the exact plan, run it on your own Mac, and keep every
-version, result, approval, and piece of evidence together.
+https://github.com/user-attachments/assets/c25a7297-7f43-49b3-a64b-29fb56cd83fa
 
-It does not replace Claude, Codex, AionUi, Paperclip, or your existing automation. It gives those
-systems one simple operator-facing workflow while keeping execution adapters replaceable and
-evidence local.
+*Goal → approval → execution → evidence. Chinese narration; public development UI screenshots
+and synthetic DEMO-001 data. This is a screenshot walkthrough, not a continuous recording or
+a fresh execution test. The screens do not establish which features ship in alpha.1.*
 
-## Current release status
+## What can I try today?
 
-OpsWitness source is public, but the product is **not released yet**:
+| Surface | Available now | What it means |
+|---|---|---|
+| **Downloadable test build** | [v0.1.0-alpha.1 prerelease](https://github.com/opswitness/opswitness/releases/tag/v0.1.0-alpha.1) | A **closed testing build**, not a stable release. macOS 14+ on Apple Silicon. Its release notes define the included capabilities. |
+| **Main-branch source** | This public repository | Source for inspection and development. `main` is not the build identity of the downloadable DMG; use the release tag and assets when reproducing alpha.1. |
+| **Development beyond alpha.1** | Separate source changes, previews and pull requests | The alpha.1 release notes explicitly exclude later Agent Contract v2, Knowledge Hub and failed-planning recovery work. A source feature or screenshot is not a shipped-feature promise. |
 
-- this repository is public for source review, issue reports, and release preparation;
-- the public product preview is available at [opswitness.com](https://opswitness.com);
-- the Community Alpha candidate is under review in
-  [Draft PR #1](https://github.com/opswitness/opswitness/pull/1);
-- no `v0.1.0-alpha.1` GitHub Release exists;
-- runtime durability, a fresh 24-hour canary, professional confusing-similarity review, and final
-  release-asset validation remain open.
+The alpha.1 build is ad-hoc signed and **not notarized by Apple**. macOS may block its first
+launch. It is for informed Alpha testers using synthetic, non-critical work; there is no SLA
+or production-readiness claim. Read the installation warning on the release page before trying it.
 
-Making the source visible does not merge the Alpha runtime or close any release gate.
+## How to verify
 
-## Alpha candidate
+1. **Downloaded build:** get the DMG and `SHA256SUMS` from the same
+   [alpha.1 release](https://github.com/opswitness/opswitness/releases/tag/v0.1.0-alpha.1).
+   Compute the DMG's SHA-256 and compare it with that file before opening it. Keep the release
+   tag and asset checksum with any feedback; a current `main` checkout is a different reference.
+2. **Source behavior:** inspect and run the credential-free
+   [synthetic showcase](examples/showcase/README.md) in an isolated development environment.
+   Its documented checks cover approval decisions, outage/replay, artifact evidence and the
+   distinction between execution status and outcome evidence. This is core-contract validation,
+   not desktop, real-provider or production acceptance.
+3. **Business result:** a completed run does not prove its output is correct. Inspect the
+   artifacts, evaluations and human sign-off for that exact run.
 
-The candidate being reviewed is centered on three ordinary surfaces:
+## Product scope
 
-1. **Workspace** - describe an outcome and review the generated team and plan.
-2. **Work** - run, pause, resume, stop, rerun, fork, and inspect a repeatable process.
-3. **Settings** - connect local model providers and inspect advanced diagnostics when needed.
+Workspace captures goals and reviewable plans; Work keeps versions, run history and results;
+Settings manages local connections. Execution adapters remain replaceable, and evidence stays
+local. OpsWitness complements existing model tools rather than promising autonomous business
+outcomes.
 
-The candidate includes immutable plan versions, execution history, readable results, approvals and
-operator input, content-addressed artifacts, append-only evidence, reusable templates, team
-blueprints, and approved Workspace memory.
+Development and release-candidate documents, including [Draft PR #1](https://github.com/opswitness/opswitness/pull/1),
+may describe work beyond the downloadable build or historical release gates. The **specific
+release page is authoritative for its assets and limitations**. Neither public source nor a
+published testing build establishes stable durability, hosted SaaS or multi-user support.
 
-OpsWitness remains a single-operator, local-first Alpha. It does not claim autonomous business
-outcomes, hosted SaaS, multi-user identity, or stable durability. Regulated workflows must produce
-reviewable evidence packages for a qualified human decision-maker; OpsWitness is not the licensed
-professional and does not submit, pay, file, bind, or send on the operator's behalf by default.
+Professional workflows prepare reviewable evidence for a qualified human decision-maker.
+OpsWitness does not submit, pay, file, bind or send on the operator's behalf by default.
 
 ## Compatibility
 
